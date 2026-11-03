@@ -18,5 +18,7 @@ export function gateIssueText(t: Translate, issue: GateIssue): string {
       return t("messaging.gate.grounding", issue);
     case "red_lines":
       return t("messaging.gate.red_lines", issue);
+    case "colleague_signal":
+      return t("messaging.gate.colleague_signal", issue);
   }
 }

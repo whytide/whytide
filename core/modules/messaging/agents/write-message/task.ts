@@ -1,5 +1,5 @@
-// The writer (README.md beside this file): the text of one first LinkedIn message, from the dossier
-// and the planner's plan. A host's loadAgentTasks() imports this file from the sources while the
+// The writer (README.md beside this file): the text of one LinkedIn message, a lead's first or a
+// sequence step's, from the dossier and the planner's plan. A host's loadAgentTasks() imports this file from the sources while the
 // worker runs the module from dist/, so it imports no registry of the module (index.ts, events.ts,
 // ids.ts, errors.ts) and the module never imports it: writeDraft takes the task from the agent
 // registry.
@@ -13,7 +13,7 @@ export const writeMessageTask = defineAgentTask(
     module: "messaging",
     kind: "generation",
     model: settings.AI_MODEL_MESSAGING_WRITE_MESSAGE,
-    promptVersion: 1,
+    promptVersion: 2,
     inputSchema: writeInput,
     outputSchema: writeOutput,
     // Not priced in credits in alpha: the cost event alone records it.

@@ -7,16 +7,17 @@ import { z } from "zod";
 import { errors } from "../errors.ts";
 import { SOURCE_LABEL_MAX, SOURCE_URL_MAX } from "./constants.ts";
 import { CONFIDENCES, LEAD_SORTS, QUALIFICATION_STATUSES, SOURCE_KINDS, TIERS } from "./lead.ts";
+import { OUTREACH_STATUSES } from "./outreach/constants.ts";
 import { PROVIDERS, SOURCES } from "./provenance.ts";
 import { REVIEW_FILTERS } from "./review/rules.ts";
 
 const text = (max: number) => z.string().trim().max(max).optional();
-const id = z.string().min(1).max(64);
+export const id = z.string().min(1).max(64);
 const source = z.enum(SOURCES);
 const provider = z.enum(PROVIDERS).nullable();
 const providerId = z.string().trim().min(1).max(256).optional();
 /** An aggregate code (`hard_filter`, `title_mismatch`), never a value about the person. */
-const code = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/);
+export const code = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/);
 /** provider_refs is keyed by the provider: an id needs one. */
 const keyed = (input: { provider: unknown; [key: string]: unknown }, value: unknown) =>
   value === undefined || input.provider !== null;
@@ -115,6 +116,7 @@ export const leadListInput = z.strictObject({
   status: z.enum(QUALIFICATION_STATUSES).optional(),
   tier: z.enum(TIERS).optional(),
   review: z.enum(REVIEW_FILTERS).optional(),
+  outreach: z.enum(OUTREACH_STATUSES).optional(),
   sort: z.enum(LEAD_SORTS),
   limit: z.int().min(1).max(100),
   cursor: z.string().min(1).max(200).optional(),
@@ -128,6 +130,7 @@ export const neighboursInput = z.strictObject({
   status: z.enum(QUALIFICATION_STATUSES).optional(),
   tier: z.enum(TIERS).optional(),
   review: z.enum(REVIEW_FILTERS).optional(),
+  outreach: z.enum(OUTREACH_STATUSES).optional(),
   sort: z.enum(LEAD_SORTS),
 });
 

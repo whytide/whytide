@@ -25,8 +25,9 @@ import type { Api } from "../src/start.ts";
 const APP_ORIGIN = "https://app.whytide.test";
 // The host reads it as its config loads, the hosted link's return address at each connect.
 process.env.APP_PUBLIC_ORIGIN = APP_ORIGIN;
-// The cap's bound, read as linkedin loads: its default, 250, whatever .env.local says.
-delete process.env.LINKEDIN_DAILY_READ_CAP_MAX;
+// The cap's bound, read as linkedin loads: its default, 100, whatever .env.local says. Empty, not
+// deleted: an empty value counts as unset, and db's loadEnvLocal fills only a variable not set.
+process.env.LINKEDIN_DAILY_READ_CAP_MAX = "";
 const { start } = await import("../src/start.ts");
 // linkedin by its build's path, as src/modules.generated.ts loads it: the api does not list a module
 // with a screen (core/apps/web/docs/screens.md).
@@ -101,7 +102,8 @@ async function post({ headers, rawBody }: LinkedinWebhook): Promise<Answer> {
 
 /** Connect, then follow the hosted link as the browser would: the account and its reference. */
 async function connect(tenant: TestTenant, timeZone = "Pacific/Auckland") {
-  const started = await call(tenant, "POST", "/connect", { timeZone, acknowledged: true });
+  const disclosure = { acknowledged: true, disclosureVersion: 2, personalAccount: true };
+  const started = await call(tenant, "POST", "/connect", { timeZone, ...disclosure });
   assert.equal(started.status, 200);
   const link = new URL(started.body.url);
   assert.equal(link.origin, APP_ORIGIN);
@@ -143,6 +145,10 @@ test("connect: 400 disclosure_required without the acknowledgment; with it, the 
     dailyReadCap: 100,
     mine: true,
     canManage: true,
+    paused: false,
+    pausedBy: null,
+    disclosureVersion: 2,
+    sendingDisclosureRequired: false,
   });
   const [raw] = await app.$queryRaw<{ ref: Uint8Array }[]>`
     SELECT provider_account_ref AS ref FROM sender_accounts WHERE id = ${account.id}`;
@@ -176,7 +182,13 @@ test("the webhook: a wrong signature is 401 linkedin_webhook_invalid and changes
   const { accounts } = (await call(a, "GET")).body;
   assert.deepEqual([accounts[0].id, accounts[0].status], [account.id, "disconnected"]);
   const disconnected = ["linkedin.sender_account_disconnected", { sender_account_id: account.id }];
-  assert.deepEqual(await events(a), [...published, disconnected]);
+  const [health] = await app.senderHealthEvent.findMany({ where: { senderId: account.id } });
+  const payload = { sender_account_id: account.id, health_event_id: health?.id };
+  const all = await events(a);
+  assert.deepEqual(all.slice(0, published.length), published);
+  // The health's pause (beta-p6-010) in the same run, at one transaction time: by name.
+  const added = all.slice(published.length).sort();
+  assert.deepEqual(added, [["linkedin.account_paused", payload], disconnected]);
 });
 
 test("PATCH the working hours: start after end, or a day outside 1 to 7, is 400 working_hours_invalid; valid hours save and the list shows them", async () => {
@@ -201,25 +213,28 @@ test("PATCH the working hours: start after end, or a day outside 1 to 7, is 400 
   });
 });
 
-test("PATCH the daily read cap: 150 is stored and listed; 0, 251, 1.5 or a string is 400 read_cap_invalid and stores nothing; a user without linkedin.manage in the workspace is 403, another workspace's account 404", async () => {
+test("PATCH the daily read cap: 100, the most, is stored and listed after 40; 0, 101, 250, 1.5 or a string is 400 read_cap_invalid with details.max 100 and stores nothing; a user without linkedin.manage in the workspace is 403, another workspace's account 404", async () => {
   const [a, b] = await createTwoWorkspaces();
   const { account } = await connect(a);
   const patch = (tenant: TestTenant, dailyReadCap: unknown) =>
     call(tenant, "PATCH", `/${account.id}`, { dailyReadCap });
-  const saved = await patch(a, 150);
-  assert.deepEqual(saved, { status: 200, body: { ...account, dailyReadCap: 150 } });
+  assert.deepEqual(await patch(a, 40), { status: 200, body: { ...account, dailyReadCap: 40 } });
+  const saved = await patch(a, 100);
+  assert.deepEqual(saved, { status: 200, body: { ...account, dailyReadCap: 100 } });
   assert.deepEqual(await call(a, "GET"), { status: 200, body: { accounts: [saved.body] } });
 
-  const details = { fields: ["dailyReadCap"], max: 250 };
+  const details = { fields: ["dailyReadCap"], max: 100 };
   const refused = { status: 400, body: { code: "read_cap_invalid", details } };
-  for (const cap of [0, 251, 1.5, "100"]) assert.deepEqual(await patch(a, cap), refused, `${cap}`);
+  for (const cap of [0, 101, 250, 1.5, "100"]) {
+    assert.deepEqual(await patch(a, cap), refused, `${cap}`);
+  }
   // B's user is no member of A's workspace: alpha's can() evaluates no role, so that is who lacks it.
   const outsider = { ...a, user: b.user };
-  assert.deepEqual(await patch(outsider, 200), { status: 403, body: { code: "forbidden" } });
+  assert.deepEqual(await patch(outsider, 50), { status: 403, body: { code: "forbidden" } });
   const notFound = { status: 404, body: { code: "sender_account_not_found" } };
-  assert.deepEqual(await patch(b, 200), notFound);
+  assert.deepEqual(await patch(b, 50), notFound);
   const row = await app.senderAccount.findUniqueOrThrow({ where: { id: account.id } });
-  assert.equal(row.dailyReadCap, 150);
+  assert.equal(row.dailyReadCap, 100);
 });
 
 test("refresh: 202 with the account as it stands and linkedin.status_refresh_requested published, for the worker; another workspace's account is 404 sender_account_not_found", async () => {

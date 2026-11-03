@@ -1,9 +1,11 @@
 // The writer's data blocks from the dossier (schemas/writer.ts; security §6): every value with its
 // fact id and nothing else, so no source, record id or hash reaches the model; the lead with their
 // company, and why now, in their own blocks, which the prompts mark untrusted; why now the newest
-// three events, without the post's link (README.md "Decided here"). Pure.
+// three events, without the post's link (README.md "Decided here"). A sequence step's <step> block
+// from the earlier drafts the writer read (beta-p3-010). Pure.
 import type { Dossier, Fact } from "../../schemas/dossier.ts";
-import type { PlanInput } from "../../schemas/writer.ts";
+import type { PlanInput, StepBlock } from "../../schemas/writer.ts";
+import type { StepKey } from "./constants.ts";
 
 export type WriterBlocks = Pick<PlanInput, "dossier" | "lead" | "why_now">;
 type Cited = Record<string, string>;
@@ -50,6 +52,26 @@ export function writerBlocks(dossier: Dossier): WriterBlocks {
       .slice(0, WHY_NOW_EVENTS)
       .map(({ reaction, at, excerpt, comment }) => ({ reaction, at, excerpt, comment })),
   };
+}
+
+/** An earlier step's draft as the writer read it (write.ts): its step and its texts. */
+export type EarlierDraft = {
+  readonly stepKey: StepKey;
+  readonly text: string | null;
+  readonly editedText: string | null;
+};
+
+/**
+ * The <step> block of a sequence step's draft: the kind of its step, and the final texts of the
+ * earlier drafts (the member's edit, else the writer's) in the order given, oldest first, empty ones
+ * left out. They are no facts: the gates never take them as grounding.
+ */
+export function stepBlock(kind: StepBlock["kind"], earlier: readonly EarlierDraft[]): StepBlock {
+  const texts = earlier.map(({ stepKey, text, editedText }) => ({
+    stepKey,
+    text: editedText ?? text ?? "",
+  }));
+  return { kind, earlier: texts.filter(({ text }) => text.trim() !== "") };
 }
 
 /** Each value takes the next fact, which holds it: `{ "f_3": "Signal Radar" }`; none for null. */

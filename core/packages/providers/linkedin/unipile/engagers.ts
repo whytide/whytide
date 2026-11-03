@@ -1,14 +1,15 @@
 // listPostEngagers on Unipile (README.md "Covers"): a post's reactions and its comments, two lists
 // of the vendor's, merged newest first by engagedAt into the port's Engager rows. A comment carries
 // its date. A reaction carries none at Unipile, so it takes the time its listing started: it sorts
-// above the comments written before, and a cursor read again gives the same page. The cursor holds
-// that time, the post's social id and, for each list, the vendor's cursor of the page being read
-// with how many of its items are done, or null once the list is read to the end.
-import { AppError } from "@whytide/platform";
+// above the comments written before, and a cursor read again gives the same page. The cursor,
+// signed (cursor.ts), holds that time, the post's id and social id and, for each list, the vendor's
+// cursor of the page being read with how many of its items are done, or null once the list is read
+// to the end.
 import { z } from "zod";
-import { type Engager, linkedinEngager, linkedinPort } from "../port.ts";
+import { type Engager, linkedinEngager } from "../port.ts";
 import { type Client, notFound, providerError, segment } from "./client.ts";
 import { ACTIVITY, POST_PATHS } from "./constants.ts";
+import { type Cursors, cursorInvalid } from "./cursor.ts";
 
 type Input = {
   readonly providerAccountRef: string;
@@ -56,13 +57,18 @@ const commentItem = z.object({
   text: z.string().nullish(),
 });
 
-export async function listPostEngagers(call: Client, now: () => number, input: Input) {
+export async function listPostEngagers(
+  call: Client,
+  now: () => number,
+  cursors: Cursors,
+  input: Input,
+) {
   const post = postIdOf(input.postUrl);
   if (post === undefined) throw notFound(METHOD);
   const state =
     input.cursor === undefined
       ? await started(call, input, post, now())
-      : resumed(input.cursor, post);
+      : resumed(cursors, input.cursor, post);
   let loads = 0;
   const load = async (list: "reactions" | "comments", cursor: string | null) => {
     if (++loads > MAX_LOADS) throw providerError(METHOD, { reason: "too many vendor pages" });
@@ -89,7 +95,7 @@ export async function listPostEngagers(call: Client, now: () => number, input: I
   }
   const next = { ...state, reactions: reactions.position(), comments: comments.position() };
   const done = next.reactions === null && next.comments === null;
-  return { engagers, nextCursor: done ? null : cursorOf(next) };
+  return { engagers, nextCursor: done ? null : cursors.sign(METHOD, next) };
 }
 
 /**
@@ -117,20 +123,12 @@ async function started(call: Client, input: Input, post: string, at: number): Pr
   return { post, social: found.data.social_id, at, reactions: [null, 0], comments: [null, 0] };
 }
 
-function resumed(cursor: string, post: string): State {
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-  } catch {
-    decoded = undefined;
-  }
-  const state = cursorState.safeParse(decoded);
+/** The state of a cursor signed for this method, of this post: else linkedin_input_invalid. */
+function resumed(cursors: Cursors, cursor: string, post: string): State {
+  const state = cursorState.safeParse(cursors.open(METHOD, cursor));
   if (state.success && state.data.post === post) return state.data;
-  const reason = "a cursor the adapter did not give for this post";
-  throw new AppError(linkedinPort.codes.input, { details: { method: METHOD, reason } });
+  throw cursorInvalid(METHOD, "post");
 }
-
-const cursorOf = (state: State) => Buffer.from(JSON.stringify(state)).toString("base64url");
 
 /** One of the post's lists from a position: its next engager, the vendor's pages loaded as needed. */
 function feed(load: (cursor: string | null) => Promise<Page>, start: Position) {

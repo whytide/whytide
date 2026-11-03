@@ -6,7 +6,8 @@
 // asked as the route asks it (stopRun, in a tenant run) cancels it by that id, and it ends cancelled;
 // a run stopped while still scheduled ends cancelled at its start, before any read; deleting a source
 // cancels its waiting run. linkedin's clock (useClock) holds a past working day at 10:00 UTC, so a
-// refusal for the cap waits a second at a time (signals-run.test.ts).
+// refusal for the cap waits a second at a time (signals-run.test.ts). Pages cost no credits
+// (beta-p1-090): a run stopped before any profile read holds none.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
@@ -93,15 +94,12 @@ const engagers = (count: number): Engager[] =>
  * source on a post of 30 engagers it seeds: a run reads the first page, then waits for the cap.
  */
 async function sourceOf() {
+  const price = (action: string, unit: string) => ({
+    id: newId(creditsIds.price_list_entry),
+    ...{ action, credits: 1, unit, version: 1, effectiveFrom: new Date(Date.now() - 60_000) },
+  });
   await asRole("billing_writer").priceListEntry.createMany({
-    data: {
-      id: newId(creditsIds.price_list_entry),
-      action: "signals.engager_read",
-      credits: 1,
-      unit: "engagers_30",
-      version: 1,
-      effectiveFrom: new Date(Date.now() - 60_000),
-    },
+    data: [price("signals.engager", "engager"), price("signals.engager_read", "engagers_30")],
     skipDuplicates: true,
   });
   const [tenant] = await tenancy.createTwoWorkspaces();
@@ -142,14 +140,16 @@ async function waitingRun(source: Source) {
   return { workflowId, handle, row };
 }
 
-/** The run's row, its staging, its read reservations and its credits. */
+/** The run's row, its staging, its read reservations and its credits, a block's or a candidate's. */
 async function stateOf(source: Source, runId: string) {
   const row = await db().signalRun.findUnique({ where: { id: runId } });
   const reads = await db().senderQuotaReservation.findMany({
     where: { senderAccountId: source.accountId },
     orderBy: { id: "asc" },
   });
-  const credits = await db().creditUsage.findMany({ where: { subjectRef: runId } });
+  const credits = await db().creditUsage.findMany({
+    where: { OR: [{ subjectRef: runId }, { idempotencyKey: { startsWith: `sigprof:${runId}:` } }] },
+  });
   return {
     row,
     staged: await db().signalCandidate.count({ where: { runId } }),
@@ -158,7 +158,7 @@ async function stateOf(source: Source, runId: string) {
   };
 }
 
-test("a run started under a known id records it; asleep on the cap, a stop asked as the route asks it cancels that workflow and the run ends cancelled, the page read paid and nothing left reserved", async () => {
+test("a run started under a known id records it; asleep on the cap, a stop asked as the route asks it cancels that workflow and the run ends cancelled, its page read free and nothing left reserved", async () => {
   const source = await sourceOf();
   const { workflowId, handle, row } = await waitingRun(source);
   assert.equal(row.workflowId, workflowId);
@@ -174,7 +174,7 @@ test("a run started under a known id records it; asleep on the cap, a stop asked
   assert.deepEqual(state.row?.stopRequestedAt, stopped.stopRequestedAt);
   assert.equal(state.staged, 0);
   assert.deepEqual(state.reads, [[1, 1, "committed"]]);
-  assert.deepEqual(state.credits, [["1", "committed"]]);
+  assert.deepEqual(state.credits, []);
 });
 
 test("a run stopped while still scheduled ends cancelled when its workflow starts, before any read: no read and no credits reserved", async () => {
@@ -212,5 +212,5 @@ test("deleting a source whose run waits for the cap cancels that run's workflow"
   const state = await stateOf(source, row.id);
   assert.equal(state.row, null);
   assert.deepEqual(state.reads, [[1, 1, "committed"]]);
-  assert.deepEqual(state.credits, [["1", "committed"]]);
+  assert.deepEqual(state.credits, []);
 });

@@ -1,9 +1,10 @@
 // The LinkedIn screen's daily read limit (fix-read-cap, criterion 5; core/modules/linkedin README.md
 // "Screen"), as e2e-read-cap@example.com, whose account no other spec touches: connected once through
-// the fake's hosted link and set back to the default cap first. The warning and the bound show; a
-// limit above the bound is refused under the field and stores nothing; one inside it saves and is the
-// cap of the reads today and of the card; a member without linkedin.manage, which the account's
-// canManage says (alpha's can() never does: here through Playwright's routing), sees the value only.
+// the fake's hosted link and set back to the default cap first. The warning and the bound show,
+// 100 at most (beta-p1-020); a limit above the bound is refused under the field and stores nothing; a
+// lower one saves and is at once the limit of the reads today and the cap of the card; a member
+// without linkedin.manage, which the account's canManage says (alpha's can() never does: here
+// through Playwright's routing), sees the value only.
 // Every text from its key, and axe.
 import { AxeBuilder } from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
@@ -41,7 +42,12 @@ test("the daily read limit: the warning and the bound, a refusal under the field
     return (accounts as Account[]).find((account) => account.mine);
   };
   if ((await mine())?.status !== "connected") {
-    const data = { timeZone: "UTC", acknowledged: true };
+    const data = {
+      timeZone: "UTC",
+      acknowledged: true,
+      disclosureVersion: 2,
+      personalAccount: true,
+    };
     const { url } = await (
       await page.request.post(`${ACCOUNTS}/connect`, { data, headers })
     ).json();
@@ -51,6 +57,7 @@ test("the daily read limit: the warning and the bound, a refusal under the field
   const reset = { dailyReadCap: 100 };
   expect(await page.request.patch(`${ACCOUNTS}/${id}`, { data: reset, headers })).toBeOK();
   const { capMax } = await (await page.request.get(`${ACCOUNTS}/${id}/usage`)).json();
+  expect(capMax).toBe(100);
 
   await page.goto(`/w/${WORKSPACE}/linkedin`);
   const card = page.getByRole("region", { name: "LinkedIn", exact: true });
@@ -72,14 +79,14 @@ test("the daily read limit: the warning and the bound, a refusal under the field
   );
   await expectNoSeriousViolation(page);
 
-  await field.fill("150");
+  await field.fill("80");
   await save.click();
   await expect(usage.getByText(say("linkedin.read_limit.saved"))).toBeVisible();
   await expect(field).not.toHaveAttribute("aria-invalid", "true");
   await expect(
-    usage.getByText(say("linkedin.usage.reads_today", { used: "0", cap: "150" })),
+    usage.getByText(say("linkedin.usage.reads_today", { used: "0", cap: "80" })),
   ).toBeVisible();
-  await expect(card.getByText(say("linkedin.account.cap", { cap: "150" }))).toBeVisible();
+  await expect(card.getByText(say("linkedin.account.cap", { cap: "80" }))).toBeVisible();
   await expectNoSeriousViolation(page);
 
   await page.route(`**${ACCOUNTS}`, async (route) => {
@@ -89,9 +96,9 @@ test("the daily read limit: the warning and the bound, a refusal under the field
     await route.fulfill({ response, json });
   });
   await page.reload();
-  await expect(card.getByText(say("linkedin.account.cap", { cap: "150" }))).toBeVisible();
+  await expect(card.getByText(say("linkedin.account.cap", { cap: "80" }))).toBeVisible();
   await expect(
-    usage.getByText(say("linkedin.usage.reads_today", { used: "0", cap: "150" })),
+    usage.getByText(say("linkedin.usage.reads_today", { used: "0", cap: "80" })),
   ).toBeVisible();
   await expect(usage.getByRole("textbox")).toHaveCount(0);
 });

@@ -337,5 +337,162 @@
     },
     "fake": [{ "angle": "pain_point", "factIds": ["f_4", "f_3", "f_6"], "cta": "soft_ask" }],
     "expected": { "angle": "pain_point" }
+  },
+  {
+    "name": "first-message-no-note",
+    "input": {
+      "channel": { "channel": "linkedin_message", "minCharacters": 150, "maxCharacters": 300 },
+      "dossier": {
+        "sender": { "name": { "f_1": "Sam Writer" } },
+        "offer": {
+          "oneLiner": {},
+          "products": { "f_2": "Signal Radar" },
+          "painPoints": { "f_3": "Leads go cold before sales calls them." },
+          "proofPoints": { "f_4": "Northwind booked 40% more meetings in a quarter." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_5": "Leona" },
+        "headline": {},
+        "title": { "f_6": "Head of Sales" },
+        "location": {},
+        "company": {
+          "name": { "f_7": "Brackenford" },
+          "industry": {},
+          "sizeRange": {},
+          "country": {}
+        }
+      },
+      "why_now": [],
+      "step": { "kind": "first_message", "earlier": [] },
+      "failures": [],
+      "replaced": null
+    },
+    "fake": [{ "angle": "pain_point", "factIds": ["f_5", "f_3", "f_2"], "cta": "question" }],
+    "expected": { "angle": "pain_point" }
+  },
+  {
+    "name": "first-message-after-note",
+    "input": {
+      "channel": { "channel": "linkedin_message", "minCharacters": 150, "maxCharacters": 300 },
+      "dossier": {
+        "sender": { "name": { "f_1": "Ines Porter" } },
+        "offer": {
+          "oneLiner": { "f_2": "Fleetwise plans the maintenance of delivery fleets." },
+          "products": { "f_3": "Fleetwise" },
+          "painPoints": { "f_4": "Vans break down between services." },
+          "proofPoints": { "f_5": "Cut breakdowns by 30% at a 200-van fleet." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_6": "Bram" },
+        "headline": {},
+        "title": { "f_7": "Fleet Manager" },
+        "location": {},
+        "company": {
+          "name": { "f_8": "Veldhaven" },
+          "industry": {},
+          "sizeRange": {},
+          "country": {}
+        }
+      },
+      "why_now": [],
+      "step": {
+        "kind": "first_message",
+        "earlier": [
+          {
+            "stepKey": "connect",
+            "text": "Bram, I help delivery fleets plan van maintenance ahead of time. Glad to connect if that is useful to you."
+          }
+        ]
+      },
+      "failures": [],
+      "replaced": null
+    },
+    "fake": [{ "angle": "proof_point", "factIds": ["f_6", "f_5", "f_3"], "cta": "soft_ask" }],
+    "expected": { "angle": "proof_point" }
+  },
+  {
+    "name": "follow-up-1-proof",
+    "input": {
+      "channel": { "channel": "linkedin_message", "minCharacters": 150, "maxCharacters": 300 },
+      "dossier": {
+        "sender": { "name": { "f_1": "Sam Writer" } },
+        "offer": {
+          "oneLiner": {},
+          "products": { "f_2": "Signal Radar" },
+          "painPoints": { "f_3": "Leads go cold before sales calls them." },
+          "proofPoints": { "f_4": "Northwind booked 40% more meetings in a quarter." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_5": "Tobias" },
+        "headline": {},
+        "title": { "f_6": "VP Sales" },
+        "location": {},
+        "company": { "name": { "f_7": "Quorvale" }, "industry": {}, "sizeRange": {}, "country": {} }
+      },
+      "why_now": [],
+      "step": {
+        "kind": "follow_up",
+        "earlier": [
+          {
+            "stepKey": "message_1",
+            "text": "Tobias, thanks for connecting. Sales teams at companies like Quorvale often see leads go cold before sales calls them. Signal Radar shows who is showing buying signals right now. How does your team decide who to call first?"
+          }
+        ]
+      },
+      "failures": [],
+      "replaced": null
+    },
+    "fake": [{ "angle": "proof_point", "factIds": ["f_5", "f_4", "f_2"], "cta": "soft_ask" }],
+    "expected": { "angle": "proof_point" }
+  },
+  {
+    "name": "follow-up-2-comment",
+    "input": {
+      "channel": { "channel": "linkedin_message", "minCharacters": 150, "maxCharacters": 300 },
+      "dossier": {
+        "sender": { "name": { "f_1": "Ines Porter" } },
+        "offer": {
+          "oneLiner": { "f_2": "Fleetwise plans the maintenance of delivery fleets." },
+          "products": { "f_3": "Fleetwise" },
+          "painPoints": { "f_4": "Vans break down between services." },
+          "proofPoints": { "f_5": "Cut breakdowns by 30% at a 200-van fleet." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_6": "Femke" },
+        "headline": {},
+        "title": { "f_7": "Fleet Director" },
+        "location": {},
+        "company": { "name": { "f_8": "Wexmoor" }, "industry": {}, "sizeRange": {}, "country": {} }
+      },
+      "why_now": [
+        {
+          "reaction": { "f_9": "comment" },
+          "at": { "f_10": "2026-10-13T08:00:00.000Z" },
+          "excerpt": { "f_11": "Getting a fleet ready for winter." },
+          "comment": { "f_12": "Our winter tyre checks start next week." }
+        }
+      ],
+      "step": {
+        "kind": "follow_up",
+        "earlier": [
+          {
+            "stepKey": "message_1",
+            "text": "Femke, thanks for connecting. Fleet teams at companies like Wexmoor often see vans break down between services. How does your team plan maintenance today?"
+          },
+          {
+            "stepKey": "follow_up_1",
+            "text": "Femke, Fleetwise cut breakdowns by 30% at a 200-van fleet by planning each service ahead. Would you be open to a short talk about how that could look at Wexmoor?"
+          }
+        ]
+      },
+      "failures": [],
+      "replaced": null
+    },
+    "fake": [{ "angle": "signal_comment", "factIds": ["f_6", "f_12", "f_3"], "cta": "question" }],
+    "expected": { "angle": "signal_comment" }
   }
 ]

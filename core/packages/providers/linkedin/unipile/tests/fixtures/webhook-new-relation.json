@@ -1,0 +1,11 @@
+{
+  "event": "new_relation",
+  "account_id": "fixture-account",
+  "account_type": "LINKEDIN",
+  "webhook_name": "whytide-users",
+  "user_full_name": "fixture-body-marker: Ada Example",
+  "user_provider_id": "fixture-member-ada",
+  "user_public_identifier": "ada-example",
+  "user_profile_url": "https://www.linkedin.com/in/ada-example/",
+  "user_picture_url": "https://media.example.com/ada.jpg"
+}

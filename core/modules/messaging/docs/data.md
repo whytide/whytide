@@ -2,11 +2,13 @@
 
 ## `message_drafts`
 
-One row per draft, a tenant table (`workspace_id`, indexed with `person_id` and `created_at`), migration `20261027100000_messaging_drafts`, ids `mdr_…`. No foreign key: the person is contacts', the records ai's.
+One row per draft, a tenant table (`workspace_id`, indexed with `person_id` and `created_at`), migration `20261027100000_messaging_drafts`, ids `mdr_…`. No foreign key: the person is contacts', the records ai's. Since `20261029092149_messaging_step_drafts` (beta-p3-010) it holds a sequence step's drafts too, beside the lead's.
 
 | Column | What | PII class |
 |---|---|---|
-| `person_id`, `channel`, `status` | the lead, `linkedin_note` or `linkedin_message`, `drafting` · `ready` · `flagged` · `failed` · `edited` | none |
+| `person_id`, `channel`, `status` | the lead, `linkedin_note` or `linkedin_message`, `drafting` · `ready` · `flagged` · `failed` · `edited` · `approved` (a step's draft only) | none |
+| `kind` | `lead_draft` (alpha's panel; every row before beta) or `outbound_step` (a sequence step's), enum `message_draft_kind` | none |
+| `step_execution_id`, `step_key` | a step's draft: campaigns' `sx_` id, no foreign key, and the template's step key (`STEP_KINDS`); null for a lead's draft | none |
 | `plan` | `{ angle, factIds, cta, decisionRecordId }`, the planner's last answer and its call's record | none |
 | `text` | the writer's last text | `business_contact` |
 | `edited_text`, `edited_at` | a member's own text (`PATCH …/drafts/{id}`) and when it was saved | `business_contact` |
@@ -15,8 +17,12 @@ One row per draft, a tenant table (`workspace_id`, indexed with `person_id` and 
 | `gates` | the last round's `{ gate, issues }`, in the gates' order | `business_contact`: an issue may name a text's words |
 | `regenerations` | 0 to 2 | none |
 | `flag_reasons` | the issues a flagged draft was left with, or a failed one's `{ code }` | `business_contact`, as `gates` |
+| `edited_by_user`, `edit_ratio` | set by approvals' path (beta-p3-020): the member changed a step's text, and by how much, 0 to 1 (`decimal(4,3)`) | none |
+| `approved_at` | when a step's draft was approved | none |
 
-`erasePerson` deletes a person's rows. The event `messaging.draft_requested` and the workflow's input carry ids only: the workspace, the draft, the person, the member who asked and the replaced draft.
+Hand-written SQL in the migration, which Prisma's schema cannot say: CHECKs that `step_execution_id` and `step_key` are set exactly for an `outbound_step` draft, that `approved_at` is set exactly when the status is `approved` (compared as text: Postgres refuses a new enum value in the transaction that adds it), that only an `outbound_step` draft is `approved`, and that `edit_ratio` lies between 0 and 1; and the partial unique key `(workspace_id, step_execution_id) WHERE step_execution_id IS NOT NULL`, one draft per step execution.
+
+`erasePerson` deletes a person's rows, a step's drafts included. The event `messaging.draft_requested` and the workflow's input carry ids only: the workspace, the draft, the person, the member who asked (a step's draft: the sender account's owner), the replaced draft and a step's `earlierDraftIds`; `messaging.step_draft_ready` the draft, its step execution and its status. No text travels in an event or an input: the writer reads the earlier texts by id.
 
 ## The dossier
 

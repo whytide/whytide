@@ -11,7 +11,19 @@ const WORKSPACE = "wsp_e2e_phone";
 /** A profile's slug without a hyphen: the lead's title, its URL, can wrap nowhere but inside. */
 const SLUG = `phone${"x".repeat(55)}`;
 const PUBLIC = ["/sign-in", "/sign-in/sent", "/sign-in/expired"];
-const SCREENS = ["leads", "company", "icp", "sources", "import", "linkedin", "credits"];
+const SCREENS = [
+  "leads",
+  "up-next",
+  "inbox",
+  "never-contact",
+  "company",
+  "icp",
+  "sources",
+  "import",
+  "linkedin",
+  "counts",
+  "credits",
+];
 
 test.use({ viewport: { width: 390, height: 844 } });
 

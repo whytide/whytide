@@ -11,6 +11,7 @@ The Temporal host: it registers the modules' workflows, activities and schedules
 | `pnpm -F worker start` | `node src/main.ts`: the worker runs its TypeScript sources and the modules' builds |
 | `pnpm -F worker test` | builds, then `node --test tests/*.test.ts` on the slice's Temporal and database |
 | `pnpm -F worker test:replay` | replays every `core/modules/*/workflows/__histories__/*.json` against the current code |
+| `pnpm -F worker test:safety` | builds, then `node --test "tests/safety/*.test.ts"`, the host's send-path safety cases (`tools/ci/README.md`), which `test` never runs: `tests/safety/stop-on-reply.test.ts`, a reply through linkedin's receiver holding the person's steps (beta-p5-010); `tests/safety/no-double-send.test.ts` and `tests/safety/send-recheck.test.ts`, linkedin's send activities retried and stopped before the call (beta-p1-050) |
 | `pnpm -F worker history:record <workflowId> [file]` | saves a workflow's history from the slice's Temporal |
 | `pnpm -F worker grounding-sample` | the root's `pnpm grounding-sample`: builds, then `scripts/grounding-sample.ts` loads every module's build, so that each defines its source, and draws a workspace's weekly grounding sample or records its reading ([@whytide/ai's README](../../packages/ai/README.md#the-grounding-sample)); `tests/grounding-sample.test.ts` tests its arguments and lines |
 | `pnpm -F worker smoke` | runs `worker_smoke`, a no-op workflow, on the stack's Temporal: exits 0 once a running worker answers |

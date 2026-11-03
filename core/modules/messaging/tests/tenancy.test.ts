@@ -1,12 +1,14 @@
 // test:tenancy for message_drafts (docs/rules/security.md §3; core/packages/db README "Register a
 // tenant table in the isolation test"): a draft made by the module's command and read in a run of
 // one workspace, scoped by the tenant client alone, is that workspace's only; the drafts' commands
-// and queries go through the tenant client; erasePerson deletes a person's drafts and no one else's.
+// and queries go through the tenant client, a sequence step's request and the sweep included
+// (beta-p3-010); erasePerson deletes a person's drafts and no one else's.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { withTenant } from "@whytide/db";
 import { asRole, assertScoped, isolationTest, withTestDb } from "@whytide/db/testing";
 import { servicePrincipal } from "@whytide/platform";
+import { requestStepDraft } from "../domain/drafts/step.ts";
 import {
   createDraft,
   editDraft,
@@ -17,6 +19,7 @@ import {
   regenerateDraft,
   requestDraft,
 } from "../domain/drafts/store.ts";
+import { sweepStuckDrafts } from "../domain/drafts/sweep.ts";
 
 withTestDb();
 const principal = servicePrincipal("messaging_test");
@@ -58,4 +61,7 @@ test("erasePerson deletes the person's drafts, and no one else's; the commands a
   await assertScoped(() => regenerateDraft("mdr_none"));
   await assertScoped(() => markFailed("mdr_none"));
   await assertScoped(() => erasePerson("per_none"));
+  const step = { personId: "per_none", stepExecutionId: "sx_none", senderUserId: "usr_none" };
+  await assertScoped(() => requestStepDraft({ ...step, stepKey: "connect" }));
+  await assertScoped(() => sweepStuckDrafts());
 });

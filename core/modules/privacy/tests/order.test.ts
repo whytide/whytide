@@ -1,9 +1,10 @@
 // The erasers' order (domain/erase/registry.ts), with no database: each runs before the erasers of
 // the modules it depends on, ties by module name; a module twice, an unknown dependency and a cycle
-// are eraser_order_invalid, naming the modules. The registered order is the one the script runs.
+// are eraser_order_invalid, naming the modules. The registered order is the one the script runs,
+// but for the platform's step, which it runs first (domain/erase/erase.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { erasingModules } from "../domain/erase/erasers.ts";
+import { erasingModules, FIRST } from "../domain/erase/erasers.ts";
 import { type Eraser, orderErasers, registeredErasers } from "../domain/erase/registry.ts";
 
 const eraser = (module: string, dependsOn: string[] = []): Eraser => ({
@@ -36,8 +37,15 @@ test("a module twice, a dependency on a module without an eraser and a cycle are
   assert.throws(() => order(cycle), invalid("cycle", ["a", "b", "c"]));
 });
 
-test("the registered erasers: drafts and snapshots before ai's records, contacts last", () => {
+test("the registered erasers: drafts and snapshots before ai's records, the outbox before campaigns', contacts last; none before the platform's", () => {
   const registered = registeredErasers().map((e) => e.module);
-  assert.deepEqual(registered, ["messaging", "platform", "qualification", "ai", "signals"]);
+  const free = ["approvals", "inbox", "linkedin", "messaging", "platform"];
+  assert.deepEqual(registered, [...free, "campaigns", "qualification", "ai", "signals"]);
   assert.deepEqual(erasingModules(), [...registered, "contacts"]);
+  // The run puts the platform's step first: no module's rows may name the platform's.
+  const naming = registeredErasers().filter((e) => e.dependsOn.includes(FIRST));
+  assert.deepEqual(
+    naming.map((e) => e.module),
+    [],
+  );
 });

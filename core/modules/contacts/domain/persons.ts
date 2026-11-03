@@ -13,6 +13,7 @@ import { anyErased, writeHash } from "./hashes.ts";
 import { normalizeLinkedinUrl } from "./linkedin-url.ts";
 import { mergeFields, type Provenance, type ProvenanceMap, splitName } from "./provenance.ts";
 import { listInput, parseInput, requireId, upsertPersonInput } from "./rules.ts";
+import { profileHash } from "./suppression/matching.ts";
 
 export type Person = {
   readonly id: string;
@@ -32,6 +33,8 @@ export type Person = {
   readonly fieldProvenance: ProvenanceMap;
   readonly createdAt: Date;
   readonly updatedAt: Date;
+  /** The latest outbound touch, read by lastTouchAt (suppression/checks.ts); null before the first. */
+  readonly lastTouchAt?: Date | null;
 };
 /** One source's values of a person: where they come from, and the profile. */
 export type PersonFromSource = {
@@ -162,6 +165,30 @@ export async function listPersons(input: {
   return { persons, nextCursor: rows.length > limit ? (persons.at(-1)?.id ?? null) : null };
 }
 
+/** A colleague as colleaguesOf answers one: the names only, no id or URL. */
+export type Colleague = { readonly firstName: string | null; readonly lastName: string | null };
+
+/**
+ * The names of the workspace's other persons at the person's company: those with its companyId, or,
+ * for a person without one, those whose companyName is the same, case aside; none for a person with
+ * neither. Never the person. messaging's colleague-signal gate (beta-p3-020); person_not_found.
+ */
+export async function colleaguesOf(personId: string): Promise<Colleague[]> {
+  const { id, companyId, companyName } = await getPerson(personId);
+  const company =
+    companyId !== null
+      ? { companyId }
+      : companyName
+        ? { companyName: { equals: companyName, mode: "insensitive" as const } }
+        : null;
+  if (company === null) return [];
+  return tenantClient.person.findMany({
+    where: { ...company, id: { not: id } },
+    select: { firstName: true, lastName: true },
+    orderBy: { id: "asc" },
+  });
+}
+
 /** What erasePerson deleted, by table, and the erased hash of the person's URL. */
 export type PersonErasure = {
   readonly counts: Readonly<Record<"review_decisions" | "leads" | "persons", number>>;
@@ -173,7 +200,10 @@ export type PersonErasure = {
  * erased hash of its URL and of each provider id, so that no source adds it again
  * (upsertPersonFromSource answers person_erased): the step the deletion script runs last, in its
  * run, after the other modules' erasers (alpha-p10-030), which logs the counts and the URL's hash.
- * The one path that deletes a decision.
+ * The one path that deletes a decision, and a status change of the lead's (beta-p2-030), which the
+ * counts leave out, as privacy's log has them. Its never-contact entries and opt-outs, in both layers,
+ * lose their profile URL and keep their hash, which is all the match reads (beta-p2-010); a company's
+ * entries stay as they are.
  */
 export async function erasePerson(personId: string): Promise<PersonErasure> {
   const person = await getPerson(personId);
@@ -183,8 +213,14 @@ export async function erasePerson(personId: string): Promise<PersonErasure> {
   for (const value of [hash, ...memberIds.map((id) => hashOf("pid", id))]) {
     await writeHash(value, "erased", [], now);
   }
+  // The profile's hash is the URL's, as an entry on the person is written (suppression/matching.ts).
+  await tenantClient.suppressionEntry.updateMany({
+    where: { hash: profileHash(person.linkedinUrl), linkedinUrl: { not: null } },
+    data: { linkedinUrl: null },
+  });
   const where = { personId: person.id };
   const decisions = await tenantClient.reviewDecision.deleteMany({ where });
+  await tenantClient.leadStatusChange.deleteMany({ where });
   const leads = await tenantClient.lead.deleteMany({ where });
   await tenantClient.person.delete({ where: { id: person.id } });
   const counts = { review_decisions: decisions.count, leads: leads.count, persons: 1 };

@@ -71,7 +71,12 @@ test("the usage panel fails with a retry, then shows the reads left; the disclos
     return (all as Account[]).find((account) => account.mine);
   };
   if ((await mine())?.status !== "connected") {
-    const data = { timeZone: "UTC", acknowledged: true };
+    const data = {
+      timeZone: "UTC",
+      acknowledged: true,
+      disclosureVersion: 2,
+      personalAccount: true,
+    };
     const headers = { origin: baseURL ?? "" };
     const { url } = await (
       await page.request.post(`${accounts}/connect`, { data, headers })

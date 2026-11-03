@@ -53,7 +53,10 @@
     "export:golden": "pnpm -F qualification export:golden",
     "grounding-sample": "pnpm -F worker grounding-sample",
     "evidence:reduce": "pnpm -F signals evidence:reduce",
-    "erase": "pnpm -F privacy erase"
+    "erase": "pnpm -F privacy erase",
+    "linkedin:control": "pnpm -F linkedin linkedin:control",
+    "inbox:export-labels": "pnpm -F inbox inbox:export-labels",
+    "campaigns:report": "pnpm -F campaigns campaigns:report"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

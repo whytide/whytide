@@ -1,0 +1,7 @@
+{
+  "status": 429,
+  "type": "errors/too_many_requests",
+  "title": "Too many requests",
+  "detail": "fixture-body-marker: retry later.",
+  "retry_after": 120
+}

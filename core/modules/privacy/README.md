@@ -4,7 +4,7 @@ The deletion script: `pnpm erase` erases a person from a workspace on request, e
 
 - **Owns:** `erasure_log` in `core/packages/db/prisma/schema/privacy.prisma`, migration `20261027140000_privacy_erasure_log` ([docs/data.md](docs/data.md)); the eraser registry in `domain/erase/`; the command in `cli/erase.ts`.
 - **Public interface:** `index.ts` exports the registries only, `errors` and `ids` (`era`). No module imports privacy, since privacy imports theirs; no host lists it as a dependency (pnpm refuses the cycle), and the api loads its build as it loads every module's.
-- **Depends on:** `contacts` (`getPerson`, `findPersonByLinkedinUrl`, `erasePerson`, `errors`), `qualification`, `signals` and `messaging` (`erasePerson`), `ai` (`eraseDecisionRecords`), `tenancy` (`findWorkspaceBySlug`), `db`, `platform`.
+- **Depends on:** `contacts` (`getPerson`, `findPersonByLinkedinUrl`, `lockLeadStatus`, `erasePerson`, `errors`), `qualification`, `signals` and `messaging` (`erasePerson`), `ai` (`eraseDecisionRecords`), `tenancy` (`findWorkspaceBySlug`), `db`, `platform`.
 - **Reviewers:** the owners of this module; two reviews ([security §8](../../../docs/rules/security.md#8-conduct)).
 
 ## The deletion script
@@ -26,14 +26,18 @@ pnpm erase --workspace <id or slug> (--linkedin-url <url> | --person <id>) --ope
 
 | Module | Function | Rows |
 |---|---|---|
+| `approvals` | `erasePerson` | `approval_items` |
+| `linkedin` | `erasePerson` | `sender_outreach`; `sender_action_log` with the person's id as `object_ref` |
 | `messaging` (depends on `ai`) | `erasePerson` | `message_drafts` |
-| `platform` | `erasePlatformRows` (privacy's own, below) | `outbox`, `idempotency_records` |
+| `platform` (depends on `campaigns`) | `erasePlatformRows` (privacy's own, below) | `outbox`, `idempotency_records` |
+| `campaigns` | `erasePerson` | `step_executions`, then `enrollments` |
 | `qualification` (depends on `ai`) | `erasePerson` | `score_snapshots`, `criterion_verdicts`, `assessment_attempts` |
 | `ai` | `eraseDecisionRecords(subjectRef)` | `decision_records` with the person's id as `subject_ref` |
 | `signals` | `erasePerson` | `signal_events`, `evidence` |
+| `inbox` | `erasePerson` | `messages`, the person's and every one in their threads, then `threads` |
 | `contacts`, last, outside the registry | `erasePerson` | `review_decisions`, `leads`, `persons`; writes the erased hashes |
 
-The platform cannot import the database package, so privacy erases the platform's tables itself: the outbox events that name the person in `personId` are deleted, a `personIds` list loses the person, and an event whose list is left empty is deleted; an idempotency record whose stored answer holds the person's id is deleted. `cost_events` and `credit_usage` keep the id ([docs/security.md](docs/security.md)).
+The run takes `platform` first, then locks the lead (contacts' `lockLeadStatus`), then runs the others in the registered order (beta-p5-030). An outbox event a delivery has claimed holds the platform's step until that delivery commits, so `campaigns`, after it, also erases the enrollment a `contacts.lead_approved` delivery wrote meanwhile (beta-p2-050); that delivery locks the lead, and a run already holding it would wait with it until the claim times out, a cycle Postgres cannot see. The lead's lock comes before every other eraser: a reply's hold, an enrollment and a skip lock the lead before the steps and items they change, so they wait for the erasure and find the person gone, where they would deadlock with an eraser that deleted those rows. The platform cannot import the database package, so privacy erases the platform's tables itself: the outbox events that name the person in `personId`, or `person_id` in linkedin's snake_case events, are deleted, a `personIds` list loses the person, and an event whose list is left empty is deleted; an idempotency record whose stored answer holds the person's id is deleted. `cost_events` and `credit_usage` keep the id ([docs/security.md](docs/security.md)).
 
 A module that adds a table with a `person_id` exports its eraser from its `index.ts` and registers it in `erasers.ts`; `test:tenancy` fails until it does (`tests/tenancy.test.ts`, the pipeline check, which names the table).
 

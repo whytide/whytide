@@ -30,6 +30,7 @@ function secrets(): Record<string, string> {
     HASH_SALT: hex(32),
     UNIPILE_API_KEY: hex(24),
     UNIPILE_WEBHOOK_SECRET: hex(24),
+    UNIPILE_CURSOR_SECRET: hex(24),
     LLM_ANTHROPIC_API_KEY: hex(24),
   };
 }

@@ -1,17 +1,19 @@
-// The erasure (docs/flows.md "Erase"): one tenant run that resolves the person, runs every
-// registered eraser in dependency order, then contacts' erasePerson, which deletes the person and
-// leaves its erased hash, and writes the log row. An error rolls every row back; a dry run rolls
-// back on purpose, once it has counted what the erasure deletes.
+// The erasure (docs/flows.md "Erase"): one tenant run that resolves the person, runs the platform's
+// eraser, locks the lead, runs every other registered eraser in dependency order, then contacts'
+// erasePerson, which deletes the person and leaves its erased hash, and writes the log row. An
+// error rolls every row back; a dry run rolls back on purpose, once it has counted what the
+// erasure deletes.
 import {
   errors as contactsErrors,
   erasePerson,
   findPersonByLinkedinUrl,
   getPerson,
+  lockLeadStatus,
 } from "@whytide/contacts";
 import { withTenant } from "@whytide/db";
 import { AppError, servicePrincipal } from "@whytide/platform";
 import { givenClient } from "../client.ts";
-import { LAST } from "./erasers.ts";
+import { FIRST, LAST } from "./erasers.ts";
 import { writeErasureLog } from "./log.ts";
 import { type Eraser, type ErasureCounts, registeredErasers } from "./registry.ts";
 
@@ -57,7 +59,19 @@ export async function erase(
   const run = async (): Promise<Erasure> => {
     const personId = await resolve(request.person);
     const counts: Record<string, ErasureCounts> = {};
-    for (const eraser of erasers) counts[eraser.module] = await eraser.erase(personId);
+    // The platform's step first, before any lock: it waits for a delivery that claimed one of its
+    // outbox events, whose handler may lock the lead (campaigns' enrollment). With the lead held
+    // here, both would wait out the claim's timeout, a cycle Postgres cannot see. Then the lead,
+    // before every other step: a reply's hold, an enrollment and a skip lock it before the rows
+    // they change, so they wait for the erasure and then find the person gone, rather than
+    // deadlock with an eraser that deleted those rows.
+    for (const eraser of erasers.filter(({ module }) => module === FIRST)) {
+      counts[eraser.module] = await eraser.erase(personId);
+    }
+    await lockLeadStatus(personId);
+    for (const eraser of erasers.filter(({ module }) => module !== FIRST)) {
+      counts[eraser.module] = await eraser.erase(personId);
+    }
     const { counts: own, hash: personHash } = await erasePerson(personId);
     counts[LAST] = own;
     const performedBy = request.operator;

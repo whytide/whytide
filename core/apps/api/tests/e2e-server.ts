@@ -48,6 +48,10 @@ const SECOND_WORKSPACE = "wsp_e2e_b";
 const IMPORT_WORKSPACE = "wsp_e2eimport";
 /** A fourth, the review panel's leads (core/apps/web/tests/review-panel.spec.ts). */
 const REVIEW_WORKSPACE = "wsp_e2e_review";
+/** Approve's, where E2E_EMAIL has a connected account (core/apps/web/tests/contacts-approve.spec.ts). */
+const APPROVE_WORKSPACE = "wsp_e2e_approve";
+/** The enrollment panel's, with a connected account (core/apps/web/tests/campaigns-enrollment-panel.spec.ts). */
+const ENROLLMENT_WORKSPACE = "wsp_e2e_enrollment";
 
 const { authPort, getAdapter, linkedinPort } = await import("@whytide/providers");
 const betterAuth = await getAdapter(authPort, "better-auth");
@@ -121,6 +125,8 @@ async function seed(): Promise<void> {
     { id: "wsp_e2e_contacts", name: "Contacts", slug: "e2e-contacts" },
     { id: "wsp_e2e_noleads", name: "No leads", slug: "e2e-noleads" },
     { id: "wsp_e2e_url", name: "List address", slug: "e2e-url" },
+    // contacts' never-contact screen and one-click blocks: contacts-never-contact.spec.ts.
+    { id: "wsp_e2e_never_contact", name: "Blocks", slug: "e2e-never-contact" },
     // messaging's draft panel on the lead page: messaging-draft-panel.spec.ts, and its states and
     // gaps, messaging-states.spec.ts.
     { id: "wsp_e2e_drafts", name: "Drafts", slug: "e2e-drafts" },
@@ -131,17 +137,38 @@ async function seed(): Promise<void> {
     { id: "wsp_e2e_nocosts", name: "No costs", slug: "e2e-nocosts" },
     // every screen at a phone's width: phone-width.spec.ts.
     { id: "wsp_e2e_phone", name: "Phone", slug: "e2e-phone" },
+    // contacts' Approve, with the user's connected account and without: contacts-approve.spec.ts.
+    { id: APPROVE_WORKSPACE, name: "Approve", slug: "e2e-approve" },
+    { id: "wsp_e2e_approve_none", name: "Approve, no account", slug: "e2e-approve-none" },
+    // approvals' "Up next", its items seeded by the e2e module: approvals-up-next.spec.ts.
+    { id: "wsp_e2e_up_next", name: "Up next", slug: "e2e-up-next" },
+    // campaigns' enrollment panel on the lead page: campaigns-enrollment-panel.spec.ts.
+    { id: ENROLLMENT_WORKSPACE, name: "Enrollments", slug: "e2e-enrollment" },
+    // campaigns' counts page, its account and steps seeded by the e2e module: campaigns-counts.spec.ts.
+    { id: "wsp_e2e_counts", name: "Counts", slug: "e2e-counts" },
+    // linkedin's pause and "Stop everything", and the operator's stops: linkedin-switches.spec.ts.
+    { id: "wsp_e2e_switches", name: "Switches", slug: "e2e-switches" },
+    // inbox's screen and its labels, its threads seeded by the e2e module: inbox-screen.spec.ts.
+    { id: "wsp_e2e_inbox", name: "Inbox", slug: "e2e-inbox" },
+    // linkedin's risk disclosure for sending, its boxes and its Dialog: linkedin-disclosure.spec.ts.
+    { id: "wsp_e2e_disclosure", name: "Disclosure", slug: "e2e-disclosure" },
+    // linkedin's health card, its states seeded by the e2e module: linkedin-health.spec.ts.
+    { id: "wsp_e2e_linkedin_health", name: "Health", slug: "e2e-linkedin-health" },
   ];
   for (const workspace of workspaces) {
     const row = { ...workspace, organizationId: organization.id };
     await db.workspace.upsert({ where: { id: workspace.id }, create: row, update: {} });
   }
+  const users = new Map<string, string>();
   for (const email of E2E_USERS) {
     const { id: userId } = await upsertUser({ email });
+    users.set(email, userId);
     for (const { id: workspaceId } of workspaces) await addOwner({ userId, workspaceId });
   }
   await seedSenders(db, fixture.FIXTURE_WORKSPACE);
   await seedSenders(db, RUN_NOW_WORKSPACE, 3);
+  await seedSenders(db, APPROVE_WORKSPACE, 5, users.get(E2E_USERS[0] ?? ""));
+  await seedSenders(db, ENROLLMENT_WORKSPACE, 60);
   await db.$disconnect();
 }
 
@@ -166,6 +193,12 @@ const api = await start({
     build("credits"),
     // The lead page's draft panel: the drafts the e2e module seeds and writes in the worker's stead.
     build("messaging"),
+    // "Up next": the queue's routes, on the items and drafts the e2e module seeds.
+    build("approvals"),
+    // The lead page's enrollment panel: the enrollments the e2e module seeds.
+    build("campaigns"),
+    // The inbox: its threads, messages and labels, which the e2e module seeds.
+    build("inbox"),
     { name: "e2e", load: () => import("./fixtures/e2e/index.ts") },
   ],
   mount: [

@@ -20,6 +20,7 @@ import {
   type Tier,
   type WhyBullet,
 } from "./lead.ts";
+import type { OutreachStatus } from "./outreach/constants.ts";
 import { getPerson, type Person } from "./persons.ts";
 import { REVIEW_DECISIONS, type ReviewDecisionKind, type ReviewFilter } from "./review/rules.ts";
 import {
@@ -53,6 +54,10 @@ export type Lead = {
   /** The latest review decision and its time; null until the first (review/reviews.ts). */
   readonly reviewStatus: ReviewDecisionKind | null;
   readonly reviewedAt: Date | null;
+  /** Where the lead is on the way to outreach; only recordLeadStatus moves it (outreach/status.ts). */
+  readonly outreachStatus: OutreachStatus;
+  /** A code: why the latest change happened, such as opted_out; null when none was given. */
+  readonly outreachReason: string | null;
 };
 export type LeadWithPerson = Lead & { readonly person: Person };
 
@@ -133,14 +138,15 @@ export async function applyQualification(input: {
 /**
  * A page of the workspace's leads with their persons, by descending fit (no score last), newest
  * first, or unreviewed first (the leads without a decision, then Good lead, then Not a fit, each by
- * descending fit), ties by the person id; `status`, `tier` and `review` (`unreviewed`: no decision
- * yet) filter. `cursor` is the `nextCursor` of the page before, in the same sort, else
- * contacts_input_invalid naming `cursor`; null on the last page.
+ * descending fit), ties by the person id; `status`, `tier`, `review` (`unreviewed`: no decision
+ * yet) and `outreach` filter. `cursor` is the `nextCursor` of the page before, in the same sort,
+ * else contacts_input_invalid naming `cursor`; null on the last page.
  */
 export async function listLeads(input: {
   status?: QualificationStatus;
   tier?: Tier;
   review?: ReviewFilter;
+  outreach?: OutreachStatus;
   sort: LeadSort;
   limit: number;
   cursor?: string;
@@ -163,7 +169,8 @@ export async function listLeads(input: {
 
 /**
  * The leads just before and just after the person's in the list's view (`sort`, filtered by
- * `status`, `tier` and `review`, as listLeads reads them): their person ids, null at either end.
+ * `status`, `tier`, `review` and `outreach`, as listLeads reads them): their person ids, null at
+ * either end.
  * The person's lead keeps its place in the sort even when the filters would leave it out.
  * lead_not_found.
  */
@@ -172,6 +179,7 @@ export async function leadNeighbours(input: {
   status?: QualificationStatus;
   tier?: Tier;
   review?: ReviewFilter;
+  outreach?: OutreachStatus;
   sort: LeadSort;
 }): Promise<{ previous: string | null; next: string | null }> {
   const { personId, sort, ...view } = parseInput(neighboursInput, input);
@@ -238,9 +246,19 @@ function asLead(row: unknown): Lead {
 }
 
 /** The list's filters: `unreviewed` is the leads without a decision. */
-function filters(view: { status?: QualificationStatus; tier?: Tier; review?: ReviewFilter }) {
+function filters(view: {
+  status?: QualificationStatus;
+  tier?: Tier;
+  review?: ReviewFilter;
+  outreach?: OutreachStatus;
+}) {
   const reviewStatus = view.review === "unreviewed" ? null : undefined;
-  return { qualificationStatus: view.status, tier: view.tier, reviewStatus };
+  return {
+    qualificationStatus: view.status,
+    tier: view.tier,
+    reviewStatus,
+    outreachStatus: view.outreach,
+  };
 }
 
 /**

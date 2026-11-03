@@ -6,7 +6,7 @@ import type { LinkedinWebhook } from "@whytide/providers";
 import { handleWebhook } from "../domain/status.ts";
 
 export const webhooks = {
-  /** The vendors' account webhooks are small JSON documents; parseWebhook itself has no limit. */
+  /** Vendors' webhooks are small JSON, a message's text included; parseWebhook has no limit. */
   bodyLimit: 64 * 1024,
   receive: (input: { readonly provider: string } & LinkedinWebhook): Promise<void> =>
     handleWebhook(input.provider, { headers: input.headers, rawBody: input.rawBody }),

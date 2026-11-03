@@ -4,7 +4,11 @@
 // now with the cheap drops, a profile read per candidate left and the processing; then the hand-off
 // through the worker host with qualification loaded: signals.person_found's ids start qualification's
 // batch, which scores them on the LLM fake. linkedin's clock is a working Wednesday at 10:00 UTC. A
-// profile the provider cannot read is skipped, and three in a row end the run (fix-profile-skip).
+// profile the provider cannot read is skipped, and three in a row end the run (fix-profile-skip);
+// within the hour linkedin's third error ends it first, the account paused (beta-p6-020); a stop
+// thrown after a profile read's reservation ends it at that read (beta-p6-040).
+// Each profile read costs a credit of signals.engager, committed when the profile came and released
+// otherwise; a candidate dropped before its read costs nothing (beta-p1-090).
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -112,8 +116,8 @@ function engager(slug: string, at: number, profile?: Record<string, string>, ext
   };
 }
 
-/** A workspace of the organization "Acme Labs" with `allowance` credits, the ICP and both prices, a connected account and a source on a post the fake seeds. */
-async function sourceOf(seeded: Engager[], allowance = 10) {
+/** A workspace of the organization "Acme Labs" with `allowance` credits, the ICP and the prices, a connected account and a source on a post the fake seeds. */
+async function sourceOf(seeded: Engager[], allowance = 100) {
   const writer = asRole("billing_writer");
   const price = (action: string, credits: number, unit: string) =>
     writer.priceListEntry.createMany({
@@ -123,6 +127,7 @@ async function sourceOf(seeded: Engager[], allowance = 10) {
       },
       skipDuplicates: true,
     });
+  await price("signals.engager", 1, "engager");
   await price("signals.engager_read", 1, "engagers_30");
   await price("qualification.assessment", 0.2, "lead");
   const [tenant] = await tenancy.createTwoWorkspaces();
@@ -210,6 +215,14 @@ async function stateOf(source: Source, runId: string) {
     outbox: (name: string) => db().outboxEntry.findMany({ where: { ...where, eventName: name } }),
   };
 }
+/** The run's engager credits, each `[credits, status]`, oldest first: one per profile read. */
+async function creditsOf(runId: string) {
+  const usage = await db().creditUsage.findMany({
+    where: { action: "signals.engager", idempotencyKey: { startsWith: `sigprof:${runId}:` } },
+    orderBy: { id: "asc" },
+  });
+  return usage.map(({ credits, status }) => [credits.toFixed(), status]);
+}
 async function until<T>(read: () => Promise<T | null | undefined>): Promise<T> {
   const deadline = Date.now() + 30_000;
   for (;;) {
@@ -295,6 +308,8 @@ test("twenty staged: two own staff, three hashed, five filtered and ten kept; te
     where: { workspaceId: source.workspaceId, kind: "read_profile", outcome: "ok" },
   });
   assert.equal(profileReads, 15);
+  // A credit per profile read, the filtered five's too; the own staff and the hashed, none.
+  assert.deepEqual(await creditsOf(result.runId), Array(15).fill(["1", "committed"]));
   // No table holds a rejected candidate's name, URL or headline.
   const rejected = [...own, ...hashed, ...filtered].flatMap((e) => [
     e.name,
@@ -353,6 +368,7 @@ test("a known person engaging again gets a second event, no second lead and a re
   assert.deepEqual(before.counts, {
     ...{ pages: 1, read: 2, staged: 2, created: 1, dropped_company: 1, profiles_read: 1 },
   });
+  assert.deepEqual(await creditsOf(first.runId), [["1", "committed"]]);
   const [lead] = before.leads;
   const again = { reaction: "comment", commentText: "Same here", engagedAt: new Date() } as const;
   const comment: Engager = { ...like, ...again };
@@ -370,6 +386,7 @@ test("a known person engaging again gets a second event, no second lead and a re
       attached: 1,
     },
   });
+  assert.deepEqual(await creditsOf(second.runId), [["1", "committed"]]);
   assert.deepEqual(
     after.persons.map((person) => person.id),
     [lead?.personId],
@@ -415,6 +432,9 @@ test("the cap reached between profile reads: the profiles read are processed bef
   // The page and one profile read on Wednesday: that one's person exists before the day rolls.
   const where = { workspaceId: source.workspaceId };
   await until(async () => ((await db().person.count({ where })) === 1 ? true : undefined));
+  // The next candidate's credit comes after its slot: none is held through the wait.
+  const held = await db().creditUsage.count({ where: { ...where, status: "reserved" } });
+  assert.equal(held, 0);
   linkedin.useClock(() => THURSDAY);
   const done = await pending;
   assert.equal(done.status, "done");
@@ -425,12 +445,14 @@ test("the cap reached between profile reads: the profiles read are processed bef
   const found = await state.outbox("signals.person_found");
   const sizes = found.map((entry) => (entry.payload as { personIds: string[] }).personIds.length);
   assert.deepEqual(sizes.sort(), [1, 2]);
+  assert.deepEqual(await creditsOf(done.runId), Array(3).fill(["1", "committed"]));
   linkedin.useClock(undefined);
 });
 
-test("a run refused its next block processes the pages it read and paid for and keeps the watermark; the next run reads and pays for them again, drops what the first processed before any profile read, and processes the older engagers", async () => {
+test("a run refused a candidate's credit releases its read, processes the profiles it read and paid for and keeps the watermark; the next run reads the pages again for nothing, drops what the first processed before any profile read, and reads the rest", async () => {
   linkedin.useClock(() => WEDNESDAY);
-  // Newest first: two kept and one filtered among the first 100 engagers, two kept among the last 30.
+  // Newest first: two kept and one filtered among the first 100 engagers, two kept among the last 30;
+  // the staff are dropped before any read. Four credits pay for the first four reads.
   const seeded = [...Array(130).keys()].map((n) => {
     if (n < 2 || n >= 128) return engager(`paid-${n}`, n, {});
     if (n === 2) return engager(`filtered-${n}`, n, { title: "Barista" });
@@ -441,10 +463,14 @@ test("a run refused its next block processes the pages it read and paid for and 
   assert.deepEqual(failed, { runId: failed.runId, status: "failed", code: "insufficient_credits" });
   const first = await stateOf(source, failed.runId);
   assert.deepEqual(first.counts, {
-    ...{ pages: 4, read: 100, staged: 100, created: 2, dropped_own: 97 },
-    ...{ dropped_filtered: 1, profiles_read: 3 },
+    ...{ pages: 6, read: 130, staged: 130, created: 3, dropped_own: 125 },
+    ...{ dropped_filtered: 1, profiles_read: 4 },
   });
-  assert.deepEqual([first.persons.length, first.candidates], [2, 0]);
+  assert.deepEqual([first.persons.length, first.candidates, first.raw], [3, 0, 0]);
+  assert.deepEqual(await creditsOf(failed.runId), Array(4).fill(["1", "committed"]));
+  // Six pages and four profiles read; the fifth candidate's slot released.
+  const { reads } = await readsOf(source);
+  assert.deepEqual(reads, [...Array(10).fill([1, 1, "committed"]), [1, null, "released"]]);
   const kept = await db().signalSource.findUniqueOrThrow({ where: { id: source.sourceId } });
   assert.equal(kept.watermark, null);
 
@@ -453,8 +479,8 @@ test("a run refused its next block processes the pages it read and paid for and 
   assert.equal(done.status, "done");
   const second = await stateOf(source, done.runId);
   assert.deepEqual(second.counts, {
-    ...{ pages: 6, read: 130, staged: 130, created: 2, dropped_own: 125 },
-    ...{ dropped_hashed: 1, dropped_known: 2, profiles_read: 2 },
+    ...{ pages: 6, read: 130, staged: 130, created: 1, dropped_own: 125 },
+    ...{ dropped_hashed: 1, dropped_known: 3, profiles_read: 1 },
   });
   assert.deepEqual([second.persons.length, second.events.length], [4, 4]);
   const hashes = await db().personHash.findMany({ where: { workspaceId: source.workspaceId } });
@@ -466,10 +492,10 @@ test("a run refused its next block processes the pages it read and paid for and 
     where: { workspaceId: source.workspaceId, kind: "read_profile", outcome: "ok" },
   });
   assert.equal(profileReads, 5);
-  // The 130 read again are paid again: 4 credits on the first block, 1 on the second.
-  const usage = await db().creditUsage.findMany({ where: { subjectRef: done.runId } });
-  const paid = usage.filter((row) => row.status === "committed").map((row) => Number(row.credits));
-  assert.deepEqual(paid.sort(), [1, 4]);
+  // The 130 read again cost nothing: one credit, for the one profile read.
+  assert.deepEqual(await creditsOf(done.runId), [["1", "committed"]]);
+  const blocks = await db().creditUsage.count({ where: { action: "signals.engager_read" } });
+  assert.equal(blocks, 0);
   const moved = await db().signalSource.findUniqueOrThrow({ where: { id: source.sourceId } });
   assert.deepEqual(moved.watermark, { engagedAt: seeded[0]?.engagedAt.toISOString() });
   linkedin.useClock(undefined);
@@ -489,23 +515,79 @@ test("a profile the provider cannot read, in the middle: its read settled as mad
   assert.deepEqual(reads, Array(4).fill([1, 1, "committed"]));
   const failed = Array(3).fill("linkedin_provider_error");
   assert.deepEqual(outcomes, ["reserved", "ok", "reserved", ...failed, "reserved", "ok"]);
+  assert.deepEqual(await creditsOf(done.runId), [
+    ["1", "committed"],
+    ["1", "released"],
+    ["1", "committed"],
+  ]);
   linkedin.useClock(undefined);
 });
 
-test("three profiles in a row the provider cannot read stop the reading: the profiles read before them are leads, the run fails linkedin_provider_error and keeps the watermark; a profile read between two resets the count", async () => {
+test("profiles the provider cannot read stop the reading at the third within the hour: its first failed attempt pauses the account until its next working day (linkedin's third error, distinct calls) and its next attempt is refused linkedin_rate_limited before the call; the profiles read before are leads, the run fails with that code and keeps the watermark", async () => {
   linkedin.useClock(() => WEDNESDAY);
   const source = await sourceOf([...Array(8).keys()].map((n) => engager(`outage-${n}`, n, {})));
-  // Read 3 between two unreadable ones resets the count; reads 4 to 6 stop it; 7 is never read.
+  // Reads 1 and 2 fail, each one call of three attempts; read 3 resets the count in a row; read 4's
+  // first attempt is the third call failed within the hour, which pauses the account, so that its
+  // second attempt is refused before the call; 5 to 7 are never read.
   const failed = await run(source, failingReads([1, 2, 4, 5, 6]));
-  const code = "linkedin_provider_error";
+  const code = "linkedin_rate_limited";
   assert.deepEqual(failed, { runId: failed.runId, status: "failed", code });
   const state = await stateOf(source, failed.runId);
   assert.deepEqual(state.counts, {
-    ...{ pages: 1, read: 8, staged: 8, created: 2, profiles_read: 2, dropped_unread: 5 },
+    ...{ pages: 1, read: 8, staged: 8, created: 2, profiles_read: 2, dropped_unread: 2 },
   });
   assert.deepEqual([state.leads.length, state.candidates, state.raw], [2, 0, 0]);
-  const { reads } = await readsOf(source);
-  assert.deepEqual(reads, Array(8).fill([1, 1, "committed"]));
+  const { reads, outcomes } = await readsOf(source);
+  assert.deepEqual(reads, Array(6).fill([1, 1, "committed"]));
+  const three = Array(3).fill("linkedin_provider_error");
+  assert.deepEqual(outcomes, [
+    ...["reserved", "ok", "reserved", ...three, "reserved", ...three],
+    ...["reserved", "ok", "reserved", "linkedin_provider_error"],
+  ]);
+  const account = await db().senderAccount.findUniqueOrThrow({ where: { id: source.accountId } });
+  assert.ok(account.retryAt !== null && account.retryAt > WEDNESDAY, "paused");
+  const events = await db().senderHealthEvent.findMany({ where: { senderId: source.accountId } });
+  assert.deepEqual(
+    events.map((event) => [event.trigger, event.metrics]),
+    [["rate_limit_errors", { errors: 3, windowMinutes: 60 }]],
+  );
+  // Reads 0 and 3 paid, the three unreadable released, 5 to 7 never reserved.
+  const paid = (n: number) => (n === 0 || n === 3 ? "committed" : "released");
+  const credits = [0, 1, 2, 3, 4].map((n) => ["1", paid(n)]);
+  assert.deepEqual(await creditsOf(failed.runId), credits);
+  const kept = await db().signalSource.findUniqueOrThrow({ where: { id: source.sourceId } });
+  assert.equal(kept.watermark, null);
+  linkedin.useClock(undefined);
+});
+
+test("a stop thrown between the last candidate's reservation and its profile read: the read refused account_stopped before its call, settled as made with its credit released; the profiles read before are leads, the run fails with that code and keeps the watermark (beta-p6-040)", async () => {
+  linkedin.useClock(() => WEDNESDAY);
+  const source = await sourceOf([0, 1, 2].map((n) => engager(`stopped-${n}`, n, {})));
+  const reads: string[] = [];
+  const linkedin_read_profile = async (input: { requestKey: string }) => {
+    if (!reads.includes(input.requestKey)) reads.push(input.requestKey);
+    if (reads.indexOf(input.requestKey) === 2) {
+      await linkedin.setAccountPaused(source.accountId, "tester");
+    }
+    return activities.linkedin_read_profile?.(input);
+  };
+  const failed = await run(source, { linkedin_read_profile });
+  const code = "account_stopped";
+  assert.deepEqual(failed, { runId: failed.runId, status: "failed", code });
+  const state = await stateOf(source, failed.runId);
+  assert.deepEqual(state.counts, {
+    ...{ pages: 1, read: 3, staged: 3, created: 2, profiles_read: 2 },
+  });
+  assert.deepEqual([state.leads.length, state.candidates, state.raw], [2, 0, 0]);
+  // The page and the three profile reads settled as made; the stopped one made no call, so no row.
+  const { reads: slots, outcomes } = await readsOf(source);
+  assert.deepEqual(slots, Array(4).fill([1, 1, "committed"]));
+  assert.deepEqual(outcomes, ["reserved", "ok", "reserved", "ok", "reserved"]);
+  assert.deepEqual(await creditsOf(failed.runId), [
+    ["1", "committed"],
+    ["1", "committed"],
+    ["1", "released"],
+  ]);
   const kept = await db().signalSource.findUniqueOrThrow({ where: { id: source.sourceId } });
   assert.equal(kept.watermark, null);
   linkedin.useClock(undefined);

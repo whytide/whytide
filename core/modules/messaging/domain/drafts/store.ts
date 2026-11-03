@@ -1,16 +1,27 @@
 // The drafts' commands and queries (README.md "Routes", docs/flows.md), in the caller's tenant run,
 // on the tenant client alone: a requested draft and its event, the reads, a member's edit, a
 // regeneration, the workflow's failure mark and the person's erasure; writeDraft writes the rest
-// (write.ts). A draft is `drafting` only until its writer ends, and never again.
+// (write.ts). A draft is `drafting` only until its writer ends, and never again. The routes read
+// and change a lead's drafts only: a sequence step's (step.ts) changes through approvals' path.
 import { errors as contactsErrors, getLead } from "@whytide/contacts";
 import { outboxWriter, tenantClient } from "@whytide/db";
-import { AppError, currentTenant, isAppError, newId, publish } from "@whytide/platform";
+import {
+  AppError,
+  currentTenant,
+  isAppError,
+  newId,
+  type OutboxWriter,
+  publish,
+} from "@whytide/platform";
 import { z } from "zod";
 import { errors } from "../../errors.ts";
 import { events } from "../../events.ts";
 import { ids } from "../../ids.ts";
+import type { DRAFT_KINDS } from "../../schemas/drafts.ts";
 import { CHANNELS, type Channel } from "../../schemas/writer.ts";
+import { requirePassingText } from "../gates/check-text.ts";
 import { hardLimitOf } from "../gates/index.ts";
+import type { StepDraftEnd } from "./constants.ts";
 import type { DraftStatus } from "./write.ts";
 
 /** A draft as the routes read it (schemas/drafts.ts); the JSON columns as stored. */
@@ -18,6 +29,7 @@ export type Draft = {
   readonly id: string;
   readonly personId: string;
   readonly channel: Channel;
+  readonly kind: (typeof DRAFT_KINDS)[number];
   readonly status: DraftStatus;
   readonly plan: unknown;
   readonly text: string | null;
@@ -53,12 +65,7 @@ export async function createDraft(input: z.input<typeof createDraftInput>): Prom
  */
 export async function requestDraft(input: z.input<typeof requestDraftInput>): Promise<Draft> {
   const { personId, channel, replacesId } = parse(requestDraftInput, input);
-  await getLead(personId).catch((error: unknown) => {
-    if (isAppError(error) && error.code === contactsErrors.lead_not_found) {
-      throw new AppError(errors.dossier_lead_not_found);
-    }
-    throw error;
-  });
+  await requireLead(personId);
   const draft = await createDraft({ personId, channel });
   const { workspaceId, principal } = currentTenant();
   const payload = { workspaceId, draftId: draft.id, personId, userId: principal.userId };
@@ -78,11 +85,11 @@ export async function getDraft(draftId: string): Promise<Draft> {
   return draft;
 }
 
-/** The person's drafts, newest first; none for a person without one. */
+/** The person's lead drafts, newest first, never a step's; none for a person without one. */
 export async function listDrafts(personId: string): Promise<Draft[]> {
   if (!personId) return [];
   return tenantClient.messageDraft.findMany({
-    where: { personId },
+    where: { personId, kind: "lead_draft" },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   });
 }
@@ -90,7 +97,8 @@ export async function listDrafts(personId: string): Promise<Draft[]> {
 /**
  * The member's own text: the draft becomes `edited`, which no write or regeneration changes.
  * draft_not_editable while it is being written; messaging_input_invalid for an empty text or one
- * above the channel's hard limit (hardLimitOf).
+ * above the channel's hard limit (hardLimitOf); draft_text_refused, with the gates' issues, for a
+ * text checkText refuses (beta-p3-020): a placeholder, a red line or a colleague's signal.
  */
 export async function editDraft(draftId: string, input: { editedText: string }): Promise<Draft> {
   const { editedText } = parse(editDraftInput, input);
@@ -98,6 +106,8 @@ export async function editDraft(draftId: string, input: { editedText: string }):
   if (editedText.length > hardLimitOf(draft.channel)) {
     throw new AppError(errors.messaging_input_invalid, { details: { fields: ["editedText"] } });
   }
+  const { personId, channel, kind } = draft;
+  await requirePassingText(editedText, { personId, channel, kind });
   const data = { status: "edited" as const, editedText, editedAt: new Date() };
   return tenantClient.messageDraft.update({ where: { id: draft.id }, data });
 }
@@ -111,10 +121,46 @@ export async function regenerateDraft(draftId: string): Promise<Draft> {
   return requestDraft({ personId, channel, replacesId });
 }
 
-/** The draft `failed`, write_failed, while `drafting`: its writer failed past its attempts. */
+/**
+ * The draft `failed`, write_failed, with no text, while `drafting`: its writer failed past its
+ * attempts. A step's draft publishes messaging.step_draft_ready.
+ */
 export async function markFailed(draftId: string): Promise<void> {
-  const data = { status: "failed" as const, flagReasons: [{ code: "write_failed" }] };
-  await tenantClient.messageDraft.updateMany({ where: { id: draftId, status: "drafting" }, data });
+  const data = { status: "failed" as const, text: null, flagReasons: [{ code: "write_failed" }] };
+  const where = { id: draftId, status: "drafting" as const };
+  const select = { id: true, stepExecutionId: true } as const;
+  const ended = await tenantClient.messageDraft.updateManyAndReturn({ where, data, select });
+  await publishStepDraftEnds(
+    outboxWriter(tenantClient, currentTenant().workspaceId),
+    ended,
+    "failed",
+  );
+}
+
+/**
+ * messaging.step_draft_ready for each draft a write just ended, in the writer's transaction: a
+ * sequence step's only, which names its step execution; a lead's draft publishes nothing.
+ */
+export async function publishStepDraftEnds(
+  outbox: OutboxWriter,
+  ended: readonly { readonly id: string; readonly stepExecutionId: string | null }[],
+  status: StepDraftEnd,
+): Promise<void> {
+  for (const { id, stepExecutionId } of ended) {
+    if (stepExecutionId === null) continue;
+    const payload = { draftId: id, stepExecutionId, status };
+    await publish(outbox, events["messaging.step_draft_ready"], payload);
+  }
+}
+
+/** The person's lead exists in this workspace, or dossier_lead_not_found. */
+export async function requireLead(personId: string): Promise<void> {
+  await getLead(personId).catch((error: unknown) => {
+    if (isAppError(error) && error.code === contactsErrors.lead_not_found) {
+      throw new AppError(errors.dossier_lead_not_found);
+    }
+    throw error;
+  });
 }
 
 /**
@@ -139,9 +185,13 @@ export function parse<T extends z.ZodType>(schema: T, input: unknown): z.output<
   throw new AppError(errors.messaging_input_invalid, { details: { fields } });
 }
 
-/** The draft, once its writer ended: a `drafting` one never is again. */
+/**
+ * A lead's draft, once its writer ended: a `drafting` one never is again. A sequence step's draft
+ * never: only approvals' path changes it (step_draft_not_editable).
+ */
 async function editable(draftId: string): Promise<Draft> {
   const draft = await getDraft(draftId);
+  if (draft.kind === "outbound_step") throw new AppError(errors.step_draft_not_editable);
   if (draft.status === "drafting") throw new AppError(errors.draft_not_editable);
   return draft;
 }

@@ -4,7 +4,7 @@ The wallet, one per organization: the plan it is on, the monthly grants and the 
 
 - **Owns:** `plans`, `subscriptions`, `credit_grants`, `credit_usage`, `credit_balances` and `price_list` in `core/packages/db/prisma/schema/credits.prisma`, with the grants, the balance triggers and `credits_seed_self_hosted` in the migration `credits_initial`, and the CHECKs, `app`'s column grant and the settle-once trigger in `credits_reserve` ([docs/data.md](docs/data.md)).
 - **Public interface:** `index.ts`, below.
-- **Depends on:** `platform`, `db`, `tenancy` (`findWorkspace` and its event); for the cost counter, `contacts` (`getLead`), `qualification` (`countQualified`) and `signals` (`personReads`, its price's action).
+- **Depends on:** `platform`, `db`, `tenancy` (`findWorkspace` and its event); for the cost counter, `contacts` (`getLead`), `qualification` (`countQualified`) and `signals` (`personReads`, its prices' actions).
 - **Reviewers:** the owners of this module; two reviews ([security §8](../../../docs/rules/security.md#8-conduct)).
 
 ## Public interface
@@ -23,7 +23,7 @@ The registries: `ids` (`plan`, `sub`, `grant`, `usage`, `bal`, `pl`), `settings`
 
 What a week and a lead cost (alpha-p10-010; [docs/concepts.md](docs/concepts.md) "Costs"), in `domain/costs/`, read in the request's run:
 - `weeklyCosts({ workspaceId, week })`, `GET …/credits/costs?week=2026-W44` (the current week without `week`): the ISO week in UTC, Monday 00:00 to the next Monday excluded; `credits`, the usage committed among the rows created in the week, `byAction`; `money`, the `unit_cost` of the cost events created in it, `byVendor`; `qualified`, qualification's `countQualified`; `costPer100Qualified`, both × 100 ÷ `qualified`, null for none. A week the year lacks is `credits_input_invalid` (400), `details.fields` `["week"]`.
-- `leadCost(personId)`, `GET …/credits/leads/{personId}/cost`: the committed usage and the cost events whose subject is the person, and its share of each signal run that read it, signals' `personReads`: the run's committed `signals.engager_read` credits × the person's candidates ÷ the candidates the run staged; `byFeature` by module. A person with no lead in the workspace, another workspace's too, is contacts' `lead_not_found` (404), never a zero.
+- `leadCost(personId)`, `GET …/credits/leads/{personId}/cost`: the committed usage and the cost events whose subject is the person, and what the signal runs that found it charged, signals' `personReads`, both under `signals`: its share of each run's committed `signals.engager_read`, a run's before beta-p1-090, its credits × the person's candidates ÷ the candidates the run staged; and the committed `signals.engager` whose subject is one of the person's candidates, the profile reads of a run since; `byFeature` by module. A lead found by runs of both kinds shows both. A person with no lead in the workspace, another workspace's too, is contacts' `lead_not_found` (404), never a zero.
 
 Amounts are decimal strings, summed exactly (`domain/costs/decimal.ts`), a share cut at the 30th decimal. LinkedIn reads write no cost event: their money is not counted.
 

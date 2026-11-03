@@ -1,0 +1,24 @@
+# inbox's routes (core/modules/inbox/README.md "API"): a member's session, inbox.read to read the
+# threads and a thread, inbox.label to label a reply. Only the conversations the platform started
+# are there, and no route sends. The label's PUT sets a state, so it takes no Idempotency-Key; it
+# sends the cookie, so it sends Origin: {{appOrigin}} too. `threadId` is a thread of your workspace
+# and `messageId` a reply in it: put them in http-client.private.env.json with your workspaceId.
+
+### GET /v1/workspaces/{workspaceId}/inbox/threads: the threads, newest first, 50 a page at most, each with its lead, the time of the last message, who wrote last and the replies to label; nextCursor for the next page
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/threads?limit=20
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/inbox/threads/{id}: the thread, its lead and its messages oldest first, each reply with its label or null; 404 thread_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/threads/{{threadId}}
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PUT /v1/workspaces/{workspaceId}/inbox/messages/{id}/label: labels the reply Positive or Not positive as you, or changes its label; 200 with the label; 409 message_not_inbound for a message the account sent, 404 inbox_message_not_found
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/messages/{{messageId}}/label
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "label": "positive" }

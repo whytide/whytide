@@ -2,6 +2,7 @@
   { "name": "lint" },
   { "name": "typecheck" },
   { "name": "test", "serial": true },
+  { "name": "test:safety" },
   { "name": "test:contract" },
   { "name": "test:tenancy" },
   { "name": "test:roles" },

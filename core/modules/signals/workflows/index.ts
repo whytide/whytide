@@ -26,8 +26,10 @@ import {
   type RunEnd,
   readPageFile,
   reserveCredits,
+  reserveEngagerCredit,
   reserveRead,
   settleCredits,
+  settleEngagerCredit,
   settleRead,
   stagePage,
   startRun,
@@ -72,6 +74,7 @@ export const activities = {
     input: step.extend({ reservationId: id, made: z.boolean() }),
     run: (input, context: Tx) => context.tenant(() => settleRead(input.reservationId, input.made)),
   }),
+  /** A run started before beta-p1-090: a block of credits for its pages' engagers. */
   signals_reserve_credits: defineActivity({
     kind: "db",
     input: step.extend({ attempt: z.int().min(1), quantity: z.int().min(1), billed: count }),
@@ -83,6 +86,20 @@ export const activities = {
     input: step.extend({ usageId: id, read: count, billed: count }),
     run: ({ usageId, read, billed }, context: Tx) =>
       context.tenant(() => settleCredits(usageId, read, billed)),
+  }),
+  /** A candidate's credit for its profile read, its `n`th reservation in the run (beta-p1-090). */
+  signals_reserve_engager_credit: defineActivity({
+    kind: "db",
+    input: step.extend({ candidateId: id, n: z.int().min(1) }),
+    run: (input, context: Tx) =>
+      context.tenant(() => reserveEngagerCredit(input, input.candidateId, input.n)),
+  }),
+  /** The candidate's credit: committed when the read returned the profile, released otherwise. */
+  signals_settle_engager_credit: defineActivity({
+    kind: "db",
+    input: step.extend({ usageId: id, read: z.boolean() }),
+    run: ({ usageId, read }, context: Tx) =>
+      context.tenant(() => settleEngagerCredit(usageId, read)),
   }),
   signals_stage_page: defineActivity({
     kind: "db",

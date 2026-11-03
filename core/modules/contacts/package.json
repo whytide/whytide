@@ -20,6 +20,7 @@
     "typecheck": "pnpm run generate && tsc -b",
     "lint": "node ../../../tools/lint/lint.ts .",
     "test": "pnpm run build && APP_ENV=test node --test tests/*.test.ts",
+    "test:safety": "pnpm run build && APP_ENV=test node --test \"tests/safety/*.test.ts\"",
     "test:tenancy": "pnpm run build && APP_ENV=test node --test tests/tenancy.test.ts"
   },
   "dependencies": {

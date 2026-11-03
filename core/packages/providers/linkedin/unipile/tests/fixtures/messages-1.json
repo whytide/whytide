@@ -1,0 +1,30 @@
+{
+  "object": "MessageList",
+  "items": [
+    {
+      "object": "Message",
+      "id": "fixture-message-chidi-2",
+      "chat_id": "fixture-chat-chidi",
+      "text": "fixture-body-marker: message 2.",
+      "timestamp": "2026-10-02T11:00:00.000Z",
+      "is_sender": 0
+    },
+    {
+      "object": "Message",
+      "id": "fixture-message-chidi-1",
+      "chat_id": "fixture-chat-chidi",
+      "text": "fixture-body-marker: message 1.",
+      "timestamp": "2026-10-02T10:00:00.000Z",
+      "is_sender": 1
+    },
+    {
+      "object": "Message",
+      "id": "fixture-message-chidi-0",
+      "chat_id": "fixture-chat-chidi",
+      "text": "fixture-body-marker: message 0.",
+      "timestamp": "2026-09-01T10:00:00.000Z",
+      "is_sender": 1
+    }
+  ],
+  "cursor": "messages-page-2"
+}

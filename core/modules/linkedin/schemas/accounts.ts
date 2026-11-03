@@ -12,12 +12,18 @@ const workingHours = z.strictObject({
   days: z.array(z.int()).max(7),
 });
 const status = z.enum(["pending", "connected", "credentials_required", "error", "disconnected"]);
+/** Who holds a stop: the tester, through the screen, or the operator, through the command. */
+export const switchSource = z.enum(["tester", "operator"]);
 
 export const connectBody = z.strictObject({
   /** The browser's IANA zone, `Intl.DateTimeFormat().resolvedOptions().timeZone`. */
   timeZone,
   /** The risk disclosure read and accepted; anything but true is disclosure_required. */
   acknowledged: z.boolean(),
+  /** The disclosure's version the screen showed; anything but DISCLOSURE_VERSION is disclosure_required. */
+  disclosureVersion: z.int().optional(),
+  /** The account is the user's own personal one; anything but true is personal_account_required. */
+  personalAccount: z.boolean().optional(),
 });
 export type ConnectBody = z.infer<typeof connectBody>;
 export const connectResponse = z.strictObject({ url: z.url() });
@@ -37,6 +43,14 @@ export type UpdateAccountBody = z.infer<typeof updateAccountBody>;
 
 export const accountParams = z.strictObject({ id: z.string().min(1).max(64) });
 
+export const disclosureBody = z.strictObject({
+  /** The disclosure's version the screen showed: DISCLOSURE_VERSION, else disclosure_version_invalid. */
+  version: z.int(),
+  /** The account is the owner's own personal one: true, else personal_account_required. */
+  personalAccount: z.boolean(),
+});
+export type DisclosureBody = z.infer<typeof disclosureBody>;
+
 export const accountResponse = z.strictObject({
   id: z.string(),
   label: z.string(),
@@ -46,8 +60,16 @@ export const accountResponse = z.strictObject({
   dailyReadCap: z.int(),
   /** The account is the signed-in user's own. */
   mine: z.boolean(),
-  /** The signed-in user holds linkedin.manage: may change, refresh and disconnect the account. */
+  /** The signed-in user holds linkedin.manage: may change, refresh, pause and disconnect the account. */
   canManage: z.boolean(),
+  /** Paused (its kill switch): no LinkedIn action through it, reads included. */
+  paused: z.boolean(),
+  /** Who paused it, null while it is not paused: only the operator lifts the operator's pause. */
+  pausedBy: switchSource.nullable(),
+  /** The risk disclosure's version its owner accepted: 1, alpha's, covers reads only. */
+  disclosureVersion: z.int(),
+  /** No send until its owner accepts the current disclosure with the personal-account confirmation. */
+  sendingDisclosureRequired: z.boolean(),
 });
 export type AccountResponse = z.infer<typeof accountResponse>;
 export const accountListResponse = z.strictObject({ accounts: z.array(accountResponse) });

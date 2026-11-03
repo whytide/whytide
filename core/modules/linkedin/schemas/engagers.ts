@@ -21,9 +21,20 @@ export type EngagersPage = {
   readonly count: number;
   readonly nextCursor: string | null;
 };
-/** No page, and no retry: the account is not connected, or the post is gone or out of its sight. */
+/**
+ * No page, and no retry: the account is not connected, or the post is gone or out of its sight; or,
+ * before the call, a kill switch holds, or the account is paused or held by its retry_at
+ * (workflows/index.ts beforeRead).
+ */
 export type EngagersRefused = {
-  readonly refused: "linkedin_account_disconnected" | "linkedin_not_found";
+  readonly refused:
+    | "linkedin_account_disconnected"
+    | "linkedin_not_found"
+    | "account_paused"
+    | "linkedin_rate_limited"
+    | "platform_stopped"
+    | "workspace_stopped"
+    | "account_stopped";
 };
 
 /** The page file: the port's engagers as it answered them, newest first, `engagedAt` in ISO. */

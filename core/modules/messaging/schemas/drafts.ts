@@ -1,6 +1,7 @@
 // The draft routes' shapes (README.md "Routes"; core/apps/api/README.md "OpenAPI and the client"):
 // the path parameters, the two bodies, and a draft as the lead page reads it (alpha-p9-030): its
-// status, plan, texts, generation record and gate results. Its texts are the lead's personal data.
+// kind, status, plan, texts, generation record and gate results. Its texts are the lead's personal
+// data. A sequence step's draft (beta-p3-010) reads back the same way, `approved` included.
 import { z } from "zod";
 import { ANGLES, CHANNELS, CTAS, GATES, gateIssue } from "./writer.ts";
 
@@ -10,16 +11,29 @@ export const draftParams = z.strictObject({ id });
 
 export const createDraftBody = z.strictObject({ channel: z.enum(CHANNELS) });
 export type CreateDraftBody = z.output<typeof createDraftBody>;
-/** The member's own text; the channel's limit is the draft's (domain/drafts/store.ts). */
+/**
+ * The member's own text; the channel's limit is the draft's, and the text, trimmed, passes
+ * checkText's gates (domain/drafts/store.ts, domain/gates/check-text.ts; beta-p3-020).
+ */
 export const editDraftBody = z.strictObject({ editedText: z.string().min(1).max(4_000) });
 export type EditDraftBody = z.output<typeof editDraftBody>;
 
-export const DRAFT_STATUSES = ["drafting", "ready", "flagged", "failed", "edited"] as const;
+export const DRAFT_STATUSES = [
+  "drafting",
+  "ready",
+  "flagged",
+  "failed",
+  "edited",
+  "approved",
+] as const;
+/** A lead's draft, alpha's panel's, or a sequence step's, which only approvals' path changes. */
+export const DRAFT_KINDS = ["lead_draft", "outbound_step"] as const;
 const time = z.iso.datetime();
 export const draftResponse = z.strictObject({
   id,
   personId: id,
   channel: z.enum(CHANNELS),
+  kind: z.enum(DRAFT_KINDS),
   status: z.enum(DRAFT_STATUSES),
   /** The planner's answer; null until it answered. */
   plan: z

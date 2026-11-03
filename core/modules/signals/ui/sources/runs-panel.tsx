@@ -116,6 +116,10 @@ export function RunsPanel({ workspaceId, source, sender }: Props) {
     linkedin_rate_limited: t("errors.linkedin_rate_limited"),
     linkedin_provider_error: t("errors.linkedin_provider_error"),
     linkedin_error_unmapped: t("errors.linkedin_error_unmapped"),
+    platform_stopped: t("errors.platform_stopped"),
+    workspace_stopped: t("errors.workspace_stopped"),
+    account_stopped: t("errors.account_stopped"),
+    account_paused: t("errors.account_paused"),
   };
   const detail = (run: Run) => {
     if (run.status === "failed") {

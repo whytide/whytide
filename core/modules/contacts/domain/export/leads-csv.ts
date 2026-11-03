@@ -6,12 +6,18 @@ import { createTranslator, loadMessages, type Translator } from "@whytide/platfo
 import { fields, type PiiClass } from "../fields.ts";
 import type { QualificationStatus, Tier } from "../lead.ts";
 import { type LeadWithPerson, listLeads } from "../leads.ts";
+import type { OutreachStatus } from "../outreach/constants.ts";
 import { type LatestReview, latestOf } from "../review/reviews.ts";
 import type { ReviewFilter } from "../review/rules.ts";
 import { csvLine } from "./csv.ts";
 
 /** The view the lead list shows: its filters; the order is the list's by fit. */
-export type LeadsView = { status?: QualificationStatus; tier?: Tier; review?: ReviewFilter };
+export type LeadsView = {
+  status?: QualificationStatus;
+  tier?: Tier;
+  review?: ReviewFilter;
+  outreach?: OutreachStatus;
+};
 type Row = { readonly lead: LeadWithPerson; readonly review: LatestReview | undefined };
 type Table = keyof typeof fields;
 /** A column of contacts' tables, `table.column`, as fields.ts classes it. */

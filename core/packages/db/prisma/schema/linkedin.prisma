@@ -25,10 +25,48 @@ model SenderAccount {
   timeZone                 String              @map("time_zone")
   /// `{ start: "08:30", end: "18:00", days: [1, 2, 3, 4, 5] }`, local times, ISO days (1 is Monday).
   workingHours             Json                @map("working_hours")
+  /// 1 to 100 (a CHECK of linkedin_send_quotas, READS_PER_DAY_MAX).
   dailyReadCap             Int                 @default(100) @map("daily_read_cap")
   disclosureAcknowledgedAt DateTime            @map("disclosure_acknowledged_at") @db.Timestamptz()
+  /// The risk disclosure's version the owner accepted: 1, alpha's, reads only; DISCLOSURE_VERSION
+  /// for sending. 1 or more: a hand-written CHECK of the migration linkedin_sending_disclosure.
+  disclosureVersion        Int                 @default(1) @map("disclosure_version")
+  /// When the owner confirmed the LinkedIn account is their own personal one; null: not confirmed.
+  personalAccountConfirmedAt DateTime?         @map("personal_account_confirmed_at") @db.Timestamptz()
+  /// HMAC-SHA-256 of `linkedin:<member id>` under LINKEDIN_HASH_KEY, hex, never the id. One connected
+  /// row per LinkedIn account across workspaces: that migration's hand-written partial unique index.
+  memberIdHash             String?             @map("member_id_hash")
+  /// When the refresh after the latest pairing read the member id; null since the pairing: the hash
+  /// may be the previous LinkedIn account's, so the account sends nothing until then.
+  memberIdCheckedAt        DateTime?           @map("member_id_checked_at") @db.Timestamptz()
   connectedAt              DateTime?           @map("connected_at") @db.Timestamptz()
   disconnectedAt           DateTime?           @map("disconnected_at") @db.Timestamptz()
+  /// The connection requests a day the limit is drawn from, 5 to 15; the ramp raises it (beta-p1-080).
+  inviteTarget             Int                 @default(5) @map("invite_target")
+  /// The messages a day the limit is drawn from, 10 to 40.
+  messageTarget            Int                 @default(10) @map("message_target")
+  /// The quota day the ramp last moved the targets, `YYYY-MM-DD`; written by beta-p1-080.
+  rampUpdatedOn            String?             @map("ramp_updated_on")
+  /// No send and no read before this instant: the provider's rate limit or an unknown outcome
+  /// (linkedin_send_reservations; written by beta-p1-050).
+  retryAt                  DateTime?           @map("retry_at") @db.Timestamptz()
+  /// The account's kill switch: no LinkedIn action through it, reads included (linkedin_kill_switches,
+  /// whose CHECK sets the source exactly while it is on).
+  killSwitch               Boolean               @default(false) @map("kill_switch")
+  killSwitchSource         LinkedinSwitchSource? @map("kill_switch_source")
+  /// The account's health (beta-p6-010, migration linkedin_health), changed only by applyHealth
+  /// (core/modules/linkedin domain/health/apply.ts), in the transaction of its cause.
+  healthState              SenderHealthState     @default(healthy) @map("health_state")
+  healthChangedAt          DateTime?             @map("health_changed_at") @db.Timestamptz()
+  /// The cool-down's end, set exactly while `restricted` or `checkpoint` (a CHECK keeps it null
+  /// otherwise); only the owner's resume lifts it (beta-p6-040).
+  pausedUntil              DateTime?             @map("paused_until") @db.Timestamptz()
+  /// The invitations pending at the vendor, as the day's check counted them, plus one for each invite
+  /// committed since; null until the first check and after a replacement (beta-p4-070). 0 or more: a
+  /// hand-written CHECK of the migration linkedin_pending_invites.
+  pendingInvites           Int?                  @map("pending_invites")
+  /// When the day's check counted them; older than 48 hours, invites stop (pending_invites_unknown).
+  pendingInvitesCheckedAt  DateTime?             @map("pending_invites_checked_at") @db.Timestamptz()
 
   @@unique([workspaceId, ownerUserId])
   @@unique([workspaceId, providerAccountRefHash])
@@ -50,17 +88,43 @@ enum SenderAccountStatus {
 // The read quota and the action log (core/modules/linkedin docs/data.md), alpha-p7-040; migration
 // 20261022191500_linkedin_quota_and_log, whose hand-written CHECKs hold the counts at zero or more.
 // The day's usage row is the lock reservations queue on (SELECT … FOR UPDATE); a reservation is a row
-// of its own, settled once, its hour swept lazily by the next reservation of the day.
+// of its own, settled once, its hour swept lazily by the next reservation of the day. The send
+// quotas (beta-p1-020, migration linkedin_send_quotas) widen the row with a limit and a counter pair
+// per action type, drawn once when the row is made; its hand-written CHECKs hold the hard maximums
+// (domain/quota/constants.ts) and the targets' bounds on sender_accounts. The send reservations
+// (beta-p1-030, migration linkedin_send_reservations) give a reservation its action type, the step's
+// key and the note flag, with hand-written SQL: a CHECK that the key is set exactly for a send, the
+// partial unique index that keeps one live reservation per key, and on the action log a CHECK of
+// the outcome against ACTION_OUTCOMES (schemas/quota.ts) and the REVOKE of UPDATE from app; the day
+// row's zone, backfilled, and the trigger that gives it to a row the previous release inserts.
 
 /// tenant
 model SenderQuotaUsage {
-  id              String @id
-  workspaceId     String @map("workspace_id")
-  senderAccountId String @map("sender_account_id")
+  id                   String    @id
+  workspaceId          String    @map("workspace_id")
+  senderAccountId      String    @map("sender_account_id")
   /// The date in the account's time zone, `YYYY-MM-DD`: text, as the schema lint takes no @db.Date.
-  quotaDay        String @map("quota_day")
-  readsReserved   Int    @default(0) @map("reads_reserved")
-  readsCommitted  Int    @default(0) @map("reads_committed")
+  quotaDay             String    @map("quota_day")
+  readsReserved        Int       @default(0) @map("reads_reserved")
+  readsCommitted       Int       @default(0) @map("reads_committed")
+  /// The day's limits, drawn when the row is made: connection requests 0 to 25, messages 0 to 80.
+  inviteLimit          Int       @default(0) @map("invite_limit")
+  invitesReserved      Int       @default(0) @map("invites_reserved")
+  invitesCommitted     Int       @default(0) @map("invites_committed")
+  messageLimit         Int       @default(0) @map("message_limit")
+  messagesReserved     Int       @default(0) @map("messages_reserved")
+  messagesCommitted    Int       @default(0) @map("messages_committed")
+  withdrawalsReserved  Int       @default(0) @map("withdrawals_reserved")
+  withdrawalsCommitted Int       @default(0) @map("withdrawals_committed")
+  /// The day's reads at most, 0 to 100: the account's cap when the row is made, after the sends.
+  readAllowance        Int       @default(0) @map("read_allowance")
+  /// When the day's pending-invite check may run (beta-p4-070); null when no window was left.
+  checkAfter           DateTime? @map("check_after") @db.Timestamptz()
+  checkedAt            DateTime? @map("checked_at") @db.Timestamptz()
+  /// The account's zone when the row was made: the day lasts until it is over there too. A row
+  /// inserted without it, by the previous release during an upgrade, takes its account's zone (a
+  /// hand-written trigger of linkedin_send_reservations).
+  timeZone             String    @map("time_zone")
 
   @@unique([workspaceId, senderAccountId, quotaDay])
   @@map("sender_quota_usage")
@@ -72,16 +136,23 @@ model SenderQuotaReservation {
   workspaceId     String                       @map("workspace_id")
   senderAccountId String                       @map("sender_account_id")
   usageId         String                       @map("usage_id")
+  actionType      SenderActionType             @default(read) @map("action_type")
+  /// The step's key, a send's only (a CHECK); one reserved or committed row per key and workspace.
+  idempotencyKey  String?                      @map("idempotency_key")
+  /// An invite carrying a note: the month's note budget counts it while it is open.
+  withNote        Boolean                      @default(false) @map("with_note")
   count           Int
-  /// The reads made, set by the commit.
+  /// The actions made, set by the commit: the reads made, or 1 for a send.
   committed       Int?
   status          SenderQuotaReservationStatus @default(reserved)
   expiresAt       DateTime                     @map("expires_at") @db.Timestamptz()
   createdAt       DateTime                     @map("created_at") @db.Timestamptz()
   settledAt       DateTime?                    @map("settled_at") @db.Timestamptz()
 
-  // The sweep: the day's open reservations past their hour.
+  // The sweep: the day's open reservations past their hold.
   @@index([workspaceId, usageId, status, expiresAt])
+  // A key's reservations, whatever their status; the live one also has the partial unique index.
+  @@index([workspaceId, idempotencyKey])
   @@map("sender_quota_reservations")
 }
 
@@ -90,8 +161,19 @@ enum SenderQuotaReservationStatus {
   committed
   released
   expired
+  /// A send committed after its release or expiry while another reservation held its key: counted.
+  committed_late
 
   @@map("sender_quota_reservation_status")
+}
+
+enum SenderActionType {
+  read
+  invite
+  message
+  withdraw
+
+  @@map("sender_action_type")
 }
 
 /// tenant
@@ -100,13 +182,19 @@ model SenderActionLog {
   workspaceId     String           @map("workspace_id")
   senderAccountId String           @map("sender_account_id")
   kind            SenderActionKind
-  /// A post's URL or a person's id, never the profile URL of an unknown person. A post URL names
-  /// its author.
+  /// A post's URL, a person's id or a send's step execution (`sx_`), never the profile URL of an
+  /// unknown person. A post URL names its author.
   /// pii
   objectRef       String?          @map("object_ref")
   count           Int
-  /// `reserved`, a refusal's code, `ok` or the read's error code.
+  /// One of ACTION_OUTCOMES (a CHECK): `reserved`, a refusal's code, `ok`, a port's code or a status.
   outcome         String
+  /// An invite carrying a note.
+  withNote        Boolean          @default(false) @map("with_note")
+  /// The call the row answers, the same on each attempt of it, so that the third error counts calls,
+  /// not attempts: a signals read's file key (`raw/…`) or a send's step execution (`sx_`); null on
+  /// any other row, each its own call.
+  callRef         String?          @map("call_ref")
   at              DateTime         @db.Timestamptz()
 
   @@index([workspaceId, senderAccountId, at])
@@ -117,6 +205,224 @@ enum SenderActionKind {
   read_engagers
   read_profile
   status_check
+  invite
+  message
+  withdraw
+  send_check
+  pending_invites
+  relation_check
 
   @@map("sender_action_kind")
+}
+
+// The provider-event receiver (core/modules/linkedin docs/data.md), beta-p0-060; migration
+// 20261029111025_linkedin_event_receiver, whose hand-written SQL holds the receipts' kinds in a CHECK
+// and revokes UPDATE on them from app. An outreach row is a person an account invited or messaged
+// (beta-p1-050 writes it at each send); the receiver keeps an event only when one matches, by the
+// member's or the chat's ref at the vendor (the account's `provider` names the adapter), and sets
+// its acceptance and its last inbound message. No foreign key, as above.
+
+/// tenant
+model SenderOutreach {
+  id                    String    @id
+  workspaceId           String    @map("workspace_id")
+  senderAccountId       String    @map("sender_account_id")
+  personId              String    @map("person_id")
+  /// The person's member id at the vendor, the port's memberRef; null until known.
+  /// pii
+  providerMemberRef     String?   @map("provider_member_ref")
+  /// The account's chat with the person at the vendor, set by a send or the first inbound message.
+  providerChatRef       String?   @map("provider_chat_ref")
+  providerInvitationRef String?   @map("provider_invitation_ref")
+  invitedAt             DateTime? @map("invited_at") @db.Timestamptz()
+  /// The provider's time of the acceptance, else its detection's.
+  acceptedAt            DateTime? @map("accepted_at") @db.Timestamptz()
+  acceptedDetectedAt    DateTime? @map("accepted_detected_at") @db.Timestamptz()
+  withdrawnAt           DateTime? @map("withdrawn_at") @db.Timestamptz()
+  lastSentAt            DateTime? @map("last_sent_at") @db.Timestamptz()
+  /// The latest inbound message's time: the reply signal campaigns' gate reads (lastInboundAt).
+  lastInboundAt         DateTime? @map("last_inbound_at") @db.Timestamptz()
+  /// The step execution (campaigns' `sx_…`) whose send settled here last (beta-p1-050).
+  lastStepExecutionId   String?   @map("last_step_execution_id")
+  /// The vendor's ref of the account's last message to the person: inbox matches its echo with it.
+  lastMessageRef        String?   @map("last_message_ref")
+  /// When the day's check asked the relation of an invite no longer pending (beta-p4-070): set once
+  /// it is accepted or gone, so a declined invite is asked once.
+  relationCheckedAt     DateTime? @map("relation_checked_at") @db.Timestamptz()
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  @@unique([workspaceId, senderAccountId, personId])
+  @@index([workspaceId, senderAccountId, providerMemberRef])
+  @@index([workspaceId, senderAccountId, providerChatRef])
+  @@index([workspaceId, lastStepExecutionId])
+  @@map("sender_outreach")
+}
+
+// A global table, no person data: one row per person event kept, so a redelivery stops at it. Its
+// insert runs in the kept event's run, with the outreach change and the outbox row. app selects,
+// inserts and deletes (beta-p1-080's purge), never updates.
+model LinkedinEventReceipt {
+  id           String   @id
+  /// HMAC-SHA-256 of `event:<adapter>:<eventKey>` under LINKEDIN_HASH_KEY, hex: the provider's
+  /// event or message id, never kept (an acceptance's names a member id).
+  eventKeyHash String   @unique @map("event_key_hash")
+  /// `invite.accepted` or `message.received` (the migration's CHECK).
+  kind         String
+  receivedAt   DateTime @map("received_at") @db.Timestamptz()
+
+  @@map("linkedin_event_receipts")
+}
+
+// The kill switches and the sending gates (core/modules/linkedin docs/data.md), beta-p1-040;
+// migration 20261029141856_linkedin_kill_switches, whose hand-written SQL holds the platform row to
+// one (a CHECK on `singleton`), a stop's source to the stop (CHECKs here and on sender_accounts),
+// and revokes UPDATE and DELETE on the events, and DELETE on the platform row, from app. No row of
+// the platform reads as sending closed and nothing stopped; no row of a workspace, as not stopped.
+
+// Global, no person data: the platform's switches, one row at most.
+model LinkedinPlatformControl {
+  id                  String   @id
+  /// Always true (a CHECK) and unique: the table holds one row at most.
+  singleton           Boolean  @unique @default(true)
+  sendingOpen         Boolean  @default(false) @map("sending_open")
+  stopped             Boolean  @default(false)
+  invitesPaused       Boolean  @default(false) @map("invites_paused")
+  /// A code, the fleet breaker's (beta-p6-030); null while invites are not paused.
+  invitesPausedReason String?  @map("invites_paused_reason")
+  /// The last change's actor: a user's id, the operator's name or the system's code.
+  changedBy           String?  @map("changed_by")
+  changedAt           DateTime @map("changed_at") @db.Timestamptz()
+
+  @@map("linkedin_platform_controls")
+}
+
+/// tenant
+model LinkedinWorkspaceControl {
+  id          String                @id
+  workspaceId String                @map("workspace_id")
+  stopped     Boolean               @default(false)
+  /// Who holds the stop, set exactly while it is on (a CHECK).
+  stopSource  LinkedinSwitchSource? @map("stop_source")
+  changedBy   String?               @map("changed_by")
+  changedAt   DateTime              @map("changed_at") @db.Timestamptz()
+
+  @@unique([workspaceId])
+  @@map("linkedin_workspace_controls")
+}
+
+enum LinkedinSwitchSource {
+  tester
+  operator
+
+  @@map("linkedin_switch_source")
+}
+
+// Global and append-only (app may not update or delete), ids and codes only: one row per change of
+// a switch. `target_workspace_id` is a plain id, not `workspace_id`, so the table stays global.
+model LinkedinControlEvent {
+  id                String                   @id
+  scope             LinkedinControlScope
+  targetWorkspaceId String?                  @map("target_workspace_id")
+  senderAccountId   String?                  @map("sender_account_id")
+  control           LinkedinControl
+  /// `closed` or `open` for sending; `off` or `on` for the platform's stop and the invites' pause;
+  /// `off`, `tester` or `operator`, who holds it, for a workspace's or an account's stop.
+  fromState         String                   @map("from_state")
+  toState           String                   @map("to_state")
+  actorType         LinkedinControlActorType @map("actor_type")
+  /// A user's id, the operator's name as the command takes it, or the system's code.
+  actor             String
+  reason            String?
+  at                DateTime                 @db.Timestamptz()
+
+  @@index([targetWorkspaceId, at])
+  @@map("linkedin_control_events")
+}
+
+enum LinkedinControlScope {
+  platform
+  workspace
+  account
+
+  @@map("linkedin_control_scope")
+}
+
+enum LinkedinControl {
+  sending
+  stop
+  invites
+
+  @@map("linkedin_control")
+}
+
+enum LinkedinControlActorType {
+  user
+  operator
+  system
+
+  @@map("linkedin_control_actor_type")
+}
+
+// Account health (beta-p6-010; core/modules/linkedin docs/data.md "Health"), migration
+// 20261029183928_linkedin_health, whose hand-written SQL holds paused_until to the cool-down states,
+// sender_type to `linkedin`, and revokes DELETE on the events from app. A health event is ids,
+// codes and numbers only: no person data, so no eraser.
+enum SenderHealthState {
+  healthy
+  at_risk
+  restricted
+  checkpoint
+  disconnected
+
+  @@map("sender_health_state")
+}
+
+enum SenderHealthTrigger {
+  acceptance_rate
+  rate_limit_errors
+  checkpoint
+  limit_reached
+  session_invalid
+  manual
+
+  @@map("sender_health_trigger")
+}
+
+enum SenderHealthAction {
+  paused_all_actions
+  paused_invites
+  resumed
+
+  @@map("sender_health_action")
+}
+
+/// tenant
+model SenderHealthEvent {
+  id                 String               @id
+  workspaceId        String               @map("workspace_id")
+  /// Always `linkedin` (a CHECK); the column the data model gives every sender's events.
+  senderType         String               @default("linkedin") @map("sender_type")
+  /// The sender account's id.
+  senderId           String               @map("sender_id")
+  fromState          SenderHealthState    @map("from_state")
+  toState            SenderHealthState    @map("to_state")
+  trigger            SenderHealthTrigger
+  /// Numbers and codes only, such as `{ errors: 3, windowMinutes: 60 }`.
+  metrics            Json                 @default("{}")
+  automaticAction    SenderHealthAction?  @map("automatic_action")
+  /// The end of the pause this event set: the cool-down's, or the next working day's for
+  /// `rate_limit_errors`; null when nothing paused.
+  pausedUntil        DateTime?            @map("paused_until") @db.Timestamptz()
+  ackRequired        Boolean              @default(false) @map("ack_required")
+  acknowledgedBy     String?              @map("acknowledged_by")
+  acknowledgedAt     DateTime?            @map("acknowledged_at") @db.Timestamptz()
+  /// The owner's mail went (linkedin_notify); set once.
+  ownerNotifiedAt    DateTime?            @map("owner_notified_at") @db.Timestamptz()
+  /// The operator's mail went (beta-p6-030's fleet breaker).
+  operatorNotifiedAt DateTime?            @map("operator_notified_at") @db.Timestamptz()
+  createdAt          DateTime             @map("created_at") @db.Timestamptz()
+
+  @@index([workspaceId, senderId, createdAt])
+  @@map("sender_health_events")
 }

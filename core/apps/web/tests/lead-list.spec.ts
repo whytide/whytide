@@ -118,7 +118,7 @@ test("qualified leads by descending fit, twenty a page, with the columns; the ti
   // The name's cell holds the title at the company under it: one column, for the table to fit.
   const headers = ["name", "tier", "fit", "confidence", "source"];
   await expect(page.locator("thead th")).toHaveText(
-    [...headers, "qualified_at", "why", "review"].map((key) =>
+    [...headers, "qualified_at", "why", "review", "outreach", "menu"].map((key) =>
       say(`contacts.leads.columns.${key}`),
     ),
   );
@@ -133,6 +133,9 @@ test("qualified leads by descending fit, twenty a page, with the columns; the ti
     /\d/,
     "Head of Data is a title the ICP wants",
     "",
+    say("contacts.outreach_status.pending_review"),
+    // The row menu: its button's name, then its items (in the DOM while the menu is closed).
+    new RegExp(`^${say("contacts.leads.row_menu").replace("{name}", "Lead 01")}`),
   ]);
 
   const { violations } = await new AxeBuilder({ page }).analyze();

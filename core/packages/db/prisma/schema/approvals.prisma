@@ -1,0 +1,62 @@
+// The tables of core/modules/approvals (its docs/data.md), beta-p3-030; migration
+// 20261029114318_approvals_initial. An approval item: a step of a sequence that can reach a person,
+// waiting for its sender account's owner (F13 §3); other modules' rows by plain id, no foreign key.
+// The migration's hand-written SQL adds what Prisma cannot say: the partial unique keys (one
+// pending and one approved item per step) and the CHECKs on the hash, the decision and the wait.
+
+/// tenant
+model ApprovalItem {
+  id                  String                  @id
+  workspaceId         String                  @map("workspace_id")
+  /// campaigns' `sx_` id of the step, no foreign key: approvals never reads campaigns.
+  stepExecutionId     String                  @map("step_execution_id")
+  /// contacts' `per_` id of the person the step reaches.
+  personId            String                  @map("person_id")
+  /// linkedin's sender account the step goes out from; its owner decides.
+  senderAccountId     String                  @map("sender_account_id")
+  actionType          ApprovalActionType      @map("action_type")
+  /// The sequence template's step key, as campaigns gives it: `connect`, `message_1`, …
+  stepKey             String                  @map("step_key")
+  /// messaging's step draft, null until its writer ends it: `ready`, `flagged` or `failed`.
+  draftId             String?                 @map("draft_id")
+  /// The step's due time when the item opened.
+  scheduledFor        DateTime                @map("scheduled_for") @db.Timestamptz()
+  status              ApprovalItemStatus      @default(pending)
+  /// The hex SHA-256 of the text the approval froze: set exactly when the item is `approved`.
+  approvedContentHash String?                 @map("approved_content_hash")
+  /// The user who approved or skipped it: the sender account's owner.
+  decidedBy           String?                 @map("decided_by")
+  decidedAt           DateTime?               @map("decided_at") @db.Timestamptz()
+  decisionOrigin      ApprovalDecisionOrigin? @map("decision_origin")
+  /// Why an approved step waits, a code (`insufficient_credits`), and until when, if known.
+  waitCode            String?                 @map("wait_code")
+  waitUntil           DateTime?               @map("wait_until") @db.Timestamptz()
+  createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt           DateTime                @updatedAt @map("updated_at") @db.Timestamptz()
+
+  @@index([workspaceId, status, scheduledFor])
+  @@index([workspaceId, personId])
+  @@map("approval_items")
+}
+
+enum ApprovalActionType {
+  invite
+  message
+
+  @@map("approval_action_type")
+}
+
+enum ApprovalItemStatus {
+  pending
+  approved
+  skipped
+  blocked
+
+  @@map("approval_item_status")
+}
+
+enum ApprovalDecisionOrigin {
+  app
+
+  @@map("approval_decision_origin")
+}

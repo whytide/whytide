@@ -2,8 +2,9 @@
 // counter"): the host started with identity, contacts and credits without its onStart, on the fake
 // authentication adapter, in a schema of the worktree's database: the week's numbers of the
 // workspace, another organization's workspace its own; the current week when none is named; a week
-// the calendar lacks, 400; a lead's cost, and another workspace's person 404, never a zero;
-// credits.read required. It lives here: a module never imports a host.
+// the calendar lacks, 400; a lead's cost, and another workspace's person 404, never a zero; a
+// signal's lead under both of signals' prices (beta-p1-090); credits.read required. It lives here: a
+// module never imports a host.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { createLeadForPerson, upsertPersonFromSource } from "@whytide/contacts";
@@ -21,14 +22,21 @@ import {
 } from "@whytide/tenancy/testing";
 import { type Api, start } from "../src/start.ts";
 
-// credits, and qualification's snapshot factory, by their builds' paths, as src/modules.generated.ts
-// loads a module: the api lists no module with a screen (core/apps/web/docs/screens.md).
+// credits, qualification's snapshot factory and signals' ids and factories, by their builds' paths,
+// as src/modules.generated.ts loads a module: the api lists no module with a screen
+// (core/apps/web/docs/screens.md).
 const modules = new URL("../../../../modules/", import.meta.url);
 type Credits = typeof import("../../../modules/credits/dist/index.js");
 type QualificationTesting = typeof import("../../../modules/qualification/dist/testing/index.js");
+type Signals = typeof import("../../../modules/signals/dist/index.js");
+type SignalsTesting = typeof import("../../../modules/signals/dist/testing/index.js");
 const credits: Credits = await import(new URL("credits/dist/index.js", modules).href);
 const qualification: QualificationTesting = await import(
   new URL("qualification/dist/testing/index.js", modules).href
+);
+const signals: Signals = await import(new URL("signals/dist/index.js", modules).href);
+const signalsTesting: SignalsTesting = await import(
+  new URL("signals/dist/testing/index.js", modules).href
 );
 
 const db = withTestDb();
@@ -184,6 +192,36 @@ test("GET …/credits/leads/{personId}/cost: the lead's credits and calls; anoth
   assert.deepEqual({ status: ofB.status, body: { code: ofB.body.code } }, notFound);
   const unknown = await get(a.user.id, a.workspace.id, "leads/per_unknown/cost");
   assert.deepEqual({ status: unknown.status, body: { code: unknown.body.code } }, notFound);
+});
+
+test("GET …/credits/leads/{personId}/cost of a lead two signal runs found: its share of the block of a run before beta-p1-090 and the engager credit of its candidate in a run since; the week has both actions", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const personId = await leadOf(a, "found-twice");
+  const { createSignalEvent, createSignalRun, createSignalSource } = signalsTesting;
+  const { id: sourceId } = await createSignalSource({ workspaceId, label: "Launch post" });
+  const run = (staged: number) =>
+    createSignalRun({ workspaceId, sourceId, status: "done", counts: { staged } });
+  // Before: a block of 2 credits over the 40 candidates the run staged, one the person's.
+  const before = await run(40);
+  await spent(a, "signals.engager_read", "2", before.id);
+  await createSignalEvent({ workspaceId, personId, sourceId, runId: before.id });
+  // Since: a credit for the profile read of the person's candidate, whose event names it.
+  const since = await run(3);
+  const candidateId = newId(signals.ids.signal_candidate);
+  await spent(a, "signals.engager", "1", candidateId);
+  await createSignalEvent({ workspaceId, personId, sourceId, runId: since.id, candidateId });
+
+  const reads = { feature: "signals", credits: "1.05", money: "0" };
+  assert.deepEqual(await get(a.user.id, workspaceId, `leads/${personId}/cost`), {
+    status: 200,
+    body: { personId, credits: "1.05", money: "0", byFeature: [reads] },
+  });
+  const week = await get(a.user.id, workspaceId, `costs?week=${WEEK}`);
+  assert.deepEqual(week.body.byAction, [
+    { action: "signals.engager", credits: "1" },
+    { action: "signals.engager_read", credits: "2" },
+  ]);
 });
 
 test("credits.read is required: a principal without a membership in the workspace gets 403", async () => {

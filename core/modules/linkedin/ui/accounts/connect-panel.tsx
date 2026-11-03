@@ -1,20 +1,23 @@
 "use client";
 // The risk disclosure and Connect (README.md "Screen"), a card: the sentence that no account is
-// connected yet heads it on the empty screen (`intro`); then the disclosure, the box to tick and
-// Connect, which stays off until the box is ticked, sends the browser's time zone and goes to the
-// provider's hosted page; the api refuses a connect without the acknowledgment as well
-// (disclosure_required). A failed connect shows its code in words, with a retry. It also reconnects
-// an account whose provider needs a new sign-in. Disclosure is the disclosure's box, which the
-// account's card shows again on demand.
+// connected yet heads it on the empty screen (`intro`); then the disclosure, its two boxes, the
+// acknowledgement and the personal account, and Connect, which stays off until both are ticked, sends
+// the browser's time zone and the disclosure's version and goes to the provider's hosted page; the
+// api refuses a connect without them as well (disclosure_required, personal_account_required). A
+// failed connect shows its code in words, with a retry. It also reconnects an account whose provider
+// needs a new sign-in. Disclosure is the disclosure's box, which the account's card shows again on
+// demand and the acceptance's Dialog shows (disclosure-notice.tsx).
 import { Button, Checkbox, ErrorState } from "@whytide/ui";
 import { ArrowUpRight, Link2, ShieldAlert } from "@whytide/ui/icons";
 import { ApiError, browserApi, data } from "@whytide/web/api/browser";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
+import { DISCLOSURE_VERSION } from "../../domain/disclosure/constants.ts";
 
 export function ConnectPanel({ workspaceId, intro }: { workspaceId: string; intro?: string }) {
   const t = useTranslations("linkedin.connect");
   const [acknowledged, setAcknowledged] = useState(false);
+  const [personalAccount, setPersonalAccount] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
   const id = useId();
@@ -27,7 +30,7 @@ export function ConnectPanel({ workspaceId, intro }: { workspaceId: string; intr
       const { url } = await data(
         browserApi().POST("/v1/workspaces/{workspaceId}/linkedin/accounts/connect", {
           params: { path: { workspaceId } },
-          body: { timeZone, acknowledged },
+          body: { timeZone, acknowledged, disclosureVersion: DISCLOSURE_VERSION, personalAccount },
         }),
       );
       window.location.assign(url);
@@ -57,13 +60,25 @@ export function ConnectPanel({ workspaceId, intro }: { workspaceId: string; intr
         </div>
       </div>
       <Disclosure />
-      <Checkbox
-        label={t("acknowledge")}
-        checked={acknowledged}
-        onChange={(event) => setAcknowledged(event.target.checked)}
-      />
+      <div className="grid gap-3">
+        <Checkbox
+          label={t("acknowledge")}
+          checked={acknowledged}
+          onChange={(event) => setAcknowledged(event.target.checked)}
+        />
+        <Checkbox
+          label={t("personal_account")}
+          checked={personalAccount}
+          onChange={(event) => setPersonalAccount(event.target.checked)}
+        />
+      </div>
       <div>
-        <Button variant="primary" loading={busy} disabled={!acknowledged} onClick={connect}>
+        <Button
+          variant="primary"
+          loading={busy}
+          disabled={!acknowledged || !personalAccount}
+          onClick={connect}
+        >
           {t("button")}
           {!busy && <ArrowUpRight aria-hidden="true" />}
         </Button>
@@ -73,7 +88,7 @@ export function ConnectPanel({ workspaceId, intro }: { workspaceId: string; intr
   );
 }
 
-/** The risk disclosure, in its box: what Whytide reads with the account, and the risk to it. */
+/** The risk disclosure, in its box: what Whytide reads and sends with the account, and the risk to it. */
 export function Disclosure() {
   const t = useTranslations("linkedin.connect");
   return (

@@ -8,7 +8,9 @@ import {
   SOURCE_KINDS,
   TIERS,
 } from "../domain/lead.ts";
+import { OUTREACH_STATUSES, STATUS_ACTORS } from "../domain/outreach/constants.ts";
 import { REASON_CODES, REVIEW_DECISIONS, REVIEW_FILTERS } from "../domain/review/rules.ts";
+import { SUPPRESSION_REASONS } from "../domain/suppression/constants.ts";
 import { personResponse } from "./persons.ts";
 
 const lead = {
@@ -49,10 +51,14 @@ const lead = {
   /** The latest review decision and its time; null until the first. */
   reviewStatus: z.enum(REVIEW_DECISIONS).nullable(),
   reviewedAt: z.string().nullable(),
+  /** Where the lead is on the way to outreach; Approve and campaigns move it. */
+  outreachStatus: z.enum(OUTREACH_STATUSES),
+  /** A code: why the latest change happened, such as opted_out; null when none was given. */
+  outreachReason: z.string().nullable(),
 };
 /**
  * A lead of the list: its fields, its latest Not a fit's reason, and the person's name, title,
- * company and URL.
+ * company, company id (the row menu's Never contact their company) and URL.
  */
 export const leadSummary = z.strictObject({
   ...lead,
@@ -63,6 +69,7 @@ export const leadSummary = z.strictObject({
     lastName: true,
     title: true,
     companyName: true,
+    companyId: true,
     linkedinUrl: true,
   }),
 });
@@ -71,8 +78,15 @@ export const leadPage = z.strictObject({
   nextCursor: z.string().nullable(),
 });
 export type LeadPage = z.infer<typeof leadPage>;
-/** One lead: its fields and the person's business fields with the provenance of each. */
-export const leadResponse = z.strictObject({ ...lead, person: personResponse });
+/**
+ * One lead: its fields, the person's business fields with the provenance of each, and why the
+ * person may not be contacted now, or null (suppressionOf without a new enrollment).
+ */
+export const leadResponse = z.strictObject({
+  ...lead,
+  person: personResponse,
+  suppression: z.strictObject({ reason: z.enum(SUPPRESSION_REASONS) }).nullable(),
+});
 export type LeadResponse = z.infer<typeof leadResponse>;
 
 const count = z.int().min(0);
@@ -94,6 +108,8 @@ export const leadListQuery = z.strictObject({
   tier: z.enum(TIERS).optional(),
   /** `unreviewed`: the leads without a review decision. */
   review: z.enum(REVIEW_FILTERS).optional(),
+  /** The outreach status; `status` stays qualification's. */
+  outreach: z.enum(OUTREACH_STATUSES).optional(),
   /** Descending fit, no score last; newest first; or no decision first, then by fit. */
   sort: z.enum(LEAD_SORTS).default("fit"),
   limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -107,6 +123,7 @@ export const neighboursQuery = leadListQuery.pick({
   status: true,
   tier: true,
   review: true,
+  outreach: true,
   sort: true,
 });
 export type NeighboursQuery = z.infer<typeof neighboursQuery>;
@@ -116,3 +133,26 @@ export const leadNeighbours = z.strictObject({
   next: z.string().nullable(),
 });
 export type LeadNeighbours = z.infer<typeof leadNeighbours>;
+/** Approve's answer: the lead's outreach status, `approved`. */
+export const approveResponse = z.strictObject({ outreachStatus: z.enum(OUTREACH_STATUSES) });
+export type ApproveResponse = z.infer<typeof approveResponse>;
+/** A lead's status changes, newest first, the hundred newest at most. */
+export const statusChangesResponse = z.strictObject({
+  changes: z.array(
+    z.strictObject({
+      id: z.string(),
+      personId: z.string(),
+      fromStatus: z.enum(OUTREACH_STATUSES),
+      toStatus: z.enum(OUTREACH_STATUSES),
+      /** The campaign's template that moved the lead, for in_campaign and finished. */
+      templateId: z.string().nullable(),
+      /** A code, such as opted_out. */
+      reason: z.string().nullable(),
+      actorType: z.enum(STATUS_ACTORS),
+      /** The user's id; null for the system. */
+      actorId: z.string().nullable(),
+      createdAt: z.string(),
+    }),
+  ),
+});
+export type StatusChangesResponse = z.infer<typeof statusChangesResponse>;

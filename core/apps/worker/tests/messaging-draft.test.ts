@@ -219,7 +219,9 @@ test("a writer that failed past its attempts marks the draft failed, write_faile
 
 test("through the host: messaging.draft_requested starts one run by messaging.draft:<workspace>:<draft>, which writes the draft; a second delivery starts none", async () => {
   const taskQueue = `test-${randomUUID()}`;
-  const host = await start({ modules: messaging, taskQueue, healthPort: 0, client: app(), log });
+  // messaging's schedule (messaging.sweep) paused, and deleted after: no test leaves one running.
+  const options = { modules: messaging, taskQueue, healthPort: 0, client: app(), log };
+  const host = await start({ ...options, schedules: "off" });
   try {
     const seeded = await seed();
     const { workspaceId, personId, userId } = seeded;
@@ -247,5 +249,9 @@ test("through the host: messaging.draft_requested starts one run by messaging.dr
     assert.deepEqual([delivered.lastError, (await run.describe()).runId], [null, runId]);
   } finally {
     await host.close();
+    await env.client.schedule
+      .getHandle("messaging.sweep")
+      .delete()
+      .catch(() => undefined);
   }
 });

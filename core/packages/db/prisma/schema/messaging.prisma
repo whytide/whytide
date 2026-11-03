@@ -3,6 +3,10 @@
 // planned and written by the module's two agents and checked by its gates, with the record of how it
 // was made (briefs RB-10.1.5). The model calls' decision records are core/packages/ai's, linked by
 // id. The module's erasePerson deletes a person's drafts.
+// The drafts of a sequence's steps (beta-p3-010), migration 20261029092149_messaging_step_drafts:
+// `kind`, the step's columns and `approved`, with hand-written SQL Prisma cannot say: the CHECKs
+// that tie a step's columns to its kind and `approved_at` to the status, and the partial unique key
+// (workspace_id, step_execution_id) WHERE step_execution_id IS NOT NULL, one draft per step.
 
 /// tenant
 model MessageDraft {
@@ -11,6 +15,12 @@ model MessageDraft {
   personId         String             @map("person_id")
   channel          MessageChannel
   status           MessageDraftStatus @default(drafting)
+  /// A lead's draft (alpha's panel) or a sequence step's; only approvals' path changes a step's.
+  kind             MessageDraftKind   @default(lead_draft)
+  /// A step's draft: its step execution, campaigns' `sx_` id, no foreign key; one draft per step.
+  stepExecutionId  String?            @map("step_execution_id")
+  /// A step's draft: the sequence template's step key (domain/drafts/constants.ts STEP_KINDS).
+  stepKey          String?            @map("step_key")
   /// The plan the text was written from: `angle`, `factIds`, `cta` and the plan call's
   /// `decisionRecordId`; null until a plan answered.
   plan             Json?
@@ -34,6 +44,11 @@ model MessageDraft {
   /// Why it is flagged (the failing gates' issues) or failed (`{ code }`); empty otherwise.
   /// pii: business_contact
   flagReasons      Json               @default("[]") @map("flag_reasons")
+  /// Set by approvals' path (beta-p3-020): the member changed the text, and by how much (0 to 1).
+  editedByUser     Boolean            @default(false) @map("edited_by_user")
+  editRatio        Decimal?           @map("edit_ratio") @db.Decimal(4, 3)
+  /// When a step's draft was approved: set exactly when the status is `approved`.
+  approvedAt       DateTime?          @map("approved_at") @db.Timestamptz()
   createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz()
 
@@ -54,6 +69,14 @@ enum MessageDraftStatus {
   flagged
   failed
   edited
+  approved
 
   @@map("message_draft_status")
+}
+
+enum MessageDraftKind {
+  lead_draft
+  outbound_step
+
+  @@map("message_draft_kind")
 }

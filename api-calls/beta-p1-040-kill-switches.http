@@ -1,0 +1,35 @@
+# linkedin's kill switches (core/modules/linkedin/README.md "API"): an account's pause and the
+# workspace's "Stop everything" stop every LinkedIn action through them, reads included, from the
+# next reservation. One variable besides the usual ones goes in http-client.private.env.json:
+# `accountId`, an id GET …/linkedin/accounts answers. Pause and unpause are @Idempotent(): the
+# Idempotency-Key is an example UUID; another one presses again, the same one answers the first
+# answer again for a day. PUT takes no key: it sets a state. A write sends the cookie, so it sends
+# Origin: {{appOrigin}} too.
+
+### POST /v1/workspaces/{workspaceId}/linkedin/accounts/{id}/pause: pauses the account, any member with linkedin.manage; a paused one stays as it is; 200 with the account, paused and pausedBy
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/{{accountId}}/pause
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000001040
+
+### POST /v1/workspaces/{workspaceId}/linkedin/accounts/{id}/unpause: resumes the account, its owner only; 200 with the account; 403 not_account_owner; 409 stopped_by_operator when the operator paused it
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/{{accountId}}/unpause
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000001041
+
+### GET /v1/workspaces/{workspaceId}/linkedin/controls: the platform's switches (sendingOpen, stopped, invitesPaused) and the workspace's stop with its stopSource
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/controls
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PUT /v1/workspaces/{workspaceId}/linkedin/controls: the workspace's "Stop everything" on or off; 200 with the controls; 409 stopped_by_operator to lift the operator's stop
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/controls
+Content-Type: application/json
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "stopped": true }

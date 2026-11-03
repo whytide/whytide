@@ -1,15 +1,16 @@
 // The lead page in the browser (page.tsx): the way back and to the neighbours; the header
-// (header.tsx), with the actions slot; a needs_review lead's unknown criteria under it; then two
+// (header.tsx), with the Never contact menu (never-contact/block.tsx), Approve (approve.tsx) and the
+// actions slot, and Approve's failure under it; a needs_review lead's unknown criteria; then two
 // columns. The first: the person's business fields each with its source and time, and the LinkedIn
 // link; the why; the snapshot, the model's summary under its label, the verdicts behind a disclosure
 // and the disqualifiers; the evidence and draft slots. Beside it: the decision and its time (the
-// snapshot's, else when the lead was decided) with the cost slot, then the review slot; in one
-// column, on a phone, they come right after the why, so that the review is near. Codes that
-// qualification stores (a why bullet, a criterion, a verdict, a disqualifier) are worded by its
-// keys, read as data through useKeyText, as the lead list words a why bullet: a code without a key
-// shows nothing, on both screens. A status and a confidence take the list's words. The LinkedIn link
-// is the person's normalized profile URL, never another value. The slots hold the panels page.tsx
-// rendered, each slot behind its own boundary (slot-boundary.tsx).
+// snapshot's, else when the lead was decided) with the cost slot, then the review and outreach
+// slots; in one column, on a phone, they come right after the why, so that the review is near.
+// Codes that qualification stores (a why bullet, a criterion, a verdict, a disqualifier) are worded
+// by its keys, read as data through useKeyText, as the lead list words a why bullet: a code without
+// a key shows nothing, on both screens. A status and a confidence take the list's words. The
+// LinkedIn link is the person's normalized profile URL, never another value. The slots hold the
+// panels page.tsx rendered, each slot behind its own boundary (slot-boundary.tsx).
 "use client";
 
 import {
@@ -20,6 +21,7 @@ import {
   DataTable,
   Link,
   Meter,
+  Toast,
   useKeyText,
 } from "@whytide/ui";
 import {
@@ -35,8 +37,10 @@ import {
   TriangleAlert,
 } from "@whytide/ui/icons";
 import { useFormatter, useTranslations } from "next-intl";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { normalizeLinkedinUrl } from "../../domain/linkedin-url.ts";
+import { useToast } from "../never-contact/block.tsx";
+import { ApproveButton, ApproveFailed, canApprove, useApprove } from "./approve.tsx";
 import { LeadHeader, LeadNav, StatusBadge, useProvenance } from "./header.tsx";
 import type { Lead, Neighbours, Snapshot } from "./page.tsx";
 import { SlotBoundary } from "./slot-boundary.tsx";
@@ -52,6 +56,8 @@ type Props = {
   /** The list's view, `?status=…&sort=…`, carried back to the list and to the neighbours. */
   query: string;
   slots: Partial<Record<LeadSlot, ReactNode>>;
+  /** Whether the user has a connected LinkedIn account of their own, without which Approve waits. */
+  hasSender: boolean;
 };
 type VerdictRow = Snapshot["verdicts"][number] & { id: string };
 type Verdict = VerdictRow["verdict"];
@@ -66,7 +72,8 @@ const VERDICT: Record<Verdict, [tone: BadgeTone, Icon: LucideIcon]> = {
 const SECTION = "grid content-start gap-4 rounded-xl border border-line bg-surface p-5 shadow-xs";
 const HEADING = "font-semibold text-ink";
 
-export function LeadView({ workspace, lead, name, snapshot, neighbours, query, slots }: Props) {
+export function LeadView(props: Props) {
+  const { workspace, lead, name, snapshot, neighbours, query, slots, hasSender } = props;
   const t = useTranslations("contacts.lead");
   const list = useTranslations("contacts.leads");
   const format = useFormatter();
@@ -81,6 +88,26 @@ export function LeadView({ workspace, lead, name, snapshot, neighbours, query, s
         <SlotBoundary>{slots[slot]}</SlotBoundary>
       </div>
     );
+  const approveWords = useTranslations("contacts.approve");
+  const [toast, setToast] = useToast();
+  // Approve's answer stands for the lead read it answered; a new read (a block's router.refresh())
+  // is a new object, whose status shows.
+  const [approved, setApproved] = useState<{ of: Lead; to: Lead["outreachStatus"] }>();
+  const outreach = approved?.of === lead ? approved.to : lead.outreachStatus;
+  const approval = useApprove(workspace, (_, status, approvedName) => {
+    setApproved({ of: lead, to: status });
+    setToast(approveWords("done", { name: approvedName }));
+  });
+  const approve = canApprove(outreach) && (
+    <ApproveButton
+      workspace={workspace}
+      status={outreach}
+      hasSender={hasSender}
+      busy={approval.busy !== undefined}
+      onApprove={() => void approval.approve(lead.personId, name)}
+    />
+  );
+  const actions = place("actions");
   const leads = `/w/${workspace}/leads`;
   const to = (personId: string) => `${leads}/${encodeURIComponent(personId)}${query}`;
   const confidenceText = {
@@ -192,7 +219,25 @@ export function LeadView({ workspace, lead, name, snapshot, neighbours, query, s
         previous={neighbours.previous && to(neighbours.previous)}
         next={neighbours.next && to(neighbours.next)}
       />
-      <LeadHeader lead={lead} name={name} actions={place("actions")} />
+      <LeadHeader
+        lead={{ ...lead, outreachStatus: outreach }}
+        name={name}
+        workspace={workspace}
+        actions={
+          (approve || actions) && (
+            <>
+              {approve}
+              {actions}
+            </>
+          )
+        }
+      />
+      {approval.failure && (
+        <div className="mb-6">
+          <ApproveFailed failure={approval.failure} />
+        </div>
+      )}
+      <Toast message={toast} />
       {unknown.length > 0 && (
         <p className="mb-6 flex items-start gap-2.5 rounded-xl border border-warm-dot/30 bg-warm-soft px-4 py-3 text-warm-ink">
           <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
@@ -267,6 +312,7 @@ export function LeadView({ workspace, lead, name, snapshot, neighbours, query, s
             {place("cost", "border-t border-line pt-4")}
           </Card>
           {place("review", "grid gap-4")}
+          {place("outreach", "grid gap-4")}
         </div>
         <div className="grid min-w-0 gap-6">
           {snapshot && (

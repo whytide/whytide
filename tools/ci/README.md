@@ -20,6 +20,7 @@ A step runs in every workspace package that defines a script of its name, in dep
 | `lint` | the structure holds ([tools/lint](../lint/README.md)) | the hosts, the modules, the packages |
 | `typecheck` | the types hold (`tsc -b`) | the hosts, the modules, the packages, the tools |
 | `test` | the package does what it says, its end-to-end test included | `lint`, `deploy`, `ci` |
+| `test:safety` | the send path's safety cases pass | the packages on the send path (beta's tasks) |
 | `test:contract` | every adapter passes its port's suite | alpha-p1-090 |
 | `test:tenancy` | `workspace_id` on every tenant table, two-workspace isolation | alpha-p1-020 |
 | `test:roles` | `app` cannot write a grant | alpha-p1-020 |
@@ -33,6 +34,8 @@ A step runs in every workspace package that defines a script of its name, in dep
 | `secrets:scan` | no secret in the history; no schema field or log key shaped like one | `ci`: [secrets-scan.ts](secrets-scan.ts), [secret-shapes.ts](secret-shapes.ts) |
 | `deps:check` | the audit, the license check, one new dependency per merge request | `ci`: [deps-check.ts](deps-check.ts) |
 | `changeset:check` | the branch adds a changeset, or the label `no-changeset` | `ci`: [changeset-check.ts](changeset-check.ts) |
+
+`test:safety` is the safety suite, the cases that prove the send path's protections on the fake adapters: the quota invariants, no action against a suppressed person, no double send on a retry, nothing sent without approval. A package's cases live in its `tests/safety/*.test.ts`, and the hosts' in `core/apps/worker/tests/safety/` and `core/apps/api/tests/safety/`. A package joins by defining a `test:safety` script that globs `tests/safety/*.test.ts`; the api's runs `dist/tests/safety/*.test.js` after its build. `test` never runs these cases, because every `test` glob reaches one folder deep (`tests/*.test.ts`, the api's `dist/tests/*.test.js`). A send-path merge request runs `pnpm ci:local test:safety` before it opens; a failing case fails the step, and the pipeline with it.
 
 The branch checks look at every file changed since the branch left `main` (`origin/main` where the remote exists), committed or not, plus the untracked files. `docs:check` takes a change under `core/modules/<name>/` outside `tests/` and `docs/` as a change of behavior and wants a change under that module's `docs/` or to its `README.md` with it; `_template` is not a module. `changeset:check` wants a changeset under `.changeset/` added on the branch when anything changed at all.
 

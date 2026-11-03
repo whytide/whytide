@@ -1,0 +1,16 @@
+# linkedin's risk disclosure for sending (core/modules/linkedin/README.md "API"): before an account
+# sends anything, its owner accepts the current version and confirms it is their own personal
+# account. One variable besides the usual ones goes in http-client.private.env.json: `accountId`, an
+# id GET …/linkedin/accounts answers. The route is @Idempotent(): the Idempotency-Key is an example
+# UUID; another one presses again, the same one answers the first answer again for a day. A write
+# sends the cookie, so it sends Origin: {{appOrigin}} too.
+
+### POST /v1/workspaces/{workspaceId}/linkedin/accounts/{id}/disclosure: the owner accepts the disclosure for sending; 200 with the account, sendingDisclosureRequired false; 400 disclosure_version_invalid or personal_account_required; 403 not_account_owner
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/{{accountId}}/disclosure
+Content-Type: application/json
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000001070
+
+{ "version": 2, "personalAccount": true }

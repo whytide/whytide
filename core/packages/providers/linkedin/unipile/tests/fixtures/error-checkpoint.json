@@ -1,0 +1,6 @@
+{
+  "status": 401,
+  "type": "errors/checkpoint_error",
+  "title": "Checkpoint error",
+  "detail": "fixture-body-marker: LinkedIn asks for a security check."
+}

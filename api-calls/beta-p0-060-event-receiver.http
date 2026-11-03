@@ -1,0 +1,19 @@
+# linkedin's provider-event receiver (core/modules/linkedin/README.md "The webhook"): the provider's
+# signed person events, outside the workspaces, no session. The body is the fake's format and the
+# signature a placeholder: the api answers it 401 linkedin_webhook_invalid, as it does to anything
+# the provider did not sign. Signed (the fake's emitMessage), the message is kept when an outreach row
+# of the account names its sender or its chat, 204; its repeat is 204 and changes nothing.
+
+### POST /v1/linkedin/webhooks/{provider}: a message to a connected account, kept when an outreach row names its sender or its chat; 204, and this unsigned one 401
+POST {{baseUrl}}/v1/linkedin/webhooks/fake
+Content-Type: application/json
+X-Linkedin-Fake-Signature: sha256=0000000000000000000000000000000000000000000000000000000000000000
+
+{ "type": "message.received", "account": "fake-account-made-up", "id": "fake-message-made-up", "chat": "fake-chat-made-up", "sender": "member-made-up", "from_account": false, "attendees": ["member-made-up"], "text": "Happy to talk next week.", "sent_at": "2026-10-29T09:30:00.000Z" }
+
+### POST /v1/linkedin/webhooks/{provider}: the same message again, as the provider retries it; 204 and nothing more, the receipt being written
+POST {{baseUrl}}/v1/linkedin/webhooks/fake
+Content-Type: application/json
+X-Linkedin-Fake-Signature: sha256=0000000000000000000000000000000000000000000000000000000000000000
+
+{ "type": "message.received", "account": "fake-account-made-up", "id": "fake-message-made-up", "chat": "fake-chat-made-up", "sender": "member-made-up", "from_account": false, "attendees": ["member-made-up"], "text": "Happy to talk next week.", "sent_at": "2026-10-29T09:30:00.000Z" }

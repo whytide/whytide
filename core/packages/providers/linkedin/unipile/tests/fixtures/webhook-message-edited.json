@@ -1,0 +1,17 @@
+{
+  "account_id": "fixture-account",
+  "account_type": "LINKEDIN",
+  "account_info": { "type": "LINKEDIN", "feature": "classic", "user_id": "fixture-member-self" },
+  "event": "message_edited",
+  "chat_id": "fixture-chat-ada",
+  "timestamp": "2026-10-02T11:45:00.000Z",
+  "webhook_name": "whytide-messaging",
+  "message_id": "fixture-message-ada-1",
+  "message": "fixture-body-marker: happy to talk on Tuesday.",
+  "sender": {
+    "attendee_id": "fixture-attendee-ada",
+    "attendee_name": "Ada Example",
+    "attendee_provider_id": "fixture-member-ada",
+    "attendee_profile_url": "https://www.linkedin.com/in/ada-example/"
+  }
+}

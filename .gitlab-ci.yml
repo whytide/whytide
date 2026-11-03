@@ -43,6 +43,7 @@ pipeline:
     - sh tools/ci/gitlab.sh step lint
     - sh tools/ci/gitlab.sh step typecheck
     - sh tools/ci/gitlab.sh step test
+    - sh tools/ci/gitlab.sh step test:safety
     - sh tools/ci/gitlab.sh step test:contract
     - sh tools/ci/gitlab.sh step test:tenancy
     - sh tools/ci/gitlab.sh step test:roles

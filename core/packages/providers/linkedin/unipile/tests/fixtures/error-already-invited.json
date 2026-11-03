@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "type": "errors/already_invited_recently",
+  "title": "Already invited recently",
+  "detail": "fixture-body-marker: an invitation was sent recently."
+}

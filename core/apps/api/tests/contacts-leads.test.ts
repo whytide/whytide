@@ -1,11 +1,17 @@
-// contacts' lead routes end to end (alpha-p5-020, the counts alpha-p6-050, the neighbours alpha-p6-060;
-// core/modules/contacts/README.md "Routes"): the host started with identity, whose resolver guards
-// the workspace, and contacts, mounted under /v1/workspaces/:workspaceId/contacts, on the fake
-// authentication adapter, in a schema of the worktree's database, answering real HTTP. It lives
-// here: a module never imports a host.
+// contacts' lead routes end to end (alpha-p5-020, the counts alpha-p6-050, the neighbours alpha-p6-060,
+// the lead's suppression beta-p2-020; core/modules/contacts/README.md "Routes"): the host started
+// with identity, whose resolver guards the workspace, and contacts, mounted under
+// /v1/workspaces/:workspaceId/contacts, on the fake authentication adapter, in a schema of the
+// worktree's database, answering real HTTP. It lives here: a module never imports a host.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { applyQualification, createLeadForPerson, upsertPersonFromSource } from "@whytide/contacts";
+import {
+  addOptOut,
+  applyQualification,
+  createLeadForPerson,
+  recordTouch,
+  upsertPersonFromSource,
+} from "@whytide/contacts";
 import { useHashSalt } from "@whytide/contacts/testing";
 import { databaseUrl, withTenant } from "@whytide/db";
 import { asRole, withTestDb } from "@whytide/db/testing";
@@ -39,6 +45,11 @@ after(() => api?.close());
 
 const fetchedAt = new Date("2026-10-01T08:00:00Z");
 type Decision = Omit<Parameters<typeof applyQualification>[0], "personId">;
+/** In the tenant's workspace, as an import or a worker writes. */
+const asService = <T>({ workspace }: TestTenant, fn: () => Promise<T>) =>
+  withTenant({ workspaceId: workspace.id, principal: servicePrincipal("contacts_test") }, fn, {
+    client: asRole("app"),
+  });
 /** A person of the tenant's workspace and its lead, written as an import and qualification do. */
 const seed = ({ workspace }: TestTenant, slug: string, decision?: Decision) =>
   withTenant(
@@ -109,6 +120,7 @@ test("GET …/contacts/leads?sort=fit answers qualified leads by descending fit 
     lastName: "elif-hot",
     title: "Head of Data",
     companyName: "Blue Harbor Labs",
+    companyId: null,
     linkedinUrl: "https://linkedin.com/in/elif-hot",
   });
   const { qualificationStatus, fitScore, fitConfidence, tier, sourceLabel } = first ?? {};
@@ -145,6 +157,22 @@ test("GET …/contacts/leads?sort=fit answers qualified leads by descending fit 
     status: 400,
     body: { code: "contacts_input_invalid", details: { fields: ["cursor"] } },
   });
+});
+
+test("GET …/contacts/leads/{personId} answers suppression null, a recent touch aside, then the reason once the person opts out", async () => {
+  const [a] = await createTwoWorkspaces();
+  const person = await seed(a, "suki-stop", { status: "qualified", fitScore: 80, tier: "hot" });
+  const read = async () => {
+    const { status, body } = await get(a.workspace.id, `leads/${person.id}`, a.user.id);
+    assert.equal(status, 200);
+    return body.suppression;
+  };
+  assert.equal(await read(), null);
+  // A touch refuses a new enrollment only: the lead's answer asks without one.
+  await asService(a, () => recordTouch(person.id, new Date()));
+  assert.equal(await read(), null);
+  await asService(a, () => addOptOut(person.id, { source: "system", reason: "reply_opt_out" }));
+  assert.deepEqual(await read(), { reason: "opted_out" });
 });
 
 test("GET …/contacts/leads/counts answers the workspace's leads per status, every status named, none of another workspace's", async () => {

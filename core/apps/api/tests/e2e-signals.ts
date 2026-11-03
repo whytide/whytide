@@ -29,8 +29,16 @@ const SENDERS = [
 ] as const;
 const RUNS_PATH = "/test/signals/runs";
 
-/** Writes the two accounts, or sets them back to their state; their ids count from `first`. */
-export async function seedSenders(db: PrismaClient, workspaceId: string, first = 1): Promise<void> {
+/**
+ * Writes the two accounts, or sets them back to their state; their ids count from `first`. The
+ * connected one is `owner`'s, a user of the e2e's, where a spec needs an account of its user's own.
+ */
+export async function seedSenders(
+  db: PrismaClient,
+  workspaceId: string,
+  first = 1,
+  owner?: string,
+): Promise<void> {
   for (const [index, { label, status }] of SENDERS.entries()) {
     const id = `sac_01K8E2E${String(first + index).padStart(19, "0")}`;
     const account = {
@@ -40,11 +48,12 @@ export async function seedSenders(db: PrismaClient, workspaceId: string, first =
       timeZone: "Europe/Paris",
       workingHours: { start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5] },
     };
-    const owner = { id, workspaceId, ownerUserId: `usr_e2e_${status}` };
+    const ownerUserId = status === "connected" && owner ? owner : `usr_e2e_${status}`;
+    const keys = { id, workspaceId, ownerUserId };
     const acknowledged = { disclosureAcknowledgedAt: new Date() };
     await db.senderAccount.upsert({
       where: { id },
-      create: { ...owner, ...account, ...acknowledged },
+      create: { ...keys, ...account, ...acknowledged },
       update: account,
     });
   }

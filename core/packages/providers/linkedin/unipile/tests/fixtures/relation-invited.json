@@ -1,0 +1,13 @@
+{
+  "object": "UserProfile",
+  "provider": "LINKEDIN",
+  "provider_id": "fixture-member-bao",
+  "public_identifier": "bao-sample",
+  "first_name": "Bao",
+  "last_name": "Sample",
+  "headline": "Founder at Blue Harbor Labs",
+  "websites": [],
+  "contact_info": { "emails": ["bao@example.com"] },
+  "network_distance": "SECOND_DEGREE",
+  "invitation": { "type": "SENT", "status": "PENDING" }
+}

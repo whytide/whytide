@@ -23,6 +23,7 @@ export const fields = {
     field_provenance: "none",
     created_at: "none",
     updated_at: "none",
+    last_touch_at: "none",
   },
   // A company's name and domain are firmographics; for a sole trader they name a person, which
   // the log redaction covers anyway (`name`).
@@ -71,6 +72,8 @@ export const fields = {
     updated_at: "none",
     review_status: "none",
     reviewed_at: "none",
+    outreach_status: "none",
+    outreach_reason: "none",
   },
   // A decision's texts are the tester's words about the lead, which may quote the profile.
   review_decisions: {
@@ -86,5 +89,37 @@ export const fields = {
     tier_at_decision: "none",
     decided_by: "none",
     decided_at: "none",
+  },
+  // A never-contact entry (beta-p2-010): its hash is pseudonymous, as person_hashes.hash; the profile
+  // or company page it was typed with is a LinkedIn URL; a domain is a firmographic, as
+  // workspace_companies.domain.
+  suppression_entries: {
+    id: "none",
+    workspace_id: "none",
+    layer: "none",
+    match_type: "none",
+    hash: "personal",
+    linkedin_url: "business_contact",
+    domain: "none",
+    channel: "none",
+    source: "none",
+    reason: "none",
+    created_by: "none",
+    created_at: "none",
+    removed_at: "none",
+    removed_by: "none",
+  },
+  // A lead's outreach status change (beta-p2-030): statuses, codes and ids, nothing about the person.
+  lead_status_changes: {
+    id: "none",
+    workspace_id: "none",
+    person_id: "none",
+    from_status: "none",
+    to_status: "none",
+    template_id: "none",
+    reason: "none",
+    actor_type: "none",
+    actor_id: "none",
+    created_at: "none",
   },
 } as const satisfies Record<string, Record<string, PiiClass>>;

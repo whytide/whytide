@@ -3,9 +3,10 @@
 // .env.production.example with its secrets filled, on Caddy's own authority and free localhost
 // ports, as a project of its own next to the laptop's stack, which it never touches. In order: the
 // smoke (health, the migrations, a web page, a sign-in followed through Caddy), the containers, the
-// master keys and the images, the webhook path and the closed admin endpoint, then the backup
-// drill. The project goes at the end with its volumes, whatever happened; PRODTEST_KEEP=1 leaves it
-// running.
+// master keys and the images, the webhook path, its body limit and the closed admin endpoint, then
+// the backup drill, which opens sending in this project only, before its backup, and finds it closed
+// by restore.sh. The project goes at the end with its volumes, whatever happened; PRODTEST_KEEP=1
+// leaves it running.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -16,6 +17,14 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseEnv } from "../scripts/deploy-check.ts";
+import {
+  CHANGED_BY_RESTORE,
+  CONTROL_COMMAND,
+  DRILL_OPERATOR,
+  FIRST_BETA_MIGRATION,
+  RESTORE_OPERATOR,
+  WEBHOOK_BODY_LIMIT,
+} from "./constants.ts";
 import { deployDir, filledProductionEnv, readDeployFile } from "./env-fixture.ts";
 
 const project = "whytide-prodtest";
@@ -30,7 +39,7 @@ const words = (text: string) => text.split(" ");
 let env: NodeJS.ProcessEnv = process.env;
 let ports = { http: 0, https: 0 };
 let ca = Buffer.alloc(0);
-let fixture = { workspaceId: "", link: "" };
+let fixture = { workspaceId: "", userId: "", link: "" };
 let session = "";
 
 function run(command: string, ...args: string[]) {
@@ -48,6 +57,23 @@ function dc(...args: string[]): string {
 const inspect = (ref: string, format: string) =>
   run("docker", "inspect", "-f", format, ref).out.trim();
 const psql = (sql: string) => dc(...words("exec -T postgres psql -U postgres -d app -At -c"), sql);
+/** A file of tests/fixtures run by psql in `app`, `variables` set with -v; it stops at an error. */
+function psqlFile(name: string, variables: Record<string, string>): void {
+  const sets = Object.entries(variables).flatMap(([key, value]) => ["-v", `${key}=${value}`]);
+  const args = words("exec -T postgres psql -U postgres -d app -At -v ON_ERROR_STOP=1 -f -");
+  const result = spawnSync(
+    "docker",
+    ["compose", "-f", join(copy, "compose.yaml"), ...args, ...sets],
+    {
+      encoding: "utf8",
+      env,
+      input: fs.readFileSync(join(deployDir, "tests", "fixtures", name), "utf8"),
+    },
+  );
+  assert.equal(result.status, 0, `${name}:\n${result.stderr}${result.stdout}`);
+}
+/** linkedin's control command in the api's container, as the runbook gives it; its output. */
+const control = (...args: string[]) => dc("exec", "-T", "api", ...CONTROL_COMMAND, ...args);
 /** A script that Node runs in the api's container; its last line of output, parsed as JSON. */
 const inApi = (script: string) =>
   JSON.parse(
@@ -135,7 +161,20 @@ async function rootCertificate(): Promise<Buffer> {
   throw new Error("Caddy made no root certificate");
 }
 
-/** Every table of `app` by its row count and a hash of its rows, and the fixture file's hash. */
+/** The tables beta's migrations create, from FIRST_BETA_MIGRATION on, as `public.<name>`. */
+function betaTables(): string[] {
+  const folder = join(root, "core/packages/db/prisma/migrations");
+  return fs
+    .readdirSync(folder, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name >= FIRST_BETA_MIGRATION)
+    .flatMap((entry) => {
+      const sql = fs.readFileSync(join(folder, entry.name, "migration.sql"), "utf8");
+      return [...sql.matchAll(/^CREATE TABLE "(\w+)"/gm)].map((match) => `public.${match[1]}`);
+    })
+    .sort();
+}
+
+/** Every table of `app`, by name, with its row count and a hash of its rows; the fixture file's hash. */
 function state() {
   const tables = psql(
     "select format('%I.%I', schemaname, tablename) from pg_tables " +
@@ -154,8 +193,12 @@ function state() {
     for await (const chunk of file.body) hash.update(chunk);
     console.log(JSON.stringify(hash.digest("hex")));
     process.exit(0);`);
-  return { tables: psql(`select * from (${sums.join(" union all ")}) s order by 1`), file };
+  const rows = psql(`select * from (${sums.join(" union all ")}) s order by 1`).split("\n");
+  return { tables: new Map(rows.map((row) => [row.split("|")[0] ?? "", row])), file };
 }
+/** A table's row count in a state; 0 for a table it lacks. */
+const count = (tables: Map<string, string>, table: string) =>
+  Number(tables.get(table)?.split("|")[1] ?? 0);
 
 before(async () => {
   const [http = 0, httpsPort = 0, ...stack] = await freePorts(7);
@@ -258,7 +301,8 @@ test("smoke: TLS with HSTS at Caddy, health, the migrations, a sign-in link foll
     await auth.configure(identity.authHooks);
     await auth.requestMagicLink({ email: "${email}", redirectTo: "/" });
     const { text } = await appMailFake.read({ to: "${email}" });
-    console.log(JSON.stringify({ workspaceId: workspace.id, link: /https:\\S+/.exec(text)[0] }));
+    console.log(JSON.stringify({ workspaceId: workspace.id, userId: user.id,
+      link: /https:\\S+/.exec(text)[0] }));
     process.exit(0);`);
   const link = new URL(fixture.link);
   assert.equal(link.origin, `https://${domain}:${ports.https}`);
@@ -360,6 +404,20 @@ test("the webhook path reaches the api through Caddy; the admin endpoint is clos
   assert.deepEqual(inApi(probe), ["open", "closed"]);
 });
 
+test("a webhook body over 64 KiB gets the api's 413 through Caddy, which sets no limit", async () => {
+  // linkedin's bodyLimit, which the api enforces before the provider is looked at; Caddy passes
+  // the body on, so the 413 and its JSON code are the api's.
+  const body = JSON.stringify({ padding: "x".repeat(WEBHOOK_BODY_LIMIT) });
+  const webhook = await https("/v1/linkedin/webhooks/unipile", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+  });
+  assert.equal(webhook.status, 413, webhook.body);
+  assert.match(`${webhook.headers["content-type"]}`, /^application\/json/);
+  assert.deepEqual(JSON.parse(webhook.body), { code: "payload_too_large" });
+});
+
 test("backup drill: backup.sh, the project gone with its volumes, restore.sh, under ten minutes", async () => {
   // The worker runs its schedules throughout. Qualification's tick reads each workspace's ICP, and the
   // first read makes it with six criteria (core/modules/icp/README.md "Public interface"), so the drill
@@ -371,7 +429,22 @@ test("backup drill: backup.sh, the project gone with its volumes, restore.sh, un
     assert.ok(Date.now() < deadline, "qualification's tick made no ICP in a minute");
     await delay(1000);
   }
+  // The backup holds sending open, in this project only, where LinkedIn is the fake, no sender
+  // account exists and no step is planned, so nothing is sent; and a row in each of beta's tables,
+  // in end states that no schedule acts on (tests/fixtures/beta-tables.sql).
+  assert.match(
+    control("sending", "open", "--operator", DRILL_OPERATOR),
+    /^changed: sending open$/m,
+  );
+  psqlFile("beta-tables.sql", { workspace: fixture.workspaceId, owner: fixture.userId });
   const before = state();
+  for (const table of betaTables()) {
+    assert.ok(
+      count(before.tables, table) > 0,
+      `${table} holds no row (tests/fixtures/beta-tables.sql)`,
+    );
+  }
+  assert.equal(psql("select sending_open from linkedin_platform_controls"), "t");
   const backups = join(work, "backups");
   fs.mkdirSync(join(backups, "20200101T000000Z"), { recursive: true });
   fs.mkdirSync(join(backups, "notes"));
@@ -392,10 +465,26 @@ test("backup drill: backup.sh, the project gone with its volumes, restore.sh, un
   removeProject();
   const restored = run("bash", join(copy, "restore.sh"), join(backups, stamp));
   assert.equal(restored.status, 0, `${restored.err}${restored.out}`);
+  assert.match(restored.out, /^restore: sending closed$/m);
   const seconds = Math.round((Date.now() - started) / 1000);
   assert.ok(seconds < 600, `the drill took ${seconds} s`);
   ca = await rootCertificate(); // a fresh caddy-data volume, so a new authority
-  assert.deepEqual(state(), before);
+  // Every table as the backup had it, but the platform's switches, which restore.sh closed before
+  // the worker started: the row reads closed, and one event more, the operator `restore`'s.
+  const back = state();
+  assert.equal(back.file, before.file);
+  const kept = (tables: Map<string, string>) =>
+    [...tables].filter(([table]) => !CHANGED_BY_RESTORE.includes(table));
+  assert.deepEqual(kept(back.tables), kept(before.tables));
+  const platform = psql("select sending_open, changed_by from linkedin_platform_controls");
+  assert.equal(platform, `f|${RESTORE_OPERATOR}`);
+  const events = "public.linkedin_control_events";
+  assert.equal(count(back.tables, events), count(before.tables, events) + 1);
+  const restoreEvents = psql(
+    "select concat_ws(' ', scope, control, from_state, to_state, actor_type) " +
+      `from linkedin_control_events where actor = '${RESTORE_OPERATOR}'`,
+  );
+  assert.equal(restoreEvents, "platform sending open closed operator");
   const me = await https("/api/v1/me", { headers: { cookie: session } });
   assert.equal(me.status, 200, "the session came back with the database");
 });

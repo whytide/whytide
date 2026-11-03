@@ -1,0 +1,34 @@
+{
+  "account_id": "fixture-account",
+  "account_type": "LINKEDIN",
+  "account_info": { "type": "LINKEDIN", "feature": "classic", "user_id": "fixture-member-self" },
+  "event": "message_received",
+  "chat_id": "fixture-chat-ada",
+  "timestamp": "2026-10-02T11:30:00.000Z",
+  "webhook_name": "whytide-messaging",
+  "message_id": "fixture-message-ada-1",
+  "message": "fixture-body-marker: happy to talk next week.",
+  "sender": {
+    "attendee_id": "fixture-attendee-ada",
+    "attendee_name": "Ada Example",
+    "attendee_provider_id": "fixture-member-ada",
+    "attendee_profile_url": "https://www.linkedin.com/in/ada-example/"
+  },
+  "attendees": [
+    {
+      "attendee_id": "fixture-attendee-ada",
+      "attendee_name": "Ada Example",
+      "attendee_provider_id": "fixture-member-ada",
+      "attendee_profile_url": "https://www.linkedin.com/in/ada-example/"
+    }
+  ],
+  "attachments": [],
+  "subject": null,
+  "provider_chat_id": "fixture-provider-chat-ada",
+  "provider_message_id": "fixture-provider-message-ada-1",
+  "is_event": 0,
+  "quoted": null,
+  "chat_content_type": null,
+  "message_type": "MESSAGE",
+  "is_group": false
+}

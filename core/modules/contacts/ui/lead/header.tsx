@@ -1,15 +1,20 @@
 // The lead page's top (view.tsx, and states.tsx while the rest of the page loads): the way back to
 // the list and to the neighbours; the header, the person's initial and name, their title at their
-// company, then the tier, the status unless qualified, the fit with its bar, the location, and where
-// the name came from, with the actions slot at the inline end. Shared: the server renders them in
-// the loading state, the browser in the page.
+// company, then, while the person may not be contacted, the never-contact badge with its reason,
+// the tier, the status unless qualified, the outreach status (unless the never-contact badge says
+// it), the fit with its bar, the location, and where the name came from, with the Never contact
+// menu (the page's, not the loading state's) and the actions slot at the inline end. Shared: the
+// server renders them in the loading state, the browser in the page.
 import { Avatar, Badge, type BadgeTone, ButtonLink, Meter, PageHeader } from "@whytide/ui";
-import { ArrowLeft, ChevronLeft, ChevronRight, MapPin } from "@whytide/ui/icons";
+import { ArrowLeft, Ban, ChevronLeft, ChevronRight, MapPin } from "@whytide/ui/icons";
 import { useFormatter, useTranslations } from "next-intl";
 import type { ReactNode } from "react";
+import { NeverContactMenu } from "../never-contact/block.tsx";
 import type { Lead } from "./page.tsx";
 
 type Status = Lead["qualificationStatus"];
+type Reason = NonNullable<Lead["suppression"]>["reason"];
+type Outreach = Lead["outreachStatus"];
 
 /** Each status's colour as a badge: good, needs care, went wrong, or under way. */
 const STATUS_TONE: Record<Status, BadgeTone> = {
@@ -20,6 +25,34 @@ const STATUS_TONE: Record<Status, BadgeTone> = {
   ai_failed: "danger",
   pending: "accent",
 };
+
+/** Each outreach status's colour: waiting, approved or answered, under way, over, or blocked. */
+const OUTREACH_TONE: Record<Outreach, BadgeTone> = {
+  pending_review: "neutral",
+  approved: "success",
+  in_campaign: "accent",
+  replied: "success",
+  finished: "neutral",
+  suppressed: "danger",
+};
+
+/** An outreach status in words, as the list's column, its filter and the header show it. */
+export function useOutreachText(): Record<Outreach, string> {
+  const t = useTranslations("contacts.outreach_status");
+  return {
+    pending_review: t("pending_review"),
+    approved: t("approved"),
+    in_campaign: t("in_campaign"),
+    replied: t("replied"),
+    finished: t("finished"),
+    suppressed: t("suppressed"),
+  };
+}
+
+/** An outreach status as a badge in its colour. */
+export function OutreachBadge({ status }: { status: Outreach }) {
+  return <Badge tone={OUTREACH_TONE[status]}>{useOutreachText()[status]}</Badge>;
+}
 
 /** A status in the list's words. */
 export function useStatusText(): Record<Status, string> {
@@ -64,8 +97,25 @@ export function StatusBadge({ status }: { status: Status }) {
   return <Badge tone={STATUS_TONE[status]}>{useStatusText()[status]}</Badge>;
 }
 
-export function LeadHeader(props: { lead: Lead; name: string; actions?: ReactNode }) {
-  const { lead, name, actions } = props;
+/** Why the person may not be contacted: on the list, their company on it, or opted out. */
+function SuppressionBadge({ reason }: { reason: Reason }) {
+  const t = useTranslations("contacts.never_contact");
+  return (
+    <Badge tone="danger">
+      <Ban aria-hidden="true" />
+      {t("badge", { reason })}
+    </Badge>
+  );
+}
+
+/** `workspace`: the page's, for the Never contact menu, which the loading state leaves out. */
+export function LeadHeader(props: {
+  lead: Lead;
+  name: string;
+  actions?: ReactNode;
+  workspace?: string;
+}) {
+  const { lead, name, actions, workspace } = props;
   const { person } = lead;
   const t = useTranslations("contacts.lead");
   const format = useFormatter();
@@ -80,9 +130,14 @@ export function LeadHeader(props: { lead: Lead; name: string; actions?: ReactNod
       description={role}
       meta={
         <>
+          {lead.suppression && <SuppressionBadge reason={lead.suppression.reason} />}
           {lead.tier && <Badge tier={lead.tier} />}
           {lead.qualificationStatus !== "qualified" && (
             <StatusBadge status={lead.qualificationStatus} />
+          )}
+          {/* Blocked says again what the never-contact badge says: one of the two. */}
+          {!(lead.suppression && lead.outreachStatus === "suppressed") && (
+            <OutreachBadge status={lead.outreachStatus} />
           )}
           {lead.fitScore !== null && (
             <span className="inline-flex items-center gap-2 text-xs text-ink-muted">
@@ -104,7 +159,20 @@ export function LeadHeader(props: { lead: Lead; name: string; actions?: ReactNod
           {named}
         </>
       }
-      actions={actions}
+      actions={
+        workspace === undefined ? (
+          actions
+        ) : (
+          <>
+            <NeverContactMenu
+              workspace={workspace}
+              personId={lead.personId}
+              companyId={person.companyId}
+            />
+            {actions}
+          </>
+        )
+      }
     />
   );
 }

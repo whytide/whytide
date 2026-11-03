@@ -18,13 +18,19 @@ export type ReadProfile = {
 export type ProfileRead = { readonly key: string };
 /**
  * No profile, and no retry: the account is not connected, the profile is gone or out of sight, or
- * the provider failed on it until attempt PROFILE_READ_ATTEMPTS (workflows/constants.ts).
+ * the provider failed on it until attempt PROFILE_READ_ATTEMPTS (workflows/constants.ts); or, before
+ * the call, a kill switch holds, or the account is paused or held by its retry_at.
  */
 export type ProfileRefused = {
   readonly refused:
     | "linkedin_account_disconnected"
     | "linkedin_not_found"
-    | "linkedin_provider_error";
+    | "linkedin_provider_error"
+    | "account_paused"
+    | "linkedin_rate_limited"
+    | "platform_stopped"
+    | "workspace_stopped"
+    | "account_stopped";
 };
 
 /** The request file: the profile to read. */

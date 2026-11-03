@@ -1,14 +1,19 @@
 // The deletion script end to end on the worktree's database (README.md "The deletion script"). The
 // fixture person has a lead with a review decision, a snapshot with its verdicts and attempt, two
-// events with their evidence, two drafts, three decision records, four outbox events, an endpoint's
+// events with their evidence, two drafts, three decision records, an enrollment with its four
+// steps, an outreach row and an action-log row of linkedin's, five outbox events, an endpoint's
 // stored answer, a cost event and a credit reservation. `pnpm erase` by URL deletes every row that
 // names the person: a scan of every table finds the id in cost_events and credit_usage only, which
 // keep it (docs/security.md), and the name and the URL nowhere; it writes the erased hashes and the
 // log row with the counts by module, and prints the counts. A later import or signal run meets the
 // erased hash. The dry run prints the same counts and changes nothing; a failing eraser rolls every
 // row back; another person, and the same person in another workspace, keep their rows.
+// The fixture person has an approval item too (approvals' eraser, beta-p3-030), and a thread with
+// their reply in it (inbox's eraser, beta-p5-010). The run locks the lead after the platform's step
+// and before every other eraser's (beta-p5-030).
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createApprovalItem } from "@whytide/approvals/testing";
 import {
   createLeadForPerson,
   isHashed,
@@ -18,6 +23,7 @@ import {
 import { useHashSalt } from "@whytide/contacts/testing";
 import { type TenantClient, withTenant } from "@whytide/db";
 import { asRole, withTestDb } from "@whytide/db/testing";
+import { createMessage, createThread } from "@whytide/inbox/testing";
 import { servicePrincipal } from "@whytide/platform";
 import { createSignalEvent } from "@whytide/signals/testing";
 import { createOrganizationWithWorkspace, useTenancyClient } from "@whytide/tenancy/testing";
@@ -60,9 +66,16 @@ const KEEP_ID = ["cost_events", "credit_usage"];
 const OPERATOR = "dpo@example.com";
 
 const COUNTS = [
-  "messaging.message_drafts: 2",
-  "platform.outbox: 4",
+  "platform.outbox: 5",
   "platform.idempotency_records: 1",
+  "approvals.approval_items: 1",
+  "inbox.messages: 1",
+  "inbox.threads: 1",
+  "linkedin.sender_outreach: 1",
+  "linkedin.sender_action_log: 1",
+  "messaging.message_drafts: 2",
+  "campaigns.step_executions: 4",
+  "campaigns.enrollments: 1",
   "qualification.score_snapshots: 1",
   "qualification.criterion_verdicts: 6",
   "qualification.assessment_attempts: 1",
@@ -73,6 +86,7 @@ const COUNTS = [
   "contacts.leads: 1",
   "contacts.persons: 1",
 ];
+const STEPS = ["connect", "message_1", "follow_up_1", "follow_up_2"] as const;
 const CRITERIA = [
   "title_function",
   "seniority",
@@ -165,6 +179,28 @@ async function rowsOf(
         },
       });
     }
+    const stepExecutionId = idOf("stp");
+    await createApprovalItem(
+      { workspaceId, personId, senderAccountId: "lac_1", stepExecutionId },
+      tx,
+    );
+    // Approved and enrolled: an enrollment with the template's four steps, as campaigns writes them.
+    const enrollmentId = idOf("enl");
+    const sent = { workspaceId, personId, senderAccountId: "sac_fixture" };
+    const template = { templateId: "linkedin_default", templateVersion: 1 };
+    await tx.enrollment.create({
+      data: {
+        ...{ id: enrollmentId, ...sent, ...template, status: "active" },
+        ...{ sourceEventId: idOf("obx"), startedAt: new Date() },
+      },
+    });
+    await tx.stepExecution.createMany({
+      data: STEPS.map((stepKey, i) => ({
+        ...{ id: idOf("sx"), enrollmentId, ...sent, ...template, stepKey, position: i + 1 },
+        ...{ actionType: i === 0 ? ("invite" as const) : ("message" as const) },
+        ...{ stepTemplateHash: idOf("hash"), idempotencyKey: idOf("key") },
+      })),
+    });
     await tx.reviewDecision.create({
       data: {
         ...{ id: idOf("rvd"), workspaceId, personId, decision: "good_lead", snapshotId },
@@ -189,6 +225,21 @@ async function rowsOf(
         ...{ leaseExpiresAt: new Date(Date.now() + 60_000), subjectRef: personId },
       },
     });
+    const senderAccountId = idOf("sac");
+    const providerMemberRef = "providerId" in profile ? profile.providerId : null;
+    await tx.senderOutreach.create({
+      data: { id: idOf("sor"), workspaceId, senderAccountId, personId, providerMemberRef },
+    });
+    await tx.senderActionLog.create({
+      data: {
+        ...{ id: idOf("sal"), workspaceId, senderAccountId, kind: "read_profile" },
+        ...{ objectRef: personId, count: 1, outcome: "ok", at: new Date() },
+      },
+    });
+    // The person's reply in the account's thread, as inbox's store writes it.
+    const threadId = await createThread({ workspaceId, personId, senderAccountId }, tx);
+    const body = `${name} here: next week works`;
+    await createMessage({ workspaceId, threadId, personId, body }, tx);
   });
   for (const at of [1, 2]) {
     const commentText = `${name} here: we rebuilt our pipeline (${at})`;
@@ -219,6 +270,7 @@ async function fixture() {
       event("messaging.draft_requested", { draftId: "mdr_1", personId, userId: "usr_1" }),
       event("signals.person_found", { personIds: [personId, otherId] }),
       event("discovery.people_imported", { jobId: "imp_1", personIds: [personId] }),
+      event("linkedin.invite_accepted", { sender_account_id: "sac_1", person_id: personId }),
     ],
   });
   // A draft's POST answered with the draft, kept for its idempotency key.
@@ -295,7 +347,7 @@ test("pnpm erase by URL deletes every row that names the person, keeps the hash 
   const args = ["--workspace", slug, "--linkedin-url", url, "--operator", OPERATOR];
   assert.equal(await runErase(args, (line) => printed.push(line)), 0);
   assert.deepEqual(printed.slice(0, -1), COUNTS);
-  assert.match(printed.at(-1) ?? "", /^erased: era_[0-9A-Z]{26}, 25 rows$/);
+  assert.match(printed.at(-1) ?? "", /^erased: era_[0-9A-Z]{26}, 36 rows$/);
   for (const value of [personId, ...NAMES]) {
     assert.ok(
       !printed.join("\n").toLowerCase().includes(value.toLowerCase()),
@@ -311,7 +363,7 @@ test("pnpm erase by URL deletes every row that names the person, keeps the hash 
   const logs = await inRun(A, (tx) => tx.erasureLog.findMany());
   assert.equal(logs.length, 1);
   const [log] = logs as [(typeof logs)[number]];
-  assert.equal(`erased: ${log.id}, 25 rows`, printed.at(-1));
+  assert.equal(`erased: ${log.id}, 36 rows`, printed.at(-1));
   const hashes = await inRun(A, (tx) => tx.personHash.findMany({ where: { kind: "erased" } }));
   assert.equal(hashes.length, 2, "the URL's hash and the provider id's");
   assert.ok(hashes.some((row) => row.hash === log.personHash));
@@ -333,9 +385,12 @@ test("pnpm erase by URL deletes every row that names the person, keeps the hash 
       count(workspaceId, (tx) => tx.signalEvent.count({ where: { personId: id } })),
       count(workspaceId, (tx) => tx.messageDraft.count({ where: { personId: id } })),
       count(workspaceId, (tx) => tx.decisionRecord.count({ where: { subjectRef: id } })),
+      count(workspaceId, (tx) => tx.approvalItem.count({ where: { personId: id } })),
+      count(workspaceId, (tx) => tx.stepExecution.count({ where: { personId: id } })),
+      count(workspaceId, (tx) => tx.message.count({ where: { personId: id } })),
     ]);
-  assert.deepEqual(await kept(A, otherId), [1, 1, 2, 2, 3]);
-  assert.deepEqual(await kept(B, inB), [1, 1, 2, 2, 3]);
+  assert.deepEqual(await kept(A, otherId), [1, 1, 2, 2, 3, 1, 4, 1]);
+  assert.deepEqual(await kept(B, inB), [1, 1, 2, 2, 3, 1, 4, 1]);
   const events = await inRun(A, (tx) => tx.outboxEntry.findMany({ orderBy: { eventName: "asc" } }));
   assert.deepEqual(
     events.map((row) => [row.eventName, row.payload]),
@@ -374,7 +429,7 @@ test("the dry run prints the same counts and changes nothing", async () => {
   const printed: string[] = [];
   const args = ["--workspace", A, "--person", personId, "--operator", OPERATOR];
   assert.equal(await runErase([...args, "--dry-run"], (line) => printed.push(line)), 0);
-  assert.deepEqual(printed, [...COUNTS, "dry_run: 25 rows counted, all rolled back"]);
+  assert.deepEqual(printed, [...COUNTS, "dry_run: 36 rows counted, all rolled back"]);
   assert.deepEqual(await everyRow(), before);
   const erased: string[] = [];
   assert.equal(await runErase(args, (line) => erased.push(line)), 0);
@@ -396,6 +451,26 @@ test("an eraser that fails rolls every row back", async () => {
   const erasers = [...registeredErasers(), failing];
   await assert.rejects(erase(request, erasers), /the eraser failed/);
   assert.deepEqual(await everyRow(), before);
+});
+
+test("the run locks the lead after the platform's step and before every other eraser's", async () => {
+  const { A, personId } = await fixture();
+  const seen: string[] = [];
+  // Each eraser looks first whether another transaction can lock the lead: SKIP LOCKED skips it
+  // while the run holds it.
+  const probed = registeredErasers().map((eraser) => ({
+    ...eraser,
+    erase: async (id: string) => {
+      const free = await asRole("owner").$queryRaw<unknown[]>`
+        SELECT 1 FROM leads WHERE person_id = ${personId} FOR UPDATE SKIP LOCKED`;
+      seen.push(`${eraser.module}: ${free.length === 0 ? "locked" : "free"}`);
+      return eraser.erase(id);
+    },
+  }));
+  const request = { workspaceId: A, person: { id: personId }, operator: OPERATOR, dryRun: true };
+  await erase(request, probed);
+  const others = probed.map(({ module }) => module).filter((module) => module !== "platform");
+  assert.deepEqual(seen, ["platform: free", ...others.map((module) => `${module}: locked`)]);
 });
 
 test("the command refuses a usage error, an unknown workspace or person and a bad URL, printing no input", async () => {

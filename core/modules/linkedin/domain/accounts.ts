@@ -2,7 +2,8 @@
 // runs inside the request's tenant run, on its transaction (tenantClient), so every query is scoped to
 // the workspace currentTenant() names (core/packages/db README); connecting, which calls the provider,
 // opens its own runs instead. It leaves the account `pending`: only the provider's webhook sets
-// `connected` (domain/status.ts pairs them).
+// `connected` (domain/status.ts pairs them). A connect needs the current risk disclosure accepted and
+// the personal-account confirmation (domain/disclosure/), both stored with the pending account.
 import { outboxWriter, type Prisma, type TenantClient, tenantClient } from "@whytide/db";
 import { AppError, currentTenant, newId, publish, type TenantContext } from "@whytide/platform";
 import { z } from "zod";
@@ -10,6 +11,9 @@ import { linkedinConfig } from "../config.ts";
 import { errors } from "../errors.ts";
 import { events } from "../events.ts";
 import { ids } from "../ids.ts";
+import { DISCLOSURE_VERSION } from "./disclosure/constants.ts";
+import { hasHashKey } from "./hash.ts";
+import type { HealthState } from "./health/states.ts";
 import { linkedin, providerName } from "./provider.ts";
 import { inRun } from "./store.ts";
 import {
@@ -19,6 +23,8 @@ import {
   type WorkingHours,
 } from "./working-hours.ts";
 
+/** Who holds a stop: the tester, through the screen, or the operator, through the command. */
+export type SwitchSource = "tester" | "operator";
 export type SenderAccountStatus =
   | "pending"
   | "connected"
@@ -34,6 +40,28 @@ export type SenderAccount = {
   readonly timeZone: string;
   readonly workingHours: WorkingHours;
   readonly dailyReadCap: number;
+  /** The connection requests and the messages a day the day's limits are drawn from (domain/quota/). */
+  readonly inviteTarget: number;
+  readonly messageTarget: number;
+  /** No send and no read before it: the provider's rate limit, or an unknown outcome (domain/send/). */
+  readonly retryAt: Date | null;
+  /** Paused: no LinkedIn action through it, reads included (domain/controls/), and who paused it. */
+  readonly killSwitch: boolean;
+  readonly killSwitchSource: SwitchSource | null;
+  /** The risk disclosure's version its owner accepted, and when they confirmed the account is their own personal one. */
+  readonly disclosureVersion: number;
+  readonly personalAccountConfirmedAt: Date | null;
+  /**
+   * Its LinkedIn member id's hash is stored and was read since the latest pairing (domain/disclosure/
+   * member.ts): a reconnect's row keeps the previous account's until then. False while
+   * LINKEDIN_HASH_KEY is empty: no hash can be matched then. The hash never leaves here.
+   */
+  readonly memberIdKnown: boolean;
+  /** Its health (domain/health/): restricted, checkpoint and disconnected refuse every action. */
+  readonly healthState: HealthState;
+  /** The invitations pending at the vendor, and when the day's check counted them (domain/invites/). */
+  readonly pendingInvites: number | null;
+  readonly pendingInvitesCheckedAt: Date | null;
 };
 
 /** The hosted link lives this long: the tester connects right after pressing Connect. */
@@ -47,20 +75,45 @@ const shown = {
   timeZone: true,
   workingHours: true,
   dailyReadCap: true,
+  inviteTarget: true,
+  messageTarget: true,
+  retryAt: true,
+  killSwitch: true,
+  killSwitchSource: true,
+  disclosureVersion: true,
+  personalAccountConfirmedAt: true,
+  memberIdHash: true,
+  memberIdCheckedAt: true,
+  healthState: true,
+  pendingInvites: true,
+  pendingInvitesCheckedAt: true,
 } as const;
 
 /**
- * The hosted link for the principal's own account, after the risk disclosure: the user's one account
- * in the workspace, new or reused, waits as `pending` for the provider's account.connected webhook,
- * so a repeated connect changes nothing but the link. `returnTo` is the screen the provider sends the
- * browser back to, with `?connect=done` or `?connect=failed`. Two runs of its own around the provider
- * call, which no run waits on (the route is whytide:own-runs, so not @Idempotent()).
+ * The hosted link for the principal's own account, after the risk disclosure: `acknowledged` true for
+ * DISCLOSURE_VERSION, else disclosure_required, and `personalAccount` true, else
+ * personal_account_required. The user's one account in the workspace, new or reused, waits as
+ * `pending` for the provider's account.connected webhook, with the version and the confirmation's
+ * time, so a repeated connect changes nothing but the link and those. A reused account keeps its
+ * member id's hash, which the refresh after the connect compares. `returnTo` is the screen the
+ * provider sends the browser back to, with `?connect=done` or `?connect=failed`. Two runs of its own
+ * around the provider call, which no run waits on (the route is whytide:own-runs, so not
+ * @Idempotent()).
  */
 export async function startConnect(
   tenant: TenantContext,
-  input: { readonly timeZone: string; readonly acknowledged: boolean; readonly returnTo: string },
+  input: {
+    readonly timeZone: string;
+    readonly acknowledged: boolean;
+    readonly disclosureVersion?: number | undefined;
+    readonly personalAccount?: boolean | undefined;
+    readonly returnTo: string;
+  },
 ): Promise<{ url: string }> {
-  if (input.acknowledged !== true) throw new AppError(errors.disclosure_required);
+  if (input.acknowledged !== true || input.disclosureVersion !== DISCLOSURE_VERSION) {
+    throw new AppError(errors.disclosure_required);
+  }
+  if (input.personalAccount !== true) throw new AppError(errors.personal_account_required);
   const timeZone = parseTimeZone(input.timeZone);
   const { workspaceId } = tenant;
   const ownerUserId = tenant.principal.userId;
@@ -74,12 +127,15 @@ export async function startConnect(
     failureUrl: `${input.returnTo}?connect=failed`,
     expiresInMin: LINK_TTL_MIN,
   });
+  const acknowledgedAt = new Date();
   const pending = {
     provider: providerName(),
     providerLinkRef: link.providerRef,
     status: "pending" as const,
     timeZone,
-    disclosureAcknowledgedAt: new Date(),
+    disclosureAcknowledgedAt: acknowledgedAt,
+    disclosureVersion: DISCLOSURE_VERSION,
+    personalAccountConfirmedAt: acknowledgedAt,
   };
   await inRun(tenant, async (tx) => {
     await refuseConnected(tx); // connected meanwhile, by another tab
@@ -103,7 +159,8 @@ export async function listAccounts(): Promise<SenderAccount[]> {
 /**
  * The label, the zone, the working hours or the daily read cap of an account, each checked:
  * working_hours_invalid or read_cap_invalid otherwise. reserveReads reads the cap at each
- * reservation, so a new cap holds from the next one.
+ * reservation, so a lowered cap holds from the next one; a raised one holds from the next quota day,
+ * whose read allowance is drawn from it (domain/quota/limits.ts).
  */
 export async function updateSettings(
   id: string,
@@ -131,9 +188,9 @@ export async function updateSettings(
 }
 
 /**
- * Deletes the account's reference and its hash and keeps the row as `disconnected`; publishes
- * linkedin.sender_account_disconnected when it was not already. The vendor's side is removed by hand
- * in alpha (docs/runbook.md).
+ * Deletes the account's reference and its hash and keeps the row as `disconnected`, with its member
+ * id's hash, which a reconnect's refresh compares; publishes linkedin.sender_account_disconnected when
+ * it was not already. The vendor's side is removed by hand in alpha (docs/runbook.md).
  */
 export async function disconnect(id: string): Promise<void> {
   const account = await findAccount(id);
@@ -178,6 +235,20 @@ function parseReadCap(value: number | string): number {
   throw new AppError(errors.read_cap_invalid, { details: { fields: ["dailyReadCap"], max } });
 }
 
+/**
+ * The user's connected account in the run's workspace, or null: a pending or disconnected one, or
+ * another user's, is none. Approve enrolls with the approver's own account (campaigns).
+ */
+export async function senderOf(userId: string): Promise<SenderAccount | null> {
+  // Prisma drops an undefined value from a where: unchecked, that would be any user's account.
+  if (!userId) return null;
+  const found = await tenantClient.senderAccount.findFirst({
+    where: { ownerUserId: userId, status: "connected" },
+    select: shown,
+  });
+  return found === null ? null : asAccount(found);
+}
+
 /** The account with the id in this workspace, or sender_account_not_found. */
 export async function findAccount(id: string): Promise<SenderAccount> {
   // Prisma drops an undefined value from a where: unchecked, that would be any account.
@@ -196,7 +267,22 @@ function asAccount(row: {
   timeZone: string;
   workingHours: Prisma.JsonValue;
   dailyReadCap: number;
+  inviteTarget: number;
+  messageTarget: number;
+  retryAt: Date | null;
+  killSwitch: boolean;
+  killSwitchSource: SwitchSource | null;
+  disclosureVersion: number;
+  personalAccountConfirmedAt: Date | null;
+  memberIdHash: string | null;
+  memberIdCheckedAt: Date | null;
+  healthState: HealthState;
+  pendingInvites: number | null;
+  pendingInvitesCheckedAt: Date | null;
 }): SenderAccount {
+  const { memberIdHash, memberIdCheckedAt, ...account } = row;
   // Written by this module only, through parseWorkingHours or the default.
-  return { ...row, workingHours: row.workingHours as unknown as WorkingHours };
+  const workingHours = row.workingHours as unknown as WorkingHours;
+  const memberIdKnown = hasHashKey() && memberIdHash !== null && memberIdCheckedAt !== null;
+  return { ...account, workingHours, memberIdKnown };
 }

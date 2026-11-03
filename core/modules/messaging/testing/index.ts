@@ -3,10 +3,12 @@
 // person's draft in any state, createMessageDraft, or a `drafting` one written as its writer leaves
 // it, writeMessageDraft, on asRole("app") of @whytide/db/testing, so the test file calls
 // withTestDb() first, or on the client given: the web's e2e api seeds the draft panel's drafts so,
-// and stands in for the worker, which it does not run.
+// and stands in for the worker, which it does not run. createStepDraft writes a sequence step's
+// draft in any state, for approvals' and campaigns' tests.
 import { Prisma, type TenantClient } from "@whytide/db";
 import { asRole } from "@whytide/db/testing";
 import { newId } from "@whytide/platform";
+import { STEP_KINDS, type StepKey } from "../domain/drafts/constants.ts";
 import type { DraftStatus } from "../domain/drafts/write.ts";
 import { ids } from "../ids.ts";
 import {
@@ -51,6 +53,33 @@ export async function createMessageDraft(
   const id = newId(ids.message_draft);
   const data = { id, workspaceId, personId, channel, createdAt, ...columnsOf(input) };
   await client.messageDraft.create({ data });
+  return id;
+}
+
+/**
+ * A sequence step's draft of the person: a message (`message_1` unless given), or the note of
+ * `connect`, `ready` with every gate passed unless the input says otherwise; an `approved` one
+ * approved now. Its id.
+ */
+export async function createStepDraft(
+  input: SeededDraft & {
+    readonly workspaceId: string;
+    readonly personId: string;
+    readonly stepExecutionId: string;
+    readonly stepKey?: StepKey;
+    readonly createdAt?: Date;
+  },
+  client: Client = asRole("app"),
+): Promise<string> {
+  const { workspaceId, personId, stepExecutionId, stepKey = "message_1", createdAt } = input;
+  const channel = STEP_KINDS[stepKey] === "note" ? "linkedin_note" : "linkedin_message";
+  const columns = columnsOf(input);
+  const approvedAt = columns.status === "approved" ? new Date() : null;
+  const id = newId(ids.message_draft);
+  const step = { kind: "outbound_step" as const, stepExecutionId, stepKey, approvedAt };
+  await client.messageDraft.create({
+    data: { id, workspaceId, personId, channel, createdAt, ...step, ...columns },
+  });
   return id;
 }
 

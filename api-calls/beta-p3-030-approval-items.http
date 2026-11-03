@@ -1,0 +1,28 @@
+# approvals' queue routes (core/modules/approvals/README.md "Routes"): a member's session,
+# approvals.read to read the queue, approvals.decide to approve or skip; only the owner of an item's
+# sender account decides it. Both POSTs are @Idempotent(): the Idempotency-Key is an example UUID;
+# the same key answers the first press again. A write sends the cookie, so it sends
+# Origin: {{appOrigin}} too. `approvalItemId` is a pending item of your workspace: put it in
+# http-client.private.env.json with your workspaceId.
+
+### GET /v1/workspaces/{workspaceId}/approvals/items: the queue, every pending item and every approved one whose step waits, by due time, each with its lead, draft, sender account, stale and needsAttention flags and canDecide; counts.toApprove and counts.decidedToday
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/approvals/items
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/approvals/items/{id}/approve: approves the item with the text given, "" for an empty note, or the draft's own without one; 200 with the item; 403 not_sender_owner, 400 draft_text_refused with details.issues, 409 approval_item_not_pending or approval_draft_pending, 404 approval_item_not_found
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/approvals/items/{{approvalItemId}}/approve
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000003030
+
+{ "text": "Ines, how does your team follow up on warm leads today? A short question about it." }
+
+### POST /v1/workspaces/{workspaceId}/approvals/items/{id}/skip: skips the item, its draft left as it is; 200 with the item; 403 not_sender_owner, 409 approval_item_not_pending, 404 approval_item_not_found
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/approvals/items/{{approvalItemId}}/skip
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000003031

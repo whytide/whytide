@@ -7,4 +7,6 @@ export const ids = defineIds({
   wco: "workspace_company",
   phash: "person_hash",
   rvd: "review_decision",
+  sup: "suppression_entry",
+  lsc: "lead_status_change",
 });

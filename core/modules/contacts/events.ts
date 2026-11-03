@@ -3,6 +3,7 @@
 import { defineEvents } from "@whytide/platform";
 import { z } from "zod";
 import { REVIEW_DECISIONS } from "./domain/review/rules.ts";
+import { SUPPRESSION_LAYERS } from "./domain/suppression/constants.ts";
 
 export const events = defineEvents({
   /** reviewLead appended a decision: ids and the decision, never a reason's text. */
@@ -10,5 +11,15 @@ export const events = defineEvents({
     workspaceId: z.string(),
     personId: z.string(),
     decision: z.enum(REVIEW_DECISIONS),
+  }),
+  /** addSuppression or addOptOut wrote a new entry: its id and its layer, never its value. */
+  "contacts.suppression_added": z.strictObject({
+    suppressionId: z.string(),
+    layer: z.enum(SUPPRESSION_LAYERS),
+  }),
+  /** approveLead approved the lead, again too: the person and the user; campaigns enrolls it. */
+  "contacts.lead_approved": z.strictObject({
+    personId: z.string(),
+    approvedBy: z.string(),
   }),
 });

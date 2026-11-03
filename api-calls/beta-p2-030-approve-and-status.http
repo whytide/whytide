@@ -1,0 +1,18 @@
+# contacts' outreach routes (core/modules/contacts/README.md "Routes"): a member's session,
+# leads.approve to approve, leads.read for the status changes. POST is @Idempotent(): the
+# Idempotency-Key is an example UUID; the same key answers the first press again, another one
+# approves again and publishes contacts.lead_approved again. A write sends the cookie, so it sends
+# Origin: {{appOrigin}} too. `personId` is a person of your workspace with a lead: put it in
+# http-client.private.env.json with your workspaceId.
+
+### POST /v1/workspaces/{workspaceId}/contacts/leads/{personId}/approve: approves the lead for outreach, from pending_review, from approved again, or from suppressed once the never-contact check allows it and the lead was never in a campaign; 200 with the outreachStatus; 409 person_suppressed with details.reason (recently_contacted included), 409 lead_in_outreach from in_campaign, replied or finished; 404 lead_not_found
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/{{personId}}/approve
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000002030
+
+### GET /v1/workspaces/{workspaceId}/contacts/leads/{personId}/status-changes: the lead's outreach status changes, newest first, the hundred newest at most, each with its reason, template and actor; 404 lead_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/{{personId}}/status-changes
+Accept: application/json
+Cookie: {{sessionCookie}}

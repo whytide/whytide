@@ -8,3 +8,5 @@
 6. Tests import `domain/` and `testing/`, never `index.ts` or `api/`: Node cannot run the controller's decorators from source. They set the salt with `useHashSalt`, never a real one.
 7. A screen's every state, empty, loading and error, takes its text from a key and has a spec.
 8. A chunk of persons or leads goes through the batched commands, whose test holds them equal to the one-row ones (`tests/batch.test.ts`).
+9. Every outbound path asks `suppressionOf(personId, { newEnrollment })` in its own run just before it acts, never an earlier answer or a cache, acts only on `{ suppressed: false }`, and then records the touch with `recordTouch`; a change to the check keeps `pnpm -F @whytide/contacts test:safety` passing.
+10. A lead's outreach status changes only through `recordLeadStatus`, from other modules and inside contacts alike, never a write to `leads.outreach_status` or `lead_status_changes`: each change is recorded, and `updated_at` stays.

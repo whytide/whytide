@@ -1,10 +1,12 @@
 // A lead's cost (README "The cost counter"; docs/concepts.md "Costs"), for GET …/credits/leads/
 // {personId}/cost, in the caller's tenant run: the credits committed with the person as subject (its
-// assessments), what the vendors cost for the calls about it (assessments, drafts), and its share of
-// what each signal run that found it read: the credits the run committed for its engagers read, over
-// the candidates it staged, once per candidate of the person's. By module, an action's first part or
-// a cost event's feature. A person with no lead in the workspace, one of another workspace included,
-// is contacts' lead_not_found.
+// assessments), what the vendors cost for the calls about it (assessments, drafts), and what the
+// signal runs that found it read: its share of each run's credits for its engagers read by blocks,
+// over the candidates it staged, once per candidate of the person's (a run started before
+// beta-p1-090), and the credits committed for the profile reads of the person's candidates, each its
+// usage's subject (beta-p1-090). By module, an action's first part or a cost event's feature. A
+// person with no lead in the workspace, one of another workspace included, is contacts'
+// lead_not_found.
 import { getLead } from "@whytide/contacts";
 import { tenantClient } from "@whytide/db";
 import { type PersonRead, personReads, prices } from "@whytide/signals";
@@ -18,6 +20,7 @@ export type LeadCost = {
 };
 
 const READ = prices["signals.engager_read"];
+const ENGAGER = prices["signals.engager"];
 const moduleOf = (action: string): string => action.split(".")[0] ?? action;
 
 /** The person's share of its runs' reads: each run's credits × the person's candidates ÷ the run's. */
@@ -68,6 +71,15 @@ export async function leadCost(personId: string): Promise<LeadCost> {
       runs.map(({ subjectRef, _sum }) => [subjectRef, _sum.credits?.toFixed() ?? "0"]),
     );
     add(moduleOf(READ), "credits", readShare(reads, runCredits));
+    const profiles = await tenantClient.creditUsage.aggregate({
+      where: {
+        subjectRef: { in: reads.flatMap(({ candidateIds }) => candidateIds) },
+        action: ENGAGER,
+        status: "committed",
+      },
+      _sum: { credits: true },
+    });
+    add(moduleOf(ENGAGER), "credits", profiles._sum.credits?.toFixed() ?? "0");
   }
   const byFeature = [...parts]
     .sort(([a], [b]) => (a < b ? -1 : 1))

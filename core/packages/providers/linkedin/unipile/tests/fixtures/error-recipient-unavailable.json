@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "type": "errors/user_unreachable",
+  "title": "User unreachable",
+  "detail": "fixture-body-marker: the recipient cannot be reached."
+}

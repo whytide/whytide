@@ -1,0 +1,13 @@
+# inbox's reply golden set (core/modules/inbox/README.md "The reply golden set"): a member's session
+# and inbox.read. The answer is a file, not JSON: a JSON line per labeled reply with the conversation
+# before it, the person's names masked and no id, also written under the workspace's exports/.
+
+### GET /v1/workspaces/{workspaceId}/inbox/exports/reply-labels.jsonl: every labeled reply, its latest label, with the thread's messages before it (the latest ten), also written to exports/reply-labels-<UTC date>.jsonl; 413 files_too_large past 25 MiB
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/exports/reply-labels.jsonl
+Accept: application/jsonl
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/inbox/exports/reply-labels.jsonl?week: the labels chosen in one ISO week (UTC), written to exports/reply-labels-<ISO week>.jsonl, the day's full file left in place; 400 week_invalid for a week its year does not have or one not started
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/exports/reply-labels.jsonl?week=2026-W44
+Accept: application/jsonl
+Cookie: {{sessionCookie}}

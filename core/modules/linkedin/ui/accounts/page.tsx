@@ -1,10 +1,12 @@
 // The LinkedIn screen (README.md "Screen"), a server component: the title, the header, the
 // provider's failed return (`?connect=failed`; `?connect=done` needs nothing, the account shows its
-// status), and the signed-in user's account, which accounts.tsx loads in the browser, with its states.
+// status), the signed-in user's account, which accounts.tsx loads in the browser, with its states,
+// and the workspace's "Stop everything" under it (workspace-stop.tsx).
 import { PageHeader } from "@whytide/ui";
 import { CircleAlert } from "@whytide/ui/icons";
 import { getTranslations } from "next-intl/server";
 import { Accounts } from "./accounts.tsx";
+import { WorkspaceStop } from "./workspace-stop.tsx";
 
 type Props = {
   params: Promise<{ workspace: string }>;
@@ -30,6 +32,9 @@ export default async function LinkedinAccounts({ params, searchParams }: Props) 
         </p>
       ) : null}
       <Accounts workspaceId={workspace} />
+      <div className="mt-6">
+        <WorkspaceStop workspaceId={workspace} />
+      </div>
     </>
   );
 }

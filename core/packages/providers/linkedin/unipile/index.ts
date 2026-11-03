@@ -1,42 +1,48 @@
 // The Unipile adapter of the LinkedIn port (README.md): the user's own account through Unipile's
-// hosted authentication, then reads, over Unipile's REST API with Node's fetch from this folder only;
-// no SDK (README.md "Covers"). Every answer is mapped to the port's words and parsed with its
-// schemas, so that a vendor field that is not a business field stops here. A webhook is accepted
-// only with the shared secret header, compared in constant time, whatever its body: a hosted-auth
-// notify without it, as Unipile documents the notify, connects nothing (README.md "Webhooks").
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+// hosted authentication, then reads and the send side, over Unipile's REST API with Node's fetch
+// from this folder only; no SDK (README.md "Covers"): invitations in invites.ts, messages in
+// messages.ts, a post's engagers in engagers.ts, under cursors signed with UNIPILE_CURSOR_SECRET
+// (cursor.ts). Every answer is mapped to the port's words and parsed with its schemas, so that a
+// vendor field that is not a business field stops here. The webhooks are webhooks.ts's: the three
+// sources behind the shared secret header, and the hosted-auth notify behind the pairing token that
+// createHostedAuthLink puts in the link's name (README.md "Webhooks", "Pairing").
+import { randomUUID } from "node:crypto";
 import { AppError } from "@whytide/platform";
 import { z } from "zod";
 import { defineAdapter, type PortImplementation } from "../../_pattern/index.ts";
-import {
-  type AccountStatus,
-  type LinkedinWebhookEvent,
-  linkedinPort,
-  linkedinProfile,
-} from "../port.ts";
-import { type Method, notFound, providerError, segment, unipileClient } from "./client.ts";
+import { type AccountStatus, linkedinPort, linkedinProfile } from "../port.ts";
+import { notFound, offShape, segment, unipileClient } from "./client.ts";
 import { unipileConfig } from "./config.ts";
+import { PROVIDER_REF_PREFIX, SECRET_MIN_CHARS } from "./constants.ts";
+import { signedCursors } from "./cursor.ts";
 import { listPostEngagers } from "./engagers.ts";
+import { invites } from "./invites.ts";
+import { messaging } from "./messages.ts";
+import { webhooks } from "./webhooks.ts";
 
-/** The header the account-status webhook is registered with, holding UNIPILE_WEBHOOK_SECRET. */
-export const SECRET_HEADER = "unipile-auth";
+export { SECRET_HEADER } from "./constants.ts";
 
 export type UnipileOptions = {
   /** The account's API address, `https://apiN.unipile.com:PORT`; a test passes its loopback server. */
   readonly baseUrl: string;
   readonly apiKey: string;
   readonly webhookSecret: string;
+  /** The key cursors are signed with (cursor.ts). */
+  readonly cursorSecret: string;
   /** The public URL of POST /v1/linkedin/webhooks/unipile; createHostedAuthLink needs it. */
   readonly notifyUrl?: string | undefined;
   /** The clock; a test sets it. */
   readonly now?: () => number;
+  /** How long a request may take, TIMEOUT_MS unless a test sets it. */
+  readonly timeoutMs?: number;
 };
 
-const { errors } = linkedinPort;
 const BLOCK = "packages/providers";
 const ref = z.string().min(1).max(256);
 const hostedLink = z.object({ url: z.url({ protocol: /^https$/ }).max(2048) });
 const account = z.object({ type: z.string(), sources: z.array(z.object({ status: z.string() })) });
+/** The account's own member id in its details, when Unipile gives one (README.md "Covers"). */
+const ownMember = z.object({ connection_params: z.object({ im: z.object({ id: ref }) }) });
 const user = z.object({
   provider_id: z.string(),
   public_identifier: z.string(),
@@ -56,43 +62,26 @@ const user = z.object({
     )
     .nullish(),
 });
-/** The hosted-auth notify: our link's name with the new account. */
-const notify = z.object({
-  status: z.enum(["CREATION_SUCCESS", "RECONNECTED"]),
-  account_id: ref,
-  name: ref,
-});
-/** The account-status webhook, for the events README.md "Webhooks" registers. */
-const accountStatus = z.object({
-  AccountStatus: z.object({
-    account_id: ref,
-    account_type: z.literal("LINKEDIN"),
-    message: z.enum(["CREATION_SUCCESS", "RECONNECTED", "CREDENTIALS", "DELETED"]),
-  }),
-});
-const KINDS = {
-  CREATION_SUCCESS: "account.connected",
-  RECONNECTED: "account.connected",
-  CREDENTIALS: "account.credentials_required",
-  DELETED: "account.disconnected",
-} as const satisfies Record<string, LinkedinWebhookEvent["kind"]>;
 
 export function unipileLinkedin({
   baseUrl,
   apiKey,
   webhookSecret,
+  cursorSecret,
   notifyUrl,
   now = Date.now,
+  timeoutMs,
 }: UnipileOptions): PortImplementation<typeof linkedinPort> {
-  const call = unipileClient(baseUrl, apiKey, now);
-  const secret = digest(webhookSecret);
+  const call = unipileClient(baseUrl, apiKey, now, timeoutMs);
+  const { pairingName, parseWebhook } = webhooks(webhookSecret);
+  const cursors = signedCursors(cursorSecret);
   return {
     createHostedAuthLink: async ({ successUrl, failureUrl, expiresInMin }) => {
       if (!notifyUrl) {
         const variables = ["UNIPILE_NOTIFY_URL: required to create a hosted link"];
         throw new AppError("config_invalid", { details: { block: BLOCK, variables } });
       }
-      const providerRef = `whytide-${randomUUID()}`;
+      const providerRef = `${PROVIDER_REF_PREFIX}${randomUUID()}`;
       const expiresAt = new Date(now() + expiresInMin * 60_000);
       const body = {
         type: "create",
@@ -102,7 +91,8 @@ export function unipileLinkedin({
         success_redirect_url: successUrl,
         failure_redirect_url: failureUrl,
         notify_url: notifyUrl,
-        name: providerRef,
+        // Echoed in the notify, whose only proof is the token (README.md "Pairing").
+        name: pairingName(providerRef),
         single_use: true,
         disabled_options: ["cookie_auth"],
       };
@@ -114,13 +104,15 @@ export function unipileLinkedin({
     },
     getAccountStatus: async (providerAccountRef) => {
       const path = `/accounts/${segment(providerAccountRef, "getAccountStatus")}`;
-      const found = account.safeParse(await call("getAccountStatus", { path }));
+      const answer = await call("getAccountStatus", { path });
+      const found = account.safeParse(answer);
       if (!found.success) throw offShape("getAccountStatus");
       if (found.data.type !== "LINKEDIN") throw notFound("getAccountStatus");
       const status = statusOf(found.data.sources.map((source) => source.status));
-      return { status, checkedAt: new Date(now()) };
+      const memberRef = ownMember.safeParse(answer).data?.connection_params.im.id ?? null;
+      return { status, checkedAt: new Date(now()), memberRef };
     },
-    listPostEngagers: (input) => listPostEngagers(call, now, input),
+    listPostEngagers: (input) => listPostEngagers(call, now, cursors, input),
     getProfile: async ({ providerAccountRef, profileUrl }) => {
       const handle = handleOf(profileUrl);
       if (handle === undefined) throw notFound("getProfile");
@@ -152,41 +144,41 @@ export function unipileLinkedin({
       if (!profile.success) throw offShape("getProfile");
       return profile.data;
     },
-    parseWebhook: async ({ headers, rawBody }) => {
-      const given = Object.entries(headers).find(([name]) => name.toLowerCase() === SECRET_HEADER);
-      const value = given?.[1];
-      if (typeof value !== "string" || !timingSafeEqual(digest(value), secret)) {
-        throw webhookInvalid("secret");
-      }
-      const event = eventOf(jsonOf(rawBody));
-      if (event === undefined) throw webhookInvalid("body");
-      return event;
-    },
+    parseWebhook,
+    ...invites(call, now, cursors),
+    ...messaging(call, now),
   };
 }
 
 export const unipileAdapter = defineAdapter(linkedinPort, {
   name: "unipile",
-  requires: ["UNIPILE_BASE_URL", "UNIPILE_API_KEY", "UNIPILE_WEBHOOK_SECRET"],
+  requires: [
+    "UNIPILE_BASE_URL",
+    "UNIPILE_API_KEY",
+    "UNIPILE_WEBHOOK_SECRET",
+    "UNIPILE_CURSOR_SECRET",
+  ],
   create: () => {
     const {
       UNIPILE_BASE_URL: baseUrl,
       UNIPILE_API_KEY: apiKey,
       UNIPILE_WEBHOOK_SECRET: webhookSecret,
+      UNIPILE_CURSOR_SECRET: cursorSecret,
       UNIPILE_NOTIFY_URL: notifyUrl,
     } = unipileConfig;
     const required = "required by the unipile adapter";
+    const long = `at least ${SECRET_MIN_CHARS} characters, ${required}`;
+    const isLong = (value?: string) => (value?.length ?? 0) >= SECRET_MIN_CHARS;
     const variables = [
       ...(baseUrl ? [] : [`UNIPILE_BASE_URL: ${required}`]),
       ...(apiKey ? [] : [`UNIPILE_API_KEY: ${required}`]),
-      ...((webhookSecret?.length ?? 0) >= 32
-        ? []
-        : [`UNIPILE_WEBHOOK_SECRET: at least 32 characters, ${required}`]),
+      ...(isLong(webhookSecret) ? [] : [`UNIPILE_WEBHOOK_SECRET: ${long}`]),
+      ...(isLong(cursorSecret) ? [] : [`UNIPILE_CURSOR_SECRET: ${long}`]),
     ];
-    if (!baseUrl || !apiKey || !webhookSecret || variables.length > 0) {
+    if (!baseUrl || !apiKey || !webhookSecret || !cursorSecret || variables.length > 0) {
       throw new AppError("config_invalid", { details: { block: BLOCK, variables } });
     }
-    return unipileLinkedin({ baseUrl, apiKey, webhookSecret, notifyUrl });
+    return unipileLinkedin({ baseUrl, apiKey, webhookSecret, cursorSecret, notifyUrl });
   },
 });
 
@@ -205,31 +197,4 @@ function statusOf(statuses: readonly string[]): AccountStatus["status"] {
   if (statuses.includes("CREDENTIALS")) return "credentials_required";
   const running = statuses.every((status) => status === "OK" || status === "CONNECTING");
   return statuses.length > 0 && running ? "connected" : "error";
-}
-
-const offShape = (method: Method) =>
-  providerError(method, { reason: "an answer off the documented shape" });
-/** Nothing of the body or the secret in it. */
-const webhookInvalid = (reason: string) =>
-  new AppError(errors.linkedin_webhook_invalid, { details: { method: "parseWebhook", reason } });
-const digest = (value: string) => createHash("sha256").update(value).digest();
-
-function jsonOf(rawBody: string | Uint8Array): unknown {
-  try {
-    return JSON.parse(typeof rawBody === "string" ? rawBody : Buffer.from(rawBody).toString());
-  } catch {
-    return undefined;
-  }
-}
-
-function eventOf(body: unknown): LinkedinWebhookEvent | undefined {
-  const link = notify.safeParse(body);
-  if (link.success) {
-    const { account_id: providerAccountRef, name: providerRef } = link.data;
-    return { kind: "account.connected", providerAccountRef, providerRef };
-  }
-  const status = accountStatus.safeParse(body);
-  if (!status.success) return undefined;
-  const { account_id: providerAccountRef, message } = status.data.AccountStatus;
-  return { kind: KINDS[message], providerAccountRef };
 }

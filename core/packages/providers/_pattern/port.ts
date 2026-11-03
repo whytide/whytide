@@ -1,10 +1,11 @@
 // A port in our words (docs/architecture.md §9 rule 1, docs/rules/coding.md §6): its methods as Zod
-// input and output schemas and its error codes, `<port>_<reason>`. bindPort() is the boundary around
-// an adapter's implementation: every call parses its input, and an error that is not one of the
-// port's codes is wrapped as `<prefix>_error_unmapped`, so that no vendor payload reaches a log line
-// (coding §9); in development and tests the output is checked too and the vendor error kept as the
-// cause, so that a vendor object fails loudly with the method's name. Production trusts what the
-// contract suite proved and passes outputs through. Every call is counted by its outcome (metrics.ts).
+// input and output schemas and its error codes, `<port>_<reason>`. bindPort() is the boundary
+// around an adapter's implementation: every call parses its input, and an error that is not one of
+// the port's codes is wrapped as `<prefix>_error_unmapped`, so that no vendor payload reaches a log
+// line (coding §9). Outside production the output is checked too (checkOutputs) and the vendor
+// error kept as the cause (keepCause), so that a vendor object fails loudly with the method's name.
+// Production keeps no cause, and passes outputs through unless the port is defined with
+// alwaysCheckOutputs, as the LinkedIn port is. Every call is counted by its outcome (metrics.ts).
 import { AppError, defineErrors, isAppError, platformConfig } from "@whytide/platform";
 import type { z } from "zod";
 import { patternErrors } from "./errors.ts";
@@ -27,6 +28,8 @@ export type PortDefinition<
   readonly variable: string;
   /** The codes bindPort() throws: an input off the schema, an output off it, an error off the list. */
   readonly codes: { readonly input: string; readonly output: string; readonly error: string };
+  /** Every binding checks the outputs, in production too, whatever its BindOptions say. */
+  readonly alwaysCheckOutputs: boolean;
 };
 export type AnyPort = PortDefinition<MethodSchemas, PortErrors>;
 export type PortErrorCode<P extends AnyPort> = keyof P["errors"] & string;
@@ -47,8 +50,16 @@ export type PortImplementation<P extends AnyPort> = {
 export type BindOptions = {
   /** The adapter's name, for the errors. */
   readonly adapter: string;
-  /** Check outputs and keep a vendor error as the cause; the default is every environment but production. */
-  readonly validate?: boolean;
+  /**
+   * Check every output against the method's schema; the default is every environment but
+   * production. A port defined with `alwaysCheckOutputs` is checked whatever this says.
+   */
+  readonly checkOutputs?: boolean;
+  /**
+   * Keep a vendor error as the cause of `<prefix>_error_unmapped`; the default is every
+   * environment but production.
+   */
+  readonly keepCause?: boolean;
 };
 
 const SNAKE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
@@ -61,8 +72,10 @@ export function definePort<M extends MethodSchemas, E extends PortErrors>(defini
   errors: E;
   /** The prefix of the codes when it is not the port's name: `mail` for `app_mail`. */
   errorPrefix?: string;
+  /** Check the outputs in every environment, production included (README.md "The boundary"). */
+  alwaysCheckOutputs?: boolean;
 }): PortDefinition<M, E> {
-  const { name, methods, errorPrefix = name } = definition;
+  const { name, methods, errorPrefix = name, alwaysCheckOutputs = false } = definition;
   const invalid = (reason: string, extra: Record<string, unknown> = {}) =>
     new AppError(patternErrors.port_invalid, { details: { port: name, reason, ...extra } });
   if (!SNAKE.test(name)) throw invalid("the name is not snake_case");
@@ -95,6 +108,7 @@ export function definePort<M extends MethodSchemas, E extends PortErrors>(defini
     errors,
     variable: `PROVIDER_${name.toUpperCase()}`,
     codes,
+    alwaysCheckOutputs,
   });
   ports.set(name, port);
   return port;
@@ -119,7 +133,9 @@ export function bindPort<P extends AnyPort>(
       details: { port: port.name, adapter: options.adapter, missing, extra },
     });
   }
-  const validate = options.validate ?? platformConfig.APP_ENV !== "production";
+  const outsideProduction = platformConfig.APP_ENV !== "production";
+  const checkOutputs = port.alwaysCheckOutputs || (options.checkOutputs ?? outsideProduction);
+  const keepCause = options.keepCause ?? outsideProduction;
   // The descriptors, not a spread: a fake's live `state` getter and its controls stay reachable.
   const bound = Object.defineProperties({}, Object.getOwnPropertyDescriptors(given));
   for (const method of names) {
@@ -140,10 +156,10 @@ export function bindPort<P extends AnyPort>(
         // The vendor error itself travels only where a person reads it, never into a production log.
         throw new AppError(port.codes.error, {
           details: { method, code: vendorCode(error) },
-          cause: validate ? error : undefined,
+          cause: keepCause ? error : undefined,
         });
       }
-      if (validate) checkOutput(port, method, schema.output, output);
+      if (checkOutputs) checkOutput(port, method, schema.output, output);
       return output;
     };
     const labels = { port: port.name, adapter: options.adapter, method };

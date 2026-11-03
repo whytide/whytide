@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "type": "errors/no_connection_with_recipient",
+  "title": "No connection with recipient",
+  "detail": "fixture-body-marker: the recipient is not a relation."
+}

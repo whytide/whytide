@@ -1,0 +1,8 @@
+# campaigns' enrollments of a person, the lead page's enrollment panel (core/modules/campaigns/README.md
+# "Routes"): a member's session, campaigns.read. `personId` is a person of your workspace: put it in
+# http-client.private.env.json with your workspaceId.
+
+### GET /v1/workspaces/{workspaceId}/campaigns/enrollments: the person's enrollments, newest first, at most 20, each with its exit reason and detail, its steps by position (their status, due, scheduled and sent times, skip reason and error code) and its sender account's time zone, null without one; none for a person without one; 400 validation_failed without personId
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/enrollments?personId={{personId}}
+Accept: application/json
+Cookie: {{sessionCookie}}

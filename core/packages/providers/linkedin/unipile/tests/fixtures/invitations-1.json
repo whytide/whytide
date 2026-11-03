@@ -1,0 +1,24 @@
+{
+  "object": "InvitationList",
+  "items": [
+    {
+      "object": "InvitationSent",
+      "id": "fixture-invitation-ada",
+      "invited_user": "Ada Example",
+      "invited_user_id": "fixture-member-ada",
+      "date": "Sent 2 days ago",
+      "parsed_datetime": "2026-09-30T08:00:00.000Z",
+      "invitation_text": "fixture-body-marker: a note to Ada."
+    },
+    {
+      "object": "InvitationSent",
+      "id": "fixture-invitation-bao",
+      "invited_user": "Bao Sample",
+      "invited_user_id": "fixture-member-bao",
+      "date": "Sent today",
+      "parsed_datetime": null
+    },
+    { "object": "InvitationSent", "id": "fixture-invitation-unknown", "invited_user_id": null }
+  ],
+  "cursor": "invitations-page-2"
+}

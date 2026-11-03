@@ -56,7 +56,7 @@ export class DraftsController {
   @Get("leads/:personId/drafts")
   @read
   @route({
-    summary: "The lead's drafts, newest first",
+    summary: "The lead's drafts, newest first; a sequence step's draft is never listed here",
     params: leadParams,
     response: draftListResponse,
   })
@@ -80,11 +80,17 @@ export class DraftsController {
   @write
   @route({
     summary:
-      "Saves the member's own text, at most the channel's limit: the draft becomes edited, which no later write changes",
+      "Saves the member's own text, at most the channel's limit and passing the gates (no placeholder, red line or colleague's signal): the draft becomes edited, which no later write changes; a sequence step's draft is refused",
     params: draftParams,
     body: editDraftBody,
     response: draftResponse,
-    errors: [errors.draft_not_found, errors.draft_not_editable, errors.messaging_input_invalid],
+    errors: [
+      errors.draft_not_found,
+      errors.draft_not_editable,
+      errors.step_draft_not_editable,
+      errors.messaging_input_invalid,
+      errors.draft_text_refused,
+    ],
   })
   async edit(@Param("id") id: string, @Body() body: EditDraftBody): Promise<DraftResponse> {
     return toResponse(await editDraft(id, body));
@@ -96,10 +102,15 @@ export class DraftsController {
   @idempotent
   @route({
     summary:
-      "Asks for a new draft of the same lead and channel, unlike this one, which is kept: 202 with the new draft, drafting; publishes messaging.draft_requested",
+      "Asks for a new draft of the same lead and channel, unlike this one, which is kept: 202 with the new draft, drafting; publishes messaging.draft_requested; a sequence step's draft is refused",
     params: draftParams,
     response: draftResponse,
-    errors: [errors.draft_not_found, errors.draft_not_editable, errors.dossier_lead_not_found],
+    errors: [
+      errors.draft_not_found,
+      errors.draft_not_editable,
+      errors.step_draft_not_editable,
+      errors.dossier_lead_not_found,
+    ],
   })
   async regenerate(@Param("id") id: string): Promise<DraftResponse> {
     return toResponse(await regenerateDraft(id));
@@ -111,11 +122,12 @@ export class DraftsController {
  * channel's limit now, which an edit is held to (hardLimitOf).
  */
 function toResponse(draft: Draft): DraftResponse {
-  const { id, personId, channel, status, text, editedText, modelId, promptVersion } = draft;
+  const { id, personId, channel, kind, status, text, editedText, modelId, promptVersion } = draft;
   const { dossierHash, regenerations, editedAt, createdAt, updatedAt } = draft;
   const plan = draft.plan as DraftResponse["plan"];
   return {
-    ...{ id, personId, channel, status, text, editedText, modelId, promptVersion, dossierHash },
+    ...{ id, personId, channel, kind, status, text, editedText, modelId, promptVersion },
+    dossierHash,
     plan: plan && { angle: plan.angle, factIds: plan.factIds, cta: plan.cta },
     gates: draft.gates as DraftResponse["gates"],
     regenerations,

@@ -20,7 +20,8 @@
     "typecheck": "pnpm run generate && tsc -b",
     "lint": "node ../../../tools/lint/lint.ts .",
     "test": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test tests/*.test.ts",
-    "test:tenancy": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test tests/tenancy.test.ts"
+    "test:tenancy": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test tests/tenancy.test.ts",
+    "test:safety": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test \"tests/safety/*.test.ts\""
   },
   "dependencies": {
     "@nestjs/common": "12.1.3",

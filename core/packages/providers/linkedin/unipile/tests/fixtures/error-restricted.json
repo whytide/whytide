@@ -1,0 +1,6 @@
+{
+  "status": 403,
+  "type": "errors/account_restricted",
+  "title": "Account restricted",
+  "detail": "fixture-body-marker: LinkedIn restricted the account."
+}

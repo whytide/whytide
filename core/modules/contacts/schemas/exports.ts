@@ -3,6 +3,11 @@
 import type { z } from "zod";
 import { leadListQuery } from "./leads.ts";
 
-/** The lead list's filters: a status, a tier, `unreviewed`; none is every lead. */
-export const leadsCsvQuery = leadListQuery.pick({ status: true, tier: true, review: true });
+/** The lead list's filters: a status, a tier, `unreviewed`, an outreach status; none is every lead. */
+export const leadsCsvQuery = leadListQuery.pick({
+  status: true,
+  tier: true,
+  review: true,
+  outreach: true,
+});
 export type LeadsCsvQuery = z.infer<typeof leadsCsvQuery>;

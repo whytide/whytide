@@ -1,0 +1,114 @@
+// The tables of core/modules/inbox (its docs/data.md), beta-p5-010; migration inbox_initial. A
+// thread: one conversation of a sender account with a person, which the platform started (the
+// receiver keeps no other, RB-13.1.3); a message in it. sender_account_id, owner_user_id, person_id
+// and step_execution_id are plain ids: no foreign key crosses modules. A message links its thread by
+// the pair (workspace_id, thread_id), so the database refuses a link across workspaces. Hand-written
+// SQL in the migration, which the schema cannot say: the CHECK messages_sent_by (sent_by null
+// exactly when the direction is in). beta-p5-040, migration inbox_reply_labels: a reply's label, one
+// row per inbound message, linked by the pair (workspace_id, message_id) and deleted with it.
+
+/// tenant
+model Thread {
+  id                String       @id
+  workspaceId       String       @map("workspace_id")
+  channel           InboxChannel
+  /// linkedin's `sac_` account the conversation runs on.
+  senderAccountId   String       @map("sender_account_id")
+  /// The account's owner, who reads the thread.
+  ownerUserId       String       @map("owner_user_id")
+  /// contacts' `per_` id of the person.
+  personId          String       @map("person_id")
+  /// The provider's chat the thread is.
+  providerThreadRef String       @map("provider_thread_ref")
+  /// The latest message's sent_at: moved forward only.
+  lastMessageAt     DateTime     @map("last_message_at") @db.Timestamptz()
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz()
+  messages          Message[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, channel, providerThreadRef])
+  @@index([workspaceId, lastMessageAt])
+  @@index([workspaceId, personId])
+  @@map("threads")
+}
+
+enum InboxChannel {
+  linkedin
+
+  @@map("inbox_channel")
+}
+
+/// tenant
+model Message {
+  id                 String           @id
+  workspaceId        String           @map("workspace_id")
+  threadId           String           @map("thread_id")
+  /// contacts' `per_` id of the person.
+  personId           String           @map("person_id")
+  direction          MessageDirection
+  /// Who sent an outbound message; null exactly when the direction is `in` (messages_sent_by).
+  sentBy             MessageSentBy?   @map("sent_by")
+  /// campaigns' `sx_` step an outbound campaign message came from (beta-p5-020).
+  stepExecutionId    String?          @map("step_execution_id")
+  /// The text as the provider gave it: never in an event, an input, a result or a log line.
+  /// pii
+  body               String
+  /// The provider's message: a second store of it is a repeat.
+  providerMessageRef String?          @map("provider_message_ref")
+  /// The provider's time of the message.
+  sentAt             DateTime         @map("sent_at") @db.Timestamptz()
+  /// When Whytide stored it.
+  receivedAt         DateTime         @map("received_at") @db.Timestamptz()
+  approvedBy         String?          @map("approved_by")
+  approvedAt         DateTime?        @map("approved_at") @db.Timestamptz()
+  /// The text holds an opt-out phrase: the store suppressed the person.
+  optOutMatched      Boolean          @default(false) @map("opt_out_matched")
+  /// When the reply's email to the owner went out (beta-p5-030).
+  ownerNotifiedAt    DateTime?        @map("owner_notified_at") @db.Timestamptz()
+  thread             Thread           @relation(fields: [workspaceId, threadId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+  replyLabel         ReplyLabel?
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, providerMessageRef])
+  @@unique([workspaceId, stepExecutionId])
+  @@index([workspaceId, threadId, sentAt])
+  @@map("messages")
+}
+
+enum MessageDirection {
+  in
+  out
+
+  @@map("message_direction")
+}
+
+enum MessageSentBy {
+  campaign
+  user
+
+  @@map("message_sent_by")
+}
+
+/// tenant
+model ReplyLabel {
+  id          String         @id
+  workspaceId String         @map("workspace_id")
+  /// The inbound message labeled: its row goes with it (ON DELETE CASCADE).
+  messageId   String         @map("message_id")
+  label       ReplyLabelKind
+  /// identity's `usr_` id of the member who chose the label.
+  labeledBy   String         @map("labeled_by")
+  labeledAt   DateTime       @map("labeled_at") @db.Timestamptz()
+  message     Message        @relation(fields: [workspaceId, messageId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([workspaceId, messageId])
+  @@map("reply_labels")
+}
+
+enum ReplyLabelKind {
+  positive
+  not_positive
+
+  @@map("reply_label")
+}

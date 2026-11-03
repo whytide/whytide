@@ -1,12 +1,12 @@
 # contacts' lead routes (core/modules/contacts/README.md "Routes"): a member's session, leads.read.
 # `personId` is a person of your workspace with a lead: put it in http-client.private.env.json with your workspaceId.
 
-### GET /v1/workspaces/{workspaceId}/contacts/leads: the workspace's leads with their persons and sources, a signal source's with its label and post URL where signals gave them, here the hot qualified ones without a review decision by descending fit, 20 a page; pass the answer's nextCursor as cursor for the next page
-GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads?sort=fit&status=qualified&tier=hot&review=unreviewed&limit=20
+### GET /v1/workspaces/{workspaceId}/contacts/leads: the workspace's leads with their persons and sources, a signal source's with its label and post URL where signals gave them, here the hot qualified ones without a review decision and not yet approved (outreach, the outreach status; status stays qualification's) by descending fit, 20 a page; pass the answer's nextCursor as cursor for the next page
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads?sort=fit&status=qualified&tier=hot&review=unreviewed&outreach=pending_review&limit=20
 Accept: application/json
 Cookie: {{sessionCookie}}
 
-### GET /v1/workspaces/{workspaceId}/contacts/leads/{personId}: one lead, its person's business fields and the provenance of each; 404 lead_not_found
+### GET /v1/workspaces/{workspaceId}/contacts/leads/{personId}: one lead, its person's business fields and the provenance of each, and suppression, null while the person may be contacted, else { reason } (opted_out, never_contact_person or never_contact_company); 404 lead_not_found
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/{{personId}}
 Accept: application/json
 Cookie: {{sessionCookie}}

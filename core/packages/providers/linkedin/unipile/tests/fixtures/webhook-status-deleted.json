@@ -1,0 +1,8 @@
+{
+  "AccountStatus": {
+    "account_id": "fixture-account",
+    "account_type": "LINKEDIN",
+    "message": "DELETED"
+  },
+  "webhook_name": "fixture-body-marker: whytide-account-status"
+}

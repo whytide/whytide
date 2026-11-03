@@ -1,0 +1,18 @@
+# linkedin's health and the owner's resume after the cool-down (core/modules/linkedin/README.md "API",
+# "Health"). `accountId` goes in http-client.private.env.json, an id GET …/linkedin/accounts answers.
+# The resume is @Idempotent(): the Idempotency-Key is an example UUID; a write sends Origin too.
+
+### GET /v1/workspaces/{workspaceId}/linkedin/accounts/{id}/health: the account's health, its cool-down, its status's last check, canResume and resumeBlockedBy, the fleet breaker, the pending invitations, the acceptance and the last 10 events; 404 sender_account_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/{{accountId}}/health
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/linkedin/accounts/{id}/resume: the owner's resume, healthy at half its targets; 200 with the health; 403 not_account_owner; 409 account_not_paused, cooldown_active, linkedin_account_disconnected, reconnect_required or status_check_required
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/{{accountId}}/resume
+Content-Type: application/json
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000006040
+
+{}

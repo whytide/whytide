@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/deploy-check.test.ts && bash tests/stack.test.sh && bash tests/worktree.test.sh",
+    "test:safety": "node --test tests/safety/*.test.ts",
     "test:observability": "pnpm -F api build && pnpm -F worker build && node --env-file-if-exists=../.env.local --test tests/observability.test.ts",
     "smoke": "node --test tests/production.test.ts"
   }

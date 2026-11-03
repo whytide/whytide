@@ -1,0 +1,13 @@
+{
+  "object": "UserProfile",
+  "provider": "LINKEDIN",
+  "provider_id": "fixture-member-chidi",
+  "public_identifier": "chidi-fixture",
+  "first_name": "Chidi",
+  "last_name": "Fixture",
+  "headline": "Founder at Blue Harbor Labs",
+  "websites": [],
+  "is_relationship": true,
+  "network_distance": "FIRST_DEGREE",
+  "invitation": { "type": "RECEIVED", "status": "PENDING" }
+}

@@ -1,0 +1,13 @@
+{
+  "object": "InvitationList",
+  "items": [
+    {
+      "object": "InvitationSent",
+      "id": "fixture-invitation-chidi",
+      "invited_user": "Chidi Fixture",
+      "invited_user_id": "fixture-member-chidi",
+      "parsed_datetime": "2026-09-11T08:00:00.000Z"
+    }
+  ],
+  "cursor": null
+}

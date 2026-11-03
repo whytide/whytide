@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "type": "errors/already_connected",
+  "title": "Already connected",
+  "detail": "fixture-body-marker: you are already connected."
+}

@@ -1,8 +1,9 @@
 // The fake pattern (docs/rules/coding.md §6 rule 4): an in-memory adapter the module tests and the
 // Compose smoke test run on, written with the port, before the vendor adapter. createFake() wraps a
-// port implementation so that every call is recorded and a failure can be injected for the next
-// one; the helpers are the port's own hooks for tests (seeding, reading what was sent). The fake
-// validates nothing: bindPort() does, around it, as around any adapter.
+// port implementation so that every call is recorded, a failure can be injected for the next one,
+// and the next call of a method can answer what a test gives, off the port's words if need be; the
+// helpers are the port's own hooks for tests (seeding, reading what was sent). The fake validates
+// nothing: bindPort() does, around it, as around any adapter.
 import { AppError } from "@whytide/platform";
 import { patternErrors } from "./errors.ts";
 import type { AnyPort, PortErrorCode, PortImplementation } from "./port.ts";
@@ -12,6 +13,7 @@ export const FAKE: unique symbol = Symbol("whytide.fake");
 export const FAKE_CONTROLS: readonly string[] = [
   "recordedCalls",
   "failNext",
+  "answerNext",
   "reset",
   "state",
   "record",
@@ -26,7 +28,13 @@ export type FakeControls<P extends AnyPort> = {
   record(method: string, input: unknown): void;
   /** The next call, whatever the method, throws this code; several calls queue up. */
   failNext(code: PortErrorCode<P>, details?: Record<string, unknown>): void;
-  /** Fresh state, no recorded calls, no pending failure. */
+  /**
+   * The next call of `method` answers `answer` as given, or throws it when it is an Error: what a
+   * vendor might send, so that a test reaches the boundary's generated codes. Answers queue up per
+   * method; a pending failNext goes first.
+   */
+  answerNext(method: keyof P["methods"] & string, answer: unknown): void;
+  /** Fresh state, no recorded calls, no pending failure or answer. */
   reset(): void;
 };
 export type FakeContext<P extends AnyPort, S> = FakeControls<P> & {
@@ -50,6 +58,11 @@ export function createFake<P extends AnyPort, S, H extends object = Record<never
   let state = options.state();
   const recordedCalls: RecordedCall[] = [];
   const failures: { code: string; details?: Record<string, unknown> }[] = [];
+  const answers = new Map<string, unknown[]>();
+  const invalid = (reason: string, details: Record<string, unknown>) =>
+    new AppError(patternErrors.adapter_invalid, {
+      details: { port: port.name, adapter: "fake", reason, ...details },
+    });
   const context: FakeContext<P, S> = {
     recordedCalls,
     get state() {
@@ -58,35 +71,28 @@ export function createFake<P extends AnyPort, S, H extends object = Record<never
     record: (method, input) => void recordedCalls.push({ method, input }),
     failNext(code, details) {
       if (!Object.hasOwn(port.errors, code)) {
-        throw new AppError(patternErrors.adapter_invalid, {
-          details: {
-            port: port.name,
-            adapter: "fake",
-            reason: "a code the port does not declare",
-            code,
-          },
-        });
+        throw invalid("a code the port does not declare", { code });
       }
       failures.push({ code, details });
+    },
+    answerNext(method, answer) {
+      if (!Object.hasOwn(port.methods, method)) {
+        throw invalid("a method the port does not declare", { method });
+      }
+      const queued = answers.get(method) ?? [];
+      queued.push(answer);
+      answers.set(method, queued);
     },
     reset() {
       state = options.state();
       recordedCalls.length = 0;
       failures.length = 0;
+      answers.clear();
     },
   };
   const methods = options.methods(context) as Record<string, (input: unknown) => Promise<unknown>>;
   const extra = Object.keys(methods).filter((method) => !Object.hasOwn(port.methods, method));
-  if (extra.length) {
-    throw new AppError(patternErrors.adapter_invalid, {
-      details: {
-        port: port.name,
-        adapter: "fake",
-        reason: "a method the port does not declare",
-        extra,
-      },
-    });
-  }
+  if (extra.length) throw invalid("a method the port does not declare", { extra });
   const fake = Object.defineProperties(
     { [FAKE]: true, ...options.helpers?.(context) } as Record<string | symbol, unknown>,
     Object.getOwnPropertyDescriptors(context),
@@ -96,6 +102,12 @@ export function createFake<P extends AnyPort, S, H extends object = Record<never
       recordedCalls.push({ method, input });
       const failure = failures.shift();
       if (failure) throw new AppError(failure.code, { details: failure.details });
+      const queued = answers.get(method);
+      if (queued?.length) {
+        const answer = queued.shift();
+        if (answer instanceof Error) throw answer;
+        return answer;
+      }
       return call.call(methods, input);
     };
   }

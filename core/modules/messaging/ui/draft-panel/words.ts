@@ -34,16 +34,21 @@ export function useDraftWords() {
     length: t("gate.length"),
     grounding: t("gate.grounding"),
     red_lines: t("gate.red_lines"),
+    colleague_signal: t("gate.colleague_signal"),
   };
-  /** A draft's mark, in the history and over the newest: none for a ready one. */
+  /**
+   * A draft's mark, in the history and over the newest: none for a ready one. The panel lists a
+   * lead's drafts only, and only a sequence step's is ever approved.
+   */
   const mark: Record<Draft["status"], string | undefined> = {
     drafting: t("drafting"),
     ready: undefined,
     flagged: t("flagged"),
     failed: t("failed"),
     edited: t("edited"),
+    approved: undefined,
   };
-  /** Why a failed draft failed, by its code (README.md "The writer"): none off the four. */
+  /** Why a failed draft failed, by its code (README.md "The writer"): none off the six. */
   const failure = (code: string) =>
     pick(
       {
@@ -51,6 +56,8 @@ export function useDraftWords() {
         draft_requester_not_member: t("failure.draft_requester_not_member"),
         dossier_lead_not_found: t("failure.dossier_lead_not_found"),
         write_failed: t("failure.write_failed"),
+        earlier_draft_invalid: t("failure.earlier_draft_invalid"),
+        draft_stuck: t("failure.draft_stuck"),
       },
       code,
     );

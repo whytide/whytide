@@ -74,13 +74,11 @@ test("on the lead page, Not a fit, a reason and Confirm show the decision, lates
 
   await page.goto(`/w/${WORKSPACE}/leads`);
   const rows = page.locator("tbody tr");
-  // Not a fit, and its reason on hover and for a screen reader.
-  await expect(rows.locator("td:last-child")).toHaveText([
-    "",
-    new RegExp(`^${say("contacts.review.not_a_fit")}`),
-    "",
-  ]);
-  await expect(rows.locator("td:last-child span[title]")).toHaveAttribute("title", decided);
+  // Not a fit, and its reason on hover and for a screen reader; the review column is before
+  // Outreach and the row menu's.
+  const review = rows.locator("td:nth-last-child(3)");
+  await expect(review).toHaveText(["", new RegExp(`^${say("contacts.review.not_a_fit")}`), ""]);
+  await expect(review.locator("span[title]")).toHaveAttribute("title", decided);
   // React replays a change made before hydration.
   await page.getByLabel(say("contacts.leads.filter.review"), { exact: true }).check();
   await expect(rows).toHaveCount(2);

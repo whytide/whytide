@@ -5,7 +5,12 @@
 // what the provider says and publishes the disconnect; readPostEngagers, the engager read of a signal
 // run (alpha-p8-020), writes each page to the files fake and answers no reference; readProfile, its
 // twin (alpha-p8-030), reads the profile a request file names and writes it to a file, and answers a
-// provider error as a refusal on its third attempt (fix-profile-skip).
+// provider error as a refusal on its third attempt (fix-profile-skip); each read checks its account
+// again just before the call, a retry's too, and answers a refusal when it is paused or held, its
+// attempts count as one call towards the third error, and refreshStatus answers a failed check with
+// its code (beta-p6-020). A read also answers a kill switch and a lost connection before its call;
+// refreshStatus makes no call while retry_at lies ahead, and one that reads the account connected
+// heals the health a read's lost session left (beta-p6-040).
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -29,11 +34,18 @@ import {
 } from "@whytide/providers";
 import { createTwoWorkspaces, useTenancyClient } from "@whytide/tenancy/testing";
 import { startConnect } from "../domain/accounts.ts";
+import { DISCLOSURE_VERSION } from "../domain/disclosure/constants.ts";
 import { refHash } from "../domain/provider.ts";
 import { handleWebhook } from "../domain/status.ts";
 import { engagersFile } from "../schemas/engagers.ts";
 import { profileFile } from "../schemas/profile.ts";
-import { useLinkedinClient, useSecretKeys } from "../testing/index.ts";
+import {
+  setAccountPaused,
+  setPlatformControls,
+  setWorkspaceStopped,
+  useLinkedinClient,
+  useSecretKeys,
+} from "../testing/index.ts";
 import { withDecryptedRef } from "../workflows/decrypt.ts";
 import { activities, readPostEngagers, readProfile, refreshStatus } from "../workflows/index.ts";
 
@@ -71,7 +83,8 @@ const contextOf = (workspaceId: string, attempt = 1) => ({
 async function connect(workspaceId: string): Promise<{ id: string; ref: string }> {
   const tenant: TenantContext = { workspaceId, principal };
   const returnTo = `${origin}/w/${workspaceId}/linkedin`;
-  const input = { timeZone: "Europe/Paris", acknowledged: true, returnTo };
+  const disclosure = { disclosureVersion: DISCLOSURE_VERSION, personalAccount: true };
+  const input = { timeZone: "Europe/Paris", acknowledged: true, ...disclosure, returnTo };
   const { url } = await startConnect(tenant, input);
   const visit = await fetch(url, { redirect: "manual" });
   assert.equal(visit.headers.get("location"), `${returnTo}?connect=done`);
@@ -245,7 +258,7 @@ test("readProfile reads the profile its request file names and writes it under r
   assert.equal(activities.linkedin_read_profile.input.safeParse(outside).success, false);
 });
 
-test("readProfile: a provider error fails attempts 1 and 2 and is the refusal linkedin_provider_error on attempt 3; a rate limit still fails it; a profile gone is a refusal on attempt 1", async () => {
+test("readProfile: a provider error fails attempts 1 and 2 and is the refusal linkedin_provider_error on attempt 3, one call that pauses nothing; a rate limit still fails it; a profile gone is a refusal on attempt 1", async () => {
   const [a] = await createTwoWorkspaces();
   const workspaceId = a.workspace.id;
   const { id } = await connect(workspaceId);
@@ -270,8 +283,167 @@ test("readProfile: a provider error fails attempts 1 and 2 and is the refusal li
     );
   }
   assert.deepEqual(await failing(linkedin_provider_error, 3), { refused: linkedin_provider_error });
+  // The three attempts are one call (their rows share the call_ref rawKey): no third error, so
+  // nothing holds the account and the next attempt reaches its call.
+  const account = () => app.senderAccount.findUniqueOrThrow({ where: { id } });
+  assert.equal((await account()).retryAt, null, "one call: no pause");
   await assert.rejects(failing(linkedin_rate_limited, 3), thrown(linkedin_rate_limited));
+  assert.equal((await account()).retryAt, null);
+  const rows = await app.senderActionLog.findMany({ where: { senderAccountId: id } });
+  assert.deepEqual(
+    rows.map((row) => row.callRef),
+    Array(4).fill(input.rawKey),
+  );
+  assert.equal(await app.senderHealthEvent.count({ where: { senderId: id } }), 0);
   // Never seeded: gone, a refusal at once.
   const gone = await readProfile(contextOf(workspaceId, 1), input);
   assert.deepEqual(gone, { refused: "linkedin_not_found" });
+});
+
+test("a read checks the switches and its account again just before the call, on every attempt: restricted, it answers the refusal account_paused; held by retry_at, linkedin_rate_limited; the account's, the workspace's or the platform's stop, its code; not connected, linkedin_account_disconnected; none calls the provider or logs a row, and once lifted the call goes", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const { id } = await connect(workspaceId);
+  const postUrl = "https://www.linkedin.com/feed/update/urn:li:activity:7300000000000000009";
+  fake.seedPost(postUrl, []);
+  const files = await getAdapter(filesPort, "fake");
+  const body = JSON.stringify({ profileUrl: "https://www.linkedin.com/in/member-9" });
+  const file = { workspaceId, key: "raw/p/9.request.json", body, contentType: "application/json" };
+  await files.put(file);
+  const engagers = { workspaceId, accountId: id, postUrl, limit: 10, rawKey: "raw/e/9.json" };
+  const profile = { workspaceId, accountId: id, requestKey: file.key, rawKey: "raw/p/9.json" };
+  const reads = [
+    () => readPostEngagers(contextOf(workspaceId, 2), engagers),
+    () => readProfile(contextOf(workspaceId, 2), profile),
+  ];
+  const READS = new Set(["listPostEngagers", "getProfile"]);
+  const calls = () => fake.recordedCalls.filter(({ method }) => READS.has(method)).length;
+  const before = calls();
+  const paused = {
+    healthState: "restricted",
+    pausedUntil: new Date(Date.now() + 3_600_000),
+  } as const;
+  await app.senderAccount.update({ where: { id }, data: paused });
+  for (const read of reads) assert.deepEqual(await read(), { refused: "account_paused" });
+  const retryAt = new Date(Date.now() + 600_000);
+  const held = { healthState: "healthy", pausedUntil: null, retryAt } as const;
+  await app.senderAccount.update({ where: { id }, data: held });
+  for (const read of reads) assert.deepEqual(await read(), { refused: "linkedin_rate_limited" });
+  await app.senderAccount.update({ where: { id }, data: { retryAt: null } });
+  const status = (value: "connected" | "credentials_required") => () =>
+    app.senderAccount.update({ where: { id }, data: { status: value } });
+  const workspace = (on: boolean) => () => setWorkspaceStopped(workspaceId, on ? "operator" : null);
+  const platform = (stopped: boolean) => () => setPlatformControls({ stopped });
+  const stops = [
+    ["account_stopped", () => setAccountPaused(id, "tester"), () => setAccountPaused(id, null)],
+    ["workspace_stopped", workspace(true), workspace(false)],
+    ["platform_stopped", platform(true), platform(false)],
+    ["linkedin_account_disconnected", status("credentials_required"), status("connected")],
+  ] as const;
+  for (const [refused, on, off] of stops) {
+    await on();
+    for (const read of reads) assert.deepEqual(await read(), { refused }, refused);
+    await off();
+  }
+  assert.equal(calls(), before, "no call");
+  const kinds = { in: ["read_engagers" as const, "read_profile" as const] };
+  const rows = await app.senderActionLog.count({ where: { senderAccountId: id, kind: kinds } });
+  assert.equal(rows, 0, "no row");
+
+  const page = await readPostEngagers(contextOf(workspaceId, 2), engagers);
+  assert.deepEqual(page, { key: `w/${workspaceId}/raw/e/9.json`, count: 0, nextCursor: null });
+  assert.equal(calls(), before + 1);
+});
+
+test("refreshStatus answers a typed port error of its call, linkedin_not_found aside, with the code and the status as it was: called once, its status_check row logged with the code, and the error's reaction in that run (an hour's retry_at for a provider error, a checkpoint's health); while retry_at lies ahead it makes no call and logs no row, held; an error that is no port error throws", async () => {
+  const [a, b] = await createTwoWorkspaces();
+  const { id } = await connect(a.workspace.id);
+  const context = contextOf(a.workspace.id);
+  const checks = () => fake.recordedCalls.filter(({ method }) => method === "getAccountStatus");
+  const before = checks().length;
+  const started = Date.now();
+  fake.failNext(linkedinPort.errors.linkedin_provider_error);
+  const failed = { status: "connected", failed: "linkedin_provider_error" };
+  assert.deepEqual(await refreshStatus(context, id), failed);
+  assert.equal(checks().length, before + 1, "one call");
+  const paused = await app.senderAccount.findUniqueOrThrow({ where: { id } });
+  assert.deepEqual([paused.status, paused.healthState], ["connected", "healthy"]);
+  const hour = (paused.retryAt?.getTime() ?? 0) - started;
+  assert.ok(hour >= 3_600_000 && hour < 3_660_000, "an hour's pause, as the error map has it");
+  const held = { status: "connected", held: "rate_limited" };
+  assert.deepEqual(await refreshStatus(context, id), held, "no call while retry_at lies ahead");
+  assert.equal(checks().length, before + 1, "still one call");
+  await app.senderAccount.update({ where: { id }, data: { retryAt: null } });
+
+  const checkpoint = { reason: "checkpoint" };
+  fake.failNext(linkedinPort.errors.linkedin_account_disconnected, checkpoint);
+  assert.deepEqual(await refreshStatus(context, id), {
+    status: "connected",
+    failed: "linkedin_account_disconnected",
+  });
+  const warned = await app.senderAccount.findUniqueOrThrow({ where: { id } });
+  assert.deepEqual([warned.status, warned.healthState], ["connected", "checkpoint"]);
+  const rows = await app.senderActionLog.findMany({
+    where: { senderAccountId: id, kind: "status_check" },
+    orderBy: { id: "asc" },
+  });
+  assert.deepEqual(
+    rows.map((row) => row.outcome),
+    ["linkedin_provider_error", "linkedin_account_disconnected"],
+  );
+
+  // The same sealed bytes under another organization: secret_context_mismatch, no port error.
+  const other = await connect(b.workspace.id);
+  const sealed = await app.senderAccount.findUniqueOrThrow({ where: { id } });
+  await app.senderAccount.update({
+    where: { id: other.id },
+    data: { providerAccountRef: sealed.providerAccountRef },
+  });
+  await assert.rejects(
+    refreshStatus(contextOf(b.workspace.id), other.id),
+    (error) => isAppError(error) && error.code === "secret_context_mismatch",
+  );
+});
+
+test("a read that finds the session lost leaves the health disconnected and the status connected; a refresh that reads the account connected heals it, healthy with a reconnect's event; a restricted account stays restricted, and a webhook's connected status changes no health", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const { id, ref } = await connect(workspaceId);
+  const postUrl = "https://www.linkedin.com/feed/update/urn:li:activity:7300000000000000011";
+  fake.seedPost(postUrl, []);
+  const input = { workspaceId, accountId: id, postUrl, limit: 10, rawKey: "raw/e/11.json" };
+  const context = contextOf(workspaceId);
+  const account = () => app.senderAccount.findUniqueOrThrow({ where: { id } });
+  const events = async () => {
+    const rows = await app.senderHealthEvent.findMany({
+      where: { senderId: id },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    return rows.map((row) => `${row.fromState}>${row.toState}:${row.trigger}`);
+  };
+  const { linkedin_account_disconnected } = linkedinPort.errors;
+  fake.failNext(linkedin_account_disconnected, { reason: "credentials_required" });
+  assert.deepEqual(await readPostEngagers(context, input), {
+    refused: linkedin_account_disconnected,
+  });
+  const lost = await account();
+  assert.deepEqual([lost.status, lost.healthState], ["connected", "disconnected"]);
+  // The vendor's webhook says connected, as the status already was: no crossing, no change.
+  await handleWebhook("fake", fake.emitAccountStatus(ref, "connected"));
+  assert.equal((await account()).healthState, "disconnected");
+
+  assert.deepEqual(await refreshStatus(context, id), { status: "connected" });
+  const healed = await account();
+  assert.deepEqual([healed.status, healed.healthState], ["connected", "healthy"]);
+  const healing = ["healthy>disconnected:session_invalid", "disconnected>healthy:manual"];
+  assert.deepEqual(await events(), healing);
+  assert.deepEqual(await refreshStatus(context, id), { status: "connected" });
+  assert.deepEqual(await events(), healing, "a healthy account: no event");
+
+  const until = new Date(Date.now() + 3_600_000);
+  const cooldown = { healthState: "restricted", pausedUntil: until } as const;
+  await app.senderAccount.update({ where: { id }, data: cooldown });
+  assert.deepEqual(await refreshStatus(context, id), { status: "connected" });
+  assert.equal((await account()).healthState, "restricted");
+  assert.deepEqual(await events(), healing, "a refresh lifts no cool-down");
 });

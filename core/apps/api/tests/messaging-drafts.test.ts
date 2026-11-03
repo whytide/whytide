@@ -2,8 +2,9 @@
 // host started with identity and messaging, on the fake authentication adapter, in a schema of the
 // worktree's database, answering real HTTP to a Member; a write sends the app's Origin. The events
 // are read from the outbox, and a draft is set `ready` as its writer leaves it: the workflow is the
-// worker's test (core/apps/worker/tests/messaging-draft.test.ts). It lives here: a module never
-// imports a host.
+// worker's test (core/apps/worker/tests/messaging-draft.test.ts). A sequence step's drafts beside
+// them (beta-p3-010): never listed, never changed by these routes, read back. An edit runs the gates
+// of checkText (beta-p3-020). It lives here: a module never imports a host.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
@@ -29,6 +30,9 @@ const { start } = await import("../src/start.ts");
 
 // messaging by its build's path, as src/modules.generated.ts loads it (messaging-dossier.test.ts).
 const messaging = new URL("../../../../modules/messaging/dist/index.js", import.meta.url).href;
+type MessagingTesting = typeof import("../../../modules/messaging/dist/testing/index.js");
+const testing = new URL("../../../../modules/messaging/dist/testing/index.js", import.meta.url);
+const { createStepDraft }: MessagingTesting = await import(testing.href);
 const db = withTestDb();
 useTenancyClient(asRole("app"));
 useIdentityClient(asRole("app"));
@@ -170,4 +174,89 @@ test("criterion 5 through the routes: a draft asked for answers 202 drafting wit
   assert.deepEqual((await send(b.user.id, b.workspace.id, "GET", `drafts/${id}`)).body, notFound);
   const noLead = await as("POST", "leads/per_none/drafts", { channel: "linkedin_note" });
   assert.deepEqual([noLead.status, noLead.body], [404, { code: "dossier_lead_not_found" }]);
+});
+
+test("a sequence step's drafts beside the lead's: the list holds none; PATCH and regenerate answer 409 step_draft_not_editable and change nothing; an `approved` one reads back with its kind", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const member = await createUser();
+  await createMembership({ userId: member.id, workspaceId, role: "Member" });
+  const personId = await seedLead(workspaceId);
+  const as = (method: string, path: string, body?: object) =>
+    send(member.id, workspaceId, method, path, body);
+  const step = { workspaceId, personId, text: TEXT };
+  const approved = await createStepDraft(
+    { ...step, stepExecutionId: "sx_approved", status: "approved" },
+    asRole("app"),
+  );
+  const ready = await createStepDraft({ ...step, stepExecutionId: "sx_ready" }, asRole("app"));
+  const lead = (await as("POST", `leads/${personId}/drafts`, { channel: "linkedin_note" })).body;
+
+  const listed = (await as("GET", `leads/${personId}/drafts`)).body as {
+    drafts: { id: string; kind: string }[];
+  };
+  assert.deepEqual(listed.drafts, [{ ...lead, kind: "lead_draft" }]);
+  const refused = { status: 409, replayed: null, body: { code: "step_draft_not_editable" } };
+  for (const id of [approved, ready]) {
+    const before = (await as("GET", `drafts/${id}`)).body;
+    assert.deepEqual(await as("PATCH", `drafts/${id}`, { editedText: OWN }), refused);
+    assert.deepEqual(await as("POST", `drafts/${id}/regenerate`), refused);
+    assert.deepEqual((await as("GET", `drafts/${id}`)).body, before, "unchanged");
+  }
+  const read = await as("GET", `drafts/${approved}`);
+  const { kind, status, channel, text, editedText } = read.body;
+  assert.deepEqual(
+    [read.status, kind, status, channel, text, editedText],
+    [200, "outbound_step", "approved", "linkedin_message", TEXT, null],
+  );
+  const requested = await asRole("app").outboxEntry.count({
+    where: { workspaceId, eventName: "messaging.draft_requested" },
+  });
+  assert.equal(requested, 1, "the lead's draft only: a refused regeneration publishes nothing");
+});
+
+test("an edit runs the gates: PATCH with a red line, a colleague's signal or a placeholder answers 400 draft_text_refused with the gate's issue and changes nothing; a lead draft's empty note is refused, as in alpha", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const member = await createUser();
+  await createMembership({ userId: member.id, workspaceId, role: "Member" });
+  const personId = await seedLead(workspaceId);
+  const as = (method: string, path: string, body?: object) =>
+    send(member.id, workspaceId, method, path, body);
+  const ask = async (channel: string) =>
+    ((await as("POST", `leads/${personId}/drafts`, { channel })).body as { id: string }).id;
+  const [message, note] = [await ask("linkedin_message"), await ask("linkedin_note")];
+  for (const id of [message, note]) {
+    await asRole("app").messageDraft.update({
+      where: { id },
+      data: { status: "ready", text: TEXT },
+    });
+  }
+  const before = (await as("GET", `drafts/${message}`)).body;
+  const refused: [string, object][] = [
+    ["Ines, as we discussed: a short question.", { gate: "red_lines", phrase: "as we discussed" }],
+    [
+      "Ines, your colleagues liked our post. A question?",
+      { gate: "colleague_signal", phrase: "your colleagues" },
+    ],
+    ["Hi [Name], a short question.", { gate: "placeholders", placeholder: "[Name]" }],
+  ];
+  for (const [editedText, issue] of refused) {
+    const body = { code: "draft_text_refused", details: { issues: [issue] } };
+    const answer = await as("PATCH", `drafts/${message}`, { editedText });
+    assert.deepEqual(answer, { status: 400, replayed: null, body }, editedText);
+  }
+  assert.deepEqual((await as("GET", `drafts/${message}`)).body, before, "unchanged");
+
+  const empty = await as("PATCH", `drafts/${note}`, { editedText: "" });
+  const invalid = { code: "validation_failed", details: { fields: ["editedText"] } };
+  assert.deepEqual([empty.status, empty.body], [400, invalid]);
+  const blank = await as("PATCH", `drafts/${note}`, { editedText: "  " });
+  const input = { code: "messaging_input_invalid", details: { fields: ["editedText"] } };
+  assert.deepEqual([blank.status, blank.body], [400, input]);
+  const edited = await as("PATCH", `drafts/${note}`, { editedText: OWN });
+  assert.deepEqual(
+    [edited.status, edited.body.status, edited.body.editedText],
+    [200, "edited", OWN],
+  );
 });

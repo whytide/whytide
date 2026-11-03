@@ -37,7 +37,7 @@ The first argument names the block of `deploy/.env.example` (`# ---- modules/sig
 
 The platform's block is `platformConfig`: `APP_ENV` (`development`, `test`, `production`), `LOG_LEVEL`, `OTEL_EXPORTER_OTLP_ENDPOINT` and `DEFAULT_LOCALE` ([Messages](#messages-and-the-i18n-runtime)). `APP_ENV` is required, with no default: unset or empty, the import fails with `config_invalid` naming it, so a server that lost it stops rather than run as `development`. A shared or staging server runs `development` or `production`; `test` is for test processes only, on a laptop or in the pipeline, never a server others reach. The packages' test scripts set `APP_ENV=test` themselves, and the db CLI loads `.env.local` before it imports the platform.
 
-Time: an instant is a `Date`, in UTC; `instant` is the Zod schema that takes a `Date` or an ISO 8601 string with an offset. A local schedule is `{ timeZone, start, end, days }`: an IANA zone, `HH:mm` clock times with `start` before `end`, distinct ISO weekdays 1 (Monday) to 7 (Sunday); `localSchedule` validates it, `LocalSchedule` is its type.
+Instants, local schedules and the helpers that place an action in time have their own section, [Time](#time).
 
 ## Errors
 
@@ -294,3 +294,19 @@ await credits.commit(usageId); // or credits.release(usageId) when it failed
 - `credits.reserve`, `commit(usageId, actualQuantity?)`, `release(usageId)`, `balance(workspaceId)` and `priceOf(action)` run inside the caller's tenant run (a request's, or `context.tenant` in an activity); amounts are decimal strings. `creditsCodes` names what a caller handles: `insufficient_credits` (402), `usage_not_open` (409).
 - **Prices**: a module declares its priced actions in its `prices.ts`, `export const prices = definePrices([{ action: "qualification.assessment", credits: 1, unit: "lead" }], import.meta.url)`, and exports `prices` from its `index.ts`. An action is `<module>.<name>`; one priced twice fails at start with `duplicate_price_action` naming both files, a malformed one with `invalid_price_definition`. `registeredPrices()` lists them.
 - Tests: `tests/credits.test.ts`.
+
+## Time
+
+An instant is a `Date`, in UTC; `instant` is the Zod schema that takes a `Date` or an ISO 8601 string with an offset. A local schedule is `{ timeZone, start, end, days }`: an IANA zone, `HH:mm` clock times with `start` before `end`, distinct ISO weekdays 1 (Monday) to 7 (Sunday); `localSchedule` validates it, `LocalSchedule` is its type, and `LocalHours` is its `start`, `end` and `days` without the zone.
+
+Every module that places a LinkedIn action in time uses the helpers below, in the sender's time zone ([coding §5](../../../docs/rules/coding.md#5-data)); the lead's own zone comes later. They are pure functions on `Intl` (`config/window.ts`, `business-days.ts`, `random-times.ts`): the offsets and their daylight-saving changes are the runtime's time-zone data, never a table here.
+
+- **The quota day:** `quotaDay(at, timeZone)` is the instant's local date, `YYYY-MM-DD`; `nextQuotaDayAt(at, timeZone)` is the next local midnight.
+- **The window:** `isWindowOpen(at, timeZone, hours)` is true on a day of `hours.days` from `start` until before `end`; `nextWindowAt(at, timeZone, hours)` is the first window start after `at`, today's or a later day's. `instantAt(date, time, timeZone)` is the instant of a local date and time. linkedin's `domain/quota/window.ts` holds the same five functions until beta-p1-020 switches to these.
+- **Business days:** `addBusinessDays(at, n, timeZone, days)` is the instant `n` business days after `at`, at the same local clock time. Each step moves to the next day whose ISO weekday is in `days`, so 1 business day from a Saturday is the Monday; `n = 0` answers `at`. Every beta caller passes `MONDAY_TO_FRIDAY`, never an account's own days. Holidays are not counted.
+- **Random times:** `randomTimesInWindow({ from, to, count, minGapMs, random })` answers up to `count` instants in `[from, to)`, sorted, no two closer than `minGapMs`, drawn uniformly among the placements that keep the gap. A window too short for `count` answers as many as fit; an empty or reversed one answers none. `random` gives numbers in `[0, 1)`: production passes `Math.random` (spacing, not secrecy); a test passes a seeded source, `() => s.int(2 ** 32) / 2 ** 32` with `s = synthetic(seed)`.
+- **Daylight saving:** the local clock time is kept across a change. A local time that a spring-forward skips lands later by the change's length, an hour (`02:30` on the Sunday Los Angeles moves to summer time is `03:30`, and a skipped midnight starts the quota day at `01:00`); a local time that a fall-back repeats is the earlier of its two instants.
+- **Refusals:** an argument a helper cannot use throws `time_argument_invalid` (500) with its `field` in `details`: `days` without an ISO weekday, an `n` that is not a whole number from 0, an invalid `from` or `to`, a `count` that is not a whole number from 0, a negative `minGapMs`, or a draw outside `[0, 1)`, so a broken source never places a time.
+- **Long waits** are rows that 15-minute jobs read, never Temporal timers; these helpers only compute the times those rows hold ([architecture §8](../../../docs/architecture.md#8-background-work-temporal-and-mastra)).
+
+`tests/time.test.ts` proves them in `Pacific/Auckland`, `America/Los_Angeles` and `Asia/Kolkata`. The safety case, `tests/safety/working-hours.test.ts`, runs with `pnpm -F platform test:safety`, which `pnpm -F platform test` leaves out.

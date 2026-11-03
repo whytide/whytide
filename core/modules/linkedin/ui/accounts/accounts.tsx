@@ -6,7 +6,7 @@
 // its reads today beside them on a wide screen, under them on a phone. The account is asked for
 // again every two seconds while the screen waits: for the provider's webhook while it is pending, two
 // minutes at most, or after Refresh status for the worker's answer, until its status changes, thirty
-// seconds at most.
+// seconds at most. Under the account's card, once it is not pending, its health (health-card.tsx).
 import { ErrorState, LoadingState, Skeleton } from "@whytide/ui";
 import { ApiError, browserApi, data } from "@whytide/web/api/browser";
 import { useTranslations } from "next-intl";
@@ -15,11 +15,13 @@ import type { AccountResponse } from "../../schemas/accounts.ts";
 import { AccountCard } from "./account-card.tsx";
 import { ConnectPanel } from "./connect-panel.tsx";
 import { LOADING_LINES } from "./constants.ts";
+import { HealthCard } from "./health-card.tsx";
 import { UsageSummary } from "./usage-summary.tsx";
 
-/** The account's column and, from xl, its reads today beside it, over both rows. */
-const LAYOUT = "grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[auto_1fr]";
-const SIDE = "min-w-0 xl:col-start-2 xl:row-span-2 xl:row-start-1";
+/** The account's column and, from xl, its reads today beside it, over every row. */
+const LAYOUT =
+  "grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[auto_auto_1fr]";
+const SIDE = "min-w-0 xl:col-start-2 xl:row-span-3 xl:row-start-1";
 const CARD = "rounded-xl border border-line bg-surface p-5 shadow-xs sm:p-6";
 
 /** What the screen waits for: a status other than `from`, `left` polls more at most. */
@@ -121,6 +123,9 @@ export function Accounts({ workspaceId }: { workspaceId: string }) {
         onRefresh={() => setWait({ from: mine.status, left: REFRESH_POLLS })}
         onChange={load}
       />
+      {mine.status === "pending" ? null : (
+        <HealthCard key={mine.status} workspaceId={workspaceId} account={mine} onChange={load} />
+      )}
       {mine.status === "connected" ? null : <ConnectPanel workspaceId={workspaceId} />}
       <div className={SIDE}>
         <UsageSummary

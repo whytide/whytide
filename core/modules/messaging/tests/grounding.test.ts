@@ -1,13 +1,14 @@
 // The drafts of the grounding sample (README.md "Public interface"), on the worktree's database:
 // a draft of the week with the writer's text, with its lead's dossier facts and their sources; a
-// draft still drafting, one of the next week and one gone give none.
+// draft still drafting, a sequence's empty connection note, one of the next week and one gone give
+// none.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { asRole, withTestDb } from "@whytide/db/testing";
 import { servicePrincipal } from "@whytide/platform";
 import { buildDossier } from "../domain/dossier/build.ts";
 import { draftSample } from "../domain/drafts/grounding.ts";
-import { createMessageDraft, useMessagingClient } from "../testing/index.ts";
+import { createMessageDraft, createStepDraft, useMessagingClient } from "../testing/index.ts";
 import { COMMENT, GROUNDED, seed } from "./fixtures/draft.ts";
 
 withTestDb();
@@ -19,12 +20,14 @@ const WEEK = {
 };
 const day = (date: number) => new Date(`2026-10-${date}T10:00:00.000Z`);
 
-test("a draft of the week with the writer's text, with its lead's dossier facts as sources; none still drafting, of the next week or gone", async () => {
+test("a draft of the week with the writer's text, with its lead's dossier facts as sources; none still drafting, an empty connection note, of the next week or gone", async () => {
   const { workspaceId, personId, userId } = await seed();
   const tenant = { workspaceId, principal: servicePrincipal("messaging_test") };
   const draft = { workspaceId, personId, text: GROUNDED };
   const written = await createMessageDraft({ ...draft, createdAt: day(21) });
   await createMessageDraft({ workspaceId, personId, status: "drafting", createdAt: day(22) });
+  const note = { stepExecutionId: "sx_connect", stepKey: "connect" as const, text: "" };
+  await createStepDraft({ workspaceId, personId, ...note, createdAt: day(23) });
   await createMessageDraft({ ...draft, createdAt: day(26) });
   assert.deepEqual(await draftSample.list(tenant, WEEK), [written]);
 

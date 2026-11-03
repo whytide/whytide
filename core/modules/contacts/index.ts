@@ -41,7 +41,16 @@ export {
   listLeads,
 } from "./domain/leads.ts";
 export { normalizeLinkedinUrl } from "./domain/linkedin-url.ts";
+export type { OutreachStatus } from "./domain/outreach/constants.ts";
+export type { StatusActor } from "./domain/outreach/rules.ts";
 export {
+  type LeadStatusChange,
+  lockLeadStatus,
+  recordLeadStatus,
+} from "./domain/outreach/status.ts";
+export {
+  type Colleague,
+  colleaguesOf,
   erasePerson,
   findPersonByLinkedinUrl,
   getPerson,
@@ -54,6 +63,19 @@ export {
 } from "./domain/persons.ts";
 export type { Provenance, ProvenanceMap, Provider, Source } from "./domain/provenance.ts";
 export { type LatestReview, latestReviews } from "./domain/review/reviews.ts";
+export {
+  lastTouchAt,
+  recordTouch,
+  suppressedAt,
+  suppressionOf,
+} from "./domain/suppression/checks.ts";
+export type {
+  SuppressionLayer,
+  SuppressionReason,
+  SuppressionSource,
+} from "./domain/suppression/constants.ts";
+export { type AddedEntry, addOptOut, type SuppressionEntry } from "./domain/suppression/entries.ts";
+export type { Suppression } from "./domain/suppression/matching.ts";
 export { errors } from "./errors.ts";
 export { events } from "./events.ts";
 export { ids } from "./ids.ts";

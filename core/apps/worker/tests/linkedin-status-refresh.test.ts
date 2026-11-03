@@ -52,15 +52,25 @@ tenancy.useTenancyClient(app);
 const fake = (await getAdapter(linkedinPort, "fake")) as unknown as LinkedinFake;
 const log = createLogger({ destination: collectLogs().destination });
 const SCHEDULE = "linkedin.status_refresh";
+/** The schedules the host's start upserts for linkedin, both deleted around a test. */
+const SCHEDULES = [SCHEDULE, "linkedin.daily"];
 
-/** `fn` with the host started, linkedin alone, on a queue of its own; closed after, the schedule deleted. */
+/** `fn` with the host started, linkedin alone, on a queue of its own; closed after, the schedules deleted. */
 async function withHost(fn: (temporal: Client, taskQueue: string) => Promise<void>) {
   const connection = await Connection.connect({ address: workerConfig.TEMPORAL_ADDRESS });
   const temporal = new Client({ connection, namespace: workerConfig.TEMPORAL_NAMESPACE });
-  const schedule = temporal.schedule.getHandle(SCHEDULE);
+  const deleteSchedules = () =>
+    Promise.all(
+      SCHEDULES.map((id) =>
+        temporal.schedule
+          .getHandle(id)
+          .delete()
+          .catch(() => undefined),
+      ),
+    );
   const taskQueue = `test-${randomUUID()}`;
   const modules = moduleLoaders.filter(({ name }) => name === "linkedin");
-  await schedule.delete().catch(() => undefined);
+  await deleteSchedules();
   const host = await start({
     modules,
     taskQueue,
@@ -73,7 +83,7 @@ async function withHost(fn: (temporal: Client, taskQueue: string) => Promise<voi
     await fn(temporal, taskQueue);
   } finally {
     await host.close();
-    await schedule.delete().catch(() => undefined);
+    await deleteSchedules();
     await connection.close();
   }
 }

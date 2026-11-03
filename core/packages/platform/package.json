@@ -23,6 +23,7 @@
     "typecheck": "tsc -b",
     "lint": "node ../../../tools/lint/lint.ts .",
     "test": "APP_ENV=test node --test tests/*.test.ts",
+    "test:safety": "APP_ENV=test node --test \"tests/safety/*.test.ts\"",
     "env:check": "node config/env-check.ts",
     "messages:check": "APP_ENV=test node i18n/messages-check.ts",
     "observability:check": "node telemetry/observability-check.ts",

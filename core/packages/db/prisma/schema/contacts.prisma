@@ -10,7 +10,12 @@
 // expiring and a rejected candidate's from never expiring. A row links another table's by the pair
 // (workspace_id, id), so the database refuses a link across workspaces. alpha-p9-040 adds a fifth,
 // review_decisions (migration 20261022210000_contacts_review_decisions), the review decisions on a
-// lead, which its REVOKE UPDATE from app keeps append-only.
+// lead, which its REVOKE UPDATE from app keeps append-only. beta-p2-010 adds a sixth,
+// suppression_entries, and persons.last_touch_at (migration 20261029091739_contacts_suppression).
+// beta-p2-030 adds a seventh, lead_status_changes, and leads.outreach_status and outreach_reason
+// (migration 20261029101240_contacts_outreach_status): its REVOKE UPDATE from app keeps the changes
+// append-only, and two CHECKs, lead_status_changes_actor (an actor_id for a user, none for system)
+// and lead_status_changes_change (from_status differs from to_status), keep each row a real change.
 
 /// tenant
 model Person {
@@ -43,6 +48,8 @@ model Person {
   fieldProvenance Json              @map("field_provenance")
   createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt       DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
+  /// The latest outbound touch (beta-p2-010): recordTouch only moves it later; the 90-day rule reads it.
+  lastTouchAt     DateTime?         @map("last_touch_at") @db.Timestamptz()
   // Restrict: SET NULL on a key with workspace_id would empty workspace_id too; nothing deletes a company.
   company         WorkspaceCompany? @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
   lead            Lead?
@@ -139,13 +146,63 @@ model Lead {
   /// The latest review decision and its time (review_decisions); null until the first.
   reviewStatus           ReviewDecisionKind?     @map("review_status")
   reviewedAt             DateTime?               @map("reviewed_at") @db.Timestamptz(3)
+  /// Where the lead is on the way to outreach (beta-p2-030); only recordLeadStatus changes it.
+  outreachStatus         LeadOutreachStatus      @default(pending_review) @map("outreach_status")
+  /// A code: why the latest change happened, such as opted_out; null when none was given.
+  outreachReason         String?                 @map("outreach_reason")
   person                 Person                  @relation(fields: [workspaceId, personId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict)
   reviewDecisions        ReviewDecision[]
+  statusChanges          LeadStatusChange[]
 
   @@unique([workspaceId, personId])
   @@index([workspaceId, qualificationStatus, fitScore])
   @@index([workspaceId, createdAt])
+  @@index([workspaceId, outreachStatus])
   @@map("leads")
+}
+
+// Beta's flow (beta-p2-030): pending_review, approved, in_campaign, then replied or finished;
+// suppressed from any of them.
+enum LeadOutreachStatus {
+  pending_review
+  approved
+  in_campaign
+  replied
+  finished
+  suppressed
+
+  @@map("lead_outreach_status")
+}
+
+// Every change of a lead's outreach status (beta-p2-030), written by contacts' recordLeadStatus in the
+// caller's transaction. Append-only: app may not update a row (the migration's REVOKE), and a lead with
+// changes is not deleted (Restrict) unless contacts' erasePerson deletes them first.
+/// tenant
+model LeadStatusChange {
+  id          String             @id
+  workspaceId String             @map("workspace_id")
+  personId    String             @map("person_id")
+  fromStatus  LeadOutreachStatus @map("from_status")
+  toStatus    LeadOutreachStatus @map("to_status")
+  /// The campaign's template that moved it, for in_campaign and finished; null otherwise.
+  templateId  String?            @map("template_id")
+  /// A code: opted_out, never_contact_person, never_contact_company or the caller's own.
+  reason      String?
+  actorType   LeadStatusActor    @map("actor_type")
+  /// The user's id for a user; null for system.
+  actorId     String?            @map("actor_id")
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  lead        Lead               @relation(fields: [workspaceId, personId], references: [workspaceId, personId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([workspaceId, personId, createdAt])
+  @@map("lead_status_changes")
+}
+
+enum LeadStatusActor {
+  user
+  system
+
+  @@map("lead_status_actor")
 }
 
 enum LeadQualificationStatus {
@@ -239,4 +296,70 @@ enum ReviewReasonCode {
   bad_timing
 
   @@map("review_reason_code")
+}
+
+// The workspace's never-contact list and its opt-outs (beta-p2-010; contacts' docs/data.md): an
+// entry blocks a person by the profile URL, or a company by its page or its domain, and is matched by
+// `hash` alone, so an entry still works once erasure clears its raw value. A blocklist entry is
+// removed by setting removed_at, never deleted. Hand-written SQL in the migration
+// 20261029091739_contacts_suppression: the unique key of the entries not removed,
+// suppression_entries_active_key on (workspace_id, layer, match_type, hash, channel) WHERE
+// removed_at IS NULL, a partial index the schema cannot say without a preview feature, and which
+// Prisma's diff leaves alone; and three CHECKs: suppression_entries_linkedin_url_match
+// (linkedin_url only on a linkedin_url entry), suppression_entries_domain_match (domain on a domain
+// entry, and only there) and suppression_entries_opt_out_kept (removed_at null on every opt-out).
+/// tenant
+model SuppressionEntry {
+  id          String               @id
+  workspaceId String               @map("workspace_id")
+  layer       SuppressionLayer
+  matchType   SuppressionMatchType @map("match_type")
+  /// contacts' hashOf of the normalized value: `url` for a profile or a company page, `domain`.
+  /// pii: personal
+  hash        String
+  /// The normalized profile or company page of a linkedin_url entry; null once the person is erased.
+  /// pii: business_contact
+  linkedinUrl String?              @map("linkedin_url")
+  /// The normalized domain of a domain entry: a company's, as workspace_companies.domain.
+  domain      String?
+  channel     SuppressionChannel   @default(all)
+  source      SuppressionSource
+  /// A code: reply_opt_out for an opt-out found in a reply.
+  reason      String?
+  /// The user who added the entry; null for system.
+  createdBy   String?              @map("created_by")
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  /// Set when a blocklist entry is removed; never on an opt-out.
+  removedAt   DateTime?            @map("removed_at") @db.Timestamptz(3)
+  removedBy   String?              @map("removed_by")
+
+  @@index([workspaceId, hash])
+  @@map("suppression_entries")
+}
+
+enum SuppressionLayer {
+  blocklist
+  opt_out
+
+  @@map("suppression_layer")
+}
+
+enum SuppressionMatchType {
+  linkedin_url
+  domain
+
+  @@map("suppression_match_type")
+}
+
+enum SuppressionChannel {
+  all
+
+  @@map("suppression_channel")
+}
+
+enum SuppressionSource {
+  manual
+  system
+
+  @@map("suppression_source")
 }

@@ -2,10 +2,12 @@
 // sources as a host loads them, the LLM fake, a workspace with a Member and the fixture lead (its
 // company, Company Knowledge and one comment event) written through contacts', onboarding's table
 // and signals' factory, a `drafting` draft, and writeDraft's context: an activity's tenant runs and
-// callAgent's options as the app role. The lead's fact ids are fixed: FACTS names them.
+// callAgent's options as the app role. The lead's fact ids are fixed: FACTS names them. A colleague
+// of the lead, another person at its company with an event of their own (beta-p3-020).
 import { loadAgentTasks } from "@whytide/ai";
 import {
   createLeadForPerson,
+  getPerson,
   linkPersonToCompany,
   upsertCompany,
   upsertPersonFromSource,
@@ -13,6 +15,7 @@ import {
 import { useHashSalt } from "@whytide/contacts/testing";
 import { type TenantClient, withTenant } from "@whytide/db";
 import { asRole } from "@whytide/db/testing";
+import { ids as onboardingIds } from "@whytide/onboarding";
 import { newId, servicePrincipal } from "@whytide/platform";
 import { getAdapter, type LlmFake, llmPort } from "@whytide/providers";
 import { createSignalEvent } from "@whytide/signals/testing";
@@ -100,12 +103,47 @@ export async function seed(comment: string = COMMENT) {
       painPoints: ["Leads go cold before sales calls them."],
       proofPoints: [{ text: "Northwind booked 40% more meetings in a quarter." }],
     };
-    await tx.companyKnowledge.create({ data: { ...knowledge, id: newId("ck"), workspaceId } });
+    await tx.companyKnowledge.create({
+      data: { ...knowledge, id: newId(onboardingIds.company_knowledge), workspaceId },
+    });
     return person.id;
   });
   const occurredAt = new Date("2026-10-02T09:00:00.000Z");
   await createSignalEvent({ workspaceId, personId, occurredAt, commentText: comment });
   return { workspaceId, personId, userId: user.id };
+}
+
+/** The lead's colleague at Acme, and the comment of their own event. */
+export const COLLEAGUE = { firstName: "Maria", lastName: "Lopez" } as const;
+export const COLLEAGUE_COMMENT = "Maria here: we switched our lead routing last month.";
+
+/** A colleague of the lead: another person linked to its company, with a comment event of theirs. */
+export async function seedColleague(workspaceId: string, leadId: string) {
+  const personId = await run(workspaceId, async () => {
+    const { companyId } = await getPerson(leadId);
+    const profile = {
+      ...COLLEAGUE,
+      linkedinUrl: "https://linkedin.com/in/maria-lopez",
+      title: "VP Sales",
+    };
+    const { person } = await upsertPersonFromSource({
+      source: "linkedin",
+      provider: null,
+      profile,
+    });
+    if (companyId !== null) await linkPersonToCompany({ personId: person.id, companyId });
+    return person.id;
+  });
+  const occurredAt = new Date("2026-10-03T09:00:00.000Z");
+  const event = await createSignalEvent({
+    workspaceId,
+    personId,
+    occurredAt,
+    commentText: COLLEAGUE_COMMENT,
+  });
+  if (event.evidence === null)
+    throw new Error("the colleague's event was written without evidence");
+  return { personId, eventId: event.id, evidenceId: event.evidence.id };
 }
 
 /** A `drafting` draft of the person, as POST …/drafts leaves it. */
@@ -138,6 +176,10 @@ export const PLAN: PlanOutput = {
 /** A message of 189 characters that names only the lead's facts. */
 export const GROUNDED =
   "Ines, your comment that you lose leads every week stood out. Signal Radar flags buying signals so Acme can reach warm leads before they go cold. How does your team follow up on leads today?";
+
+/** A message of 201 characters, grounded, that points at the lead's colleagues. */
+export const COLLEAGUES_TEXT =
+  "Ines, your colleagues commented on a post about losing leads every week. Signal Radar flags buying signals so Acme can reach warm leads before they go cold. How does your team follow up on leads today?";
 
 /** A grounded text of exactly `length` characters. */
 export const sized = (length: number) =>

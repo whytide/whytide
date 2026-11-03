@@ -1,6 +1,6 @@
 # signals: data
 
-Five tenant tables in `core/packages/db/prisma/schema/signals.prisma`, created by the migrations `20261022150800_signals_sources_and_runs`, `20261022193000_signals_candidates` and `20261022212000_signals_events_and_evidence`; `20261022196000_signals_run_cancelled` adds the status `cancelled`, `20261028130900_signals_run_stop` a run's `workflow_id` and `stop_requested_at`. Ids are `src_<ULID>`, `run_<ULID>`, `cand_<ULID>`, `sev_<ULID>` and `evd_<ULID>` (`ids.ts`); times are `timestamptz`.
+Five tenant tables in `core/packages/db/prisma/schema/signals.prisma`, created by the migrations `20261022150800_signals_sources_and_runs`, `20261022193000_signals_candidates` and `20261022212000_signals_events_and_evidence`; `20261022196000_signals_run_cancelled` adds the status `cancelled`, `20261028130900_signals_run_stop` a run's `workflow_id` and `stop_requested_at`. Ids are `src_<ULID>`, `run_<ULID>`, `cand_<ULID>`, `sev_<ULID>` and `evd_<ULID>` (`ids.ts`), an event's ULID its candidate's since beta-p1-090, the subject of the candidate's credit; times are `timestamptz`.
 
 | Table | Columns | Keys |
 |---|---|---|

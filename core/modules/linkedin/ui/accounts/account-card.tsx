@@ -5,8 +5,10 @@
 // or one the provider has a problem with, asks the worker for the status at the provider; the screen
 // then asks for the account again (accounts.tsx). A pending card says the screen is waiting for the
 // provider; a connected one shows the risk disclosure again on demand; one whose provider needs a
-// new sign-in says to reconnect through the provider's page. A failed action shows its code in
-// words, with a retry of it.
+// new sign-in says to reconnect through the provider's page. One whose owner has not accepted the
+// risk disclosure for sending shows its notice (disclosure-notice.tsx), and a toast once accepted;
+// a disconnected one leaves that to Connect's boxes. Its pause (pause-switch.tsx) sits above the
+// working hours. A failed action shows its code in words, with a retry of it.
 import {
   Avatar,
   Badge,
@@ -35,6 +37,8 @@ import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import type { AccountResponse } from "../../schemas/accounts.ts";
 import { Disclosure } from "./connect-panel.tsx";
+import { DisclosureNotice } from "./disclosure-notice.tsx";
+import { PauseSwitch } from "./pause-switch.tsx";
 
 type Props = {
   workspaceId: string;
@@ -74,6 +78,7 @@ const timeOptions = (kept: string) =>
 
 export function AccountCard({ workspaceId, account, refreshing, onRefresh, onChange }: Props) {
   const t = useTranslations("linkedin.account");
+  const disclosure = useTranslations("linkedin.disclosure");
   const id = useId();
   const [start, setStart] = useState(account.workingHours.start);
   const [end, setEnd] = useState(account.workingHours.end);
@@ -207,6 +212,16 @@ export function AccountCard({ workspaceId, account, refreshing, onRefresh, onCha
           </dd>
         </div>
       </dl>
+      {account.sendingDisclosureRequired && account.status !== "disconnected" ? (
+        <DisclosureNotice
+          workspaceId={workspaceId}
+          account={account}
+          onAccepted={async () => {
+            await onChange();
+            setSaved(disclosure("accepted"));
+          }}
+        />
+      ) : null}
       {account.status === "pending" ? (
         <p className={`${NOTE} bg-accent-soft text-accent-ink`}>
           <span aria-hidden="true" className="wt-spinner mt-0.5" />
@@ -233,6 +248,7 @@ export function AccountCard({ workspaceId, account, refreshing, onRefresh, onCha
           </div>
         </details>
       ) : null}
+      <PauseSwitch workspaceId={workspaceId} account={account} onChange={onChange} />
       <form
         className="grid gap-4 border-t border-line pt-5"
         onSubmit={(event) => {

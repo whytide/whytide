@@ -14,6 +14,7 @@
     "start": "node src/main.ts",
     "test": "pnpm run build && APP_ENV=test node --env-file-if-exists=../../../.env.local --test \"tests/*.test.ts\"",
     "test:replay": "pnpm run build && APP_ENV=test node --env-file-if-exists=../../../.env.local scripts/replay.ts",
+    "test:safety": "pnpm run build && APP_ENV=test node --env-file-if-exists=../../../.env.local --test \"tests/safety/*.test.ts\"",
     "lint": "node ../../../tools/lint/lint.ts .",
     "smoke": "node --env-file-if-exists=../../../.env.local tests/smoke.ts",
     "history:record": "node --env-file-if-exists=../../../.env.local scripts/history-record.ts",

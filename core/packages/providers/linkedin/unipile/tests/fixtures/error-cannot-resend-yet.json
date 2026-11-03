@@ -1,0 +1,6 @@
+{
+  "status": 422,
+  "type": "errors/cannot_resend_yet",
+  "title": "Cannot resend yet",
+  "detail": "fixture-body-marker: the weekly invitation limit is reached."
+}

@@ -14,17 +14,17 @@ Idempotency-Key: 00000000-0000-4000-8000-000000000921
 
 { "channel": "linkedin_note" }
 
-### GET /v1/workspaces/{workspaceId}/messaging/drafts/{id}: a draft, its status, plan, text and edit, generation record and gate results, and the channel's limit now, maxCharacters; 404 draft_not_found
+### GET /v1/workspaces/{workspaceId}/messaging/drafts/{id}: a draft, its kind (lead_draft or a sequence step's, outbound_step), status, plan, text and edit, generation record and gate results, and the channel's limit now, maxCharacters; 404 draft_not_found
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/drafts/{{draftId}}
 Accept: application/json
 Cookie: {{sessionCookie}}
 
-### GET /v1/workspaces/{workspaceId}/messaging/leads/{personId}/drafts: the lead's drafts, newest first, each with its maxCharacters
+### GET /v1/workspaces/{workspaceId}/messaging/leads/{personId}/drafts: the lead's drafts, newest first, each with its maxCharacters; lead drafts only, never a sequence step's
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/leads/{{personId}}/drafts
 Accept: application/json
 Cookie: {{sessionCookie}}
 
-### PATCH /v1/workspaces/{workspaceId}/messaging/drafts/{id}: saves the member's own text, at most the channel's limit; 200 with the draft, edited, and its maxCharacters; 409 draft_not_editable while it is being written
+### PATCH /v1/workspaces/{workspaceId}/messaging/drafts/{id}: saves the member's own text, at most the channel's limit and passing the gates (no placeholder, red line or colleague's signal); 200 with the draft, edited, and its maxCharacters; 400 draft_text_refused with details.issues, 409 draft_not_editable while it is being written, 409 step_draft_not_editable for a sequence step's draft
 PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/drafts/{{draftId}}
 Accept: application/json
 Content-Type: application/json
@@ -33,7 +33,16 @@ Origin: {{appOrigin}}
 
 { "editedText": "Hi, a short question about how your team follows up on warm leads." }
 
-### POST /v1/workspaces/{workspaceId}/messaging/drafts/{id}/regenerate: asks for a new draft of the same lead and channel, unlike this one, which is kept; 202 with the new draft, drafting, and its maxCharacters
+### PATCH /v1/workspaces/{workspaceId}/messaging/drafts/{id}, refused by a gate: a text that points at a colleague of the lead; 400 draft_text_refused, details.issues [{ "gate": "colleague_signal", "phrase": "your colleagues" }], and the draft unchanged
+PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/drafts/{{draftId}}
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "editedText": "Hi, your colleagues liked our post about warm leads. A short question?" }
+
+### POST /v1/workspaces/{workspaceId}/messaging/drafts/{id}/regenerate: asks for a new draft of the same lead and channel, unlike this one, which is kept; 202 with the new draft, drafting, and its maxCharacters; 409 step_draft_not_editable for a sequence step's draft
 POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/drafts/{{draftId}}/regenerate
 Accept: application/json
 Cookie: {{sessionCookie}}

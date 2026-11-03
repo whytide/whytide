@@ -21,8 +21,12 @@
   },
   "dependencies": {
     "@whytide/ai": "workspace:*",
+    "@whytide/approvals": "workspace:*",
+    "@whytide/campaigns": "workspace:*",
     "@whytide/contacts": "workspace:*",
     "@whytide/db": "workspace:*",
+    "@whytide/inbox": "workspace:*",
+    "@whytide/linkedin": "workspace:*",
     "@whytide/messaging": "workspace:*",
     "@whytide/platform": "workspace:*",
     "@whytide/qualification": "workspace:*",

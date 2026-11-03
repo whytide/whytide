@@ -1,8 +1,9 @@
-// test:tenancy for contacts' five tables (docs/rules/security.md §3; core/packages/db README
+// test:tenancy for contacts' seven tables (docs/rules/security.md §3; core/packages/db README
 // "Register a tenant table in the isolation test"): the same person, company, hash, lead (with its
-// source's label) and review decision in workspaces A and B are two rows, each read by the module's
-// scoped query in its own workspace only; the database refuses a link across workspaces; and every
-// public command and query goes through the tenant client of the caller's run.
+// source's label), review decision, never-contact entry and status change in workspaces A and B are
+// two rows, each read by the module's scoped query in its own workspace only; an entry in A
+// suppresses no one in B; the database refuses a link across workspaces; and every public command
+// and query goes through the tenant client of the caller's run.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { type TenantClient, withTenant } from "@whytide/db";
@@ -19,6 +20,7 @@ import {
   leadsPendingQualification,
   listLeads,
 } from "../domain/leads.ts";
+import { approveLead, listStatusChanges, recordLeadStatus } from "../domain/outreach/status.ts";
 import {
   erasePerson,
   findPersonByLinkedinUrl,
@@ -27,6 +29,18 @@ import {
   upsertPersonFromSource,
 } from "../domain/persons.ts";
 import { latestReviews, listReviews, reviewLead, reviewSummary } from "../domain/review/reviews.ts";
+import {
+  lastTouchAt,
+  recordTouch,
+  suppressedAt,
+  suppressionOf,
+} from "../domain/suppression/checks.ts";
+import {
+  addOptOut,
+  addSuppression,
+  listSuppression,
+  removeSuppression,
+} from "../domain/suppression/entries.ts";
 import { useHashSalt } from "../testing/index.ts";
 
 withTestDb();
@@ -99,6 +113,49 @@ isolationTest("review_decisions", {
   readAs: (workspaceId) => run(workspaceId, (tx) => tx.reviewDecision.findMany()),
 });
 
+isolationTest("lead_status_changes", {
+  createRow: (workspaceId) =>
+    run(workspaceId, async () => {
+      const { id: personId } = (await upsertPersonFromSource(person)).person;
+      await createLeadForPerson({ personId, source });
+      const change = await recordLeadStatus(personId, "approved", { actor: { type: "system" } });
+      return change ?? assert.fail("a new lead's first change writes a row");
+    }),
+  readAs: (workspaceId) => run(workspaceId, (tx) => tx.leadStatusChange.findMany()),
+});
+
+isolationTest("suppression_entries", {
+  createRow: (workspaceId) =>
+    run(workspaceId, async () => {
+      const { id: personId } = (await upsertPersonFromSource(person)).person;
+      return (await addSuppression({ kind: "person", personId, createdBy: "usr_tenancy" })).entry;
+    }),
+  readAs: (workspaceId) =>
+    run(workspaceId, async () => (await listSuppression({ limit: 100 })).entries),
+});
+
+test("an entry in one workspace suppresses no one in another: the same person and company in B stay allowed", async () => {
+  const atCompany = async (workspaceId: string) =>
+    run(workspaceId, async () => {
+      const { id: personId } = (await upsertPersonFromSource(person)).person;
+      const { id: companyId } = (await upsertCompany(company)).company;
+      await linkPersonToCompany({ personId, companyId });
+      return personId;
+    });
+  const [ours, theirs] = [await atCompany("wsp_block_a"), await atCompany("wsp_block_b")];
+  await run("wsp_block_a", async () => {
+    await addSuppression({ kind: "company", value: "blueharbor.example", createdBy: "usr_a" });
+    await addOptOut(ours, { source: "system", reason: "reply_opt_out" });
+  });
+  const answer = (workspaceId: string, personId: string) =>
+    run(workspaceId, () => suppressionOf(personId, { newEnrollment: true }));
+  assert.deepEqual(await answer("wsp_block_a", ours), { suppressed: true, reason: "opted_out" });
+  assert.deepEqual(await answer("wsp_block_b", theirs), { suppressed: false });
+  // A's person is no person of B's.
+  const notFound = { suppressed: true, reason: "person_not_found" };
+  assert.deepEqual(await answer("wsp_block_b", ours), notFound);
+});
+
 test("the database refuses a lead, or a person's company, of another workspace: the keys are (workspace_id, id)", async () => {
   const theirs = await run("wsp_tenancy_a", async () => ({
     person: (await upsertPersonFromSource(person)).person,
@@ -164,4 +221,15 @@ test("every public command and query of contacts goes through the tenant client 
   await assertScoped(() => listReviews(id));
   await assertScoped(() => reviewSummary("2026-W40"));
   await assertScoped(() => latestReviews({ week: "2026-W40" }));
+  await assertScoped(() => addSuppression({ kind: "person", personId: id, createdBy: "usr_1" }));
+  await assertScoped(() => addOptOut(id, { source: "system" }));
+  await assertScoped(() => removeSuppression("sup_0", { removedBy: "usr_1" }));
+  await assertScoped(() => listSuppression({ limit: 10 }));
+  await assertScoped(() => suppressionOf(id, { newEnrollment: true }));
+  await assertScoped(() => suppressedAt(id, new Date()));
+  await assertScoped(() => lastTouchAt(id));
+  await assertScoped(() => recordTouch(id, new Date()));
+  await assertScoped(() => recordLeadStatus(id, "approved", { actor: { type: "system" } }));
+  await assertScoped(() => approveLead(id));
+  await assertScoped(() => listStatusChanges(id));
 });

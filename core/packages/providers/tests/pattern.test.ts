@@ -1,14 +1,17 @@
-// The end-to-end test of alpha-p1-090: the package used as a consumer module and an adapter task use
-// it. The fixture port (fixtures/pattern/fixture) with a fake and two more adapters runs the same
-// contract suite through the test runner, each from its <adapter>/tests/contract.test.ts; a broken
-// adapter fails it with the method's name; a suite without its credentials is skipped and exits 0.
-// The registry resolves PROVIDER_FIXTURE; the boundary parses inputs, wraps an unmapped error
-// everywhere and, in test mode, refuses a vendor field and a transform; the fake records and fails on
-// demand; provider_refs takes vendor ids.
+// The end-to-end test of alpha-p1-090: the package used as a consumer module and an adapter task
+// use it. The fixture port (fixtures/pattern/fixture) with a fake and two more adapters runs the
+// same contract suite through the test runner, each from its <adapter>/tests/contract.test.ts; a
+// broken adapter fails it with the method's name; a suite without its credentials is skipped and
+// exits 0. The registry resolves PROVIDER_FIXTURE; the boundary parses inputs, wraps an unmapped
+// error everywhere and, in test mode, refuses a vendor field and a transform; under
+// APP_ENV=production, in a child process, checkOutputs and keepCause are off unless a binding or
+// the port turns them on; the fake records, fails and answers on demand; provider_refs takes vendor
+// ids.
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { defineConfig, isAppError, throwsCode } from "@whytide/platform";
 import { z } from "zod";
 import {
@@ -18,6 +21,7 @@ import {
   definePort,
   getAdapter,
   isFake,
+  linkedinPort,
   providerSelector,
   setProviderRef,
 } from "../index.ts";
@@ -148,7 +152,10 @@ test("the boundary: the input parsed; in test mode a vendor field, a vendor obje
     });
     return true;
   });
-  const production = bindPort(fixturePort, vendorShaped, { adapter: "leaking", validate: false });
+  const production = bindPort(fixturePort, vendorShaped, {
+    adapter: "leaking",
+    checkOutputs: false,
+  });
   assert.deepEqual(await production.greet({ name: "Ada" }), {
     greeting: "hello Ada",
     vendor_id: "grt_1",
@@ -242,7 +249,7 @@ test("an unmapped vendor error is wrapped in every environment; its payload trav
   );
   const production = bindPort(fixturePort, vendorError, {
     adapter: "vendor-error",
-    validate: false,
+    keepCause: false,
   });
   await assert.rejects(production.greet({ name: "Ada" }), (error: unknown) => {
     assert.ok(isAppError(error) && error.code === "fixture_error_unmapped");
@@ -263,7 +270,7 @@ test("an unmapped vendor error is wrapped in every environment; its payload trav
     },
   };
   await assert.rejects(
-    bindPort(fixturePort, statusOnly, { adapter: "status-only", validate: false }).greet({
+    bindPort(fixturePort, statusOnly, { adapter: "status-only", keepCause: false }).greet({
       name: "Ada",
     }),
     (error: unknown) => {
@@ -279,7 +286,7 @@ test("an unmapped vendor error is wrapped in every environment; its payload trav
     },
   };
   await assert.rejects(
-    bindPort(fixturePort, notAnError, { adapter: "string-thrower", validate: false }).greet({
+    bindPort(fixturePort, notAnError, { adapter: "string-thrower", keepCause: false }).greet({
       name: "Ada",
     }),
     (error: unknown) => {
@@ -288,6 +295,95 @@ test("an unmapped vendor error is wrapped in every environment; its payload trav
       return true;
     },
   );
+});
+
+test("under APP_ENV=production: no output check and no cause by default, both on a binding's options; the LinkedIn port checks every output whatever they say", async () => {
+  const script = fileURLToPath(new URL("./fixtures/pattern/production.ts", import.meta.url));
+  const env = { ...process.env, APP_ENV: "production" };
+  const { stdout } = await promisify(execFile)(process.execPath, [script], { env });
+  const seen = JSON.parse(stdout);
+  const unmapped = (port: string, method: string, cause: boolean) => ({
+    code: `${port}_error_unmapped`,
+    details: { method, code: "ECONNRESET" },
+    cause,
+  });
+  assert.deepEqual(seen.fixture, {
+    defaults: [
+      { value: { greeting: "hello Ada", vendor_id: "grt_1" } },
+      unmapped("fixture", "count", false),
+    ],
+    turnedOn: [
+      {
+        code: "fixture_output_invalid",
+        details: {
+          method: "greet",
+          path: "vendor_id",
+          reason: "a field the port does not declare",
+        },
+        cause: false,
+      },
+      unmapped("fixture", "count", true),
+    ],
+  });
+  // The LinkedIn outputs are strict objects: the extra key fails the parse itself.
+  const methods = Object.keys(linkedinPort.methods);
+  const extraKey = (method: string) => ({
+    code: "linkedin_output_invalid",
+    details: { method, issues: ['.: Unrecognized key: "vendor_id"'] },
+    cause: false,
+  });
+  assert.deepEqual(
+    seen.linkedin.extraKey,
+    Object.fromEntries(methods.map((m) => [m, extraKey(m)])),
+  );
+  assert.deepEqual(seen.linkedin.checkOutputsOff, extraKey("getProfile"));
+  assert.deepEqual(seen.linkedin.textInMessages, {
+    code: "linkedin_output_invalid",
+    details: {
+      method: "listRecentMessages",
+      issues: ['messages.0: Unrecognized key: "text"'],
+    },
+    cause: false,
+  });
+  assert.deepEqual(seen.linkedin.vendorError, unmapped("linkedin", "sendInvite", false));
+});
+
+test("answerNext: the next call of a method answers what it is given or throws it, reaching the generated codes; failNext goes first; reset clears it", async () => {
+  const fixture = await getAdapter(fixturePort, "fake");
+  fixtureFake.reset();
+  fixtureFake.answerNext("greet", { greeting: "hi", vendor_id: "grt_2" });
+  await assert.rejects(fixture.greet({ name: "Ada" }), (error: unknown) => {
+    assert.ok(isAppError(error) && error.code === "fixture_output_invalid");
+    assert.deepEqual(error.details, {
+      method: "greet",
+      path: "vendor_id",
+      reason: "a field the port does not declare",
+    });
+    return true;
+  });
+  fixtureFake.answerNext("count", new Error("the vendor is down"));
+  await assert.rejects(fixture.count(), (error: unknown) => {
+    assert.ok(isAppError(error) && error.code === "fixture_error_unmapped");
+    assert.ok(error.cause instanceof Error && error.cause.message === "the vendor is down");
+    return true;
+  });
+  // Answers queue per method; a method with none runs the fake; a pending failure goes first.
+  fixtureFake.answerNext("greet", { greeting: "first" });
+  fixtureFake.answerNext("greet", { greeting: "second" });
+  assert.deepEqual(await fixture.count(), { greetings: 0 });
+  assert.deepEqual(await fixture.greet({ name: "Ada" }), { greeting: "first" });
+  fixtureFake.failNext("fixture_rate_limited");
+  await assert.rejects(
+    fixture.greet({ name: "Ada" }),
+    (error: unknown) => isAppError(error) && error.code === "fixture_rate_limited",
+  );
+  assert.deepEqual(await fixture.greet({ name: "Ada" }), { greeting: "second" });
+  assert.deepEqual(await fixture.greet({ name: "Ada" }), { greeting: "hello Ada" });
+  assert.equal(fixtureFake.recordedCalls.length, 7);
+  fixtureFake.answerNext("count", { greetings: 99 });
+  fixtureFake.reset();
+  assert.deepEqual(await fixture.count(), { greetings: 0 });
+  throwsCode(() => fixtureFake.answerNext("sendMessage" as never, {}), "adapter_invalid");
 });
 
 test("the fake records every call, fails the next one on demand and resets", async () => {
@@ -383,7 +479,7 @@ test("definitions are checked at start: the name, the <port>_ prefix, a fake's c
       return true;
     },
   );
-  for (const method of ["record", "state", "recordedCalls", "failNext"]) {
+  for (const method of ["record", "state", "recordedCalls", "failNext", "answerNext"]) {
     throwsCode(
       () => definePort({ name: "pinger", methods: { [method]: methods.ping }, errors: {} }),
       "port_invalid",

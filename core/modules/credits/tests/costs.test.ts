@@ -3,7 +3,9 @@
 // signal run of four credits and three drafts gives the week's sums by action and by vendor and the
 // cost per 100 qualified leads, from usage committed in the week only; another organization's
 // workspace has its own. A signal-sourced lead costs its assessment, its draft and its share of the
-// run's reads; an imported one has no share; another workspace's person is lead_not_found. The week's
+// run's reads; an imported one has no share; another workspace's person is lead_not_found. Since
+// beta-p1-090 a lead found by a run also costs the committed engager credits of its candidates, so a
+// lead found before the change, after it or by both shows its share, its credits or both. The week's
 // and the share's arithmetic, pure.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -13,6 +15,7 @@ import { withTenant } from "@whytide/db";
 import { asRole, withTestDb } from "@whytide/db/testing";
 import { newId, platformIds, servicePrincipal } from "@whytide/platform";
 import { createScoreSnapshot } from "@whytide/qualification/testing";
+import { ids as signalsIds } from "@whytide/signals";
 import { createSignalEvent, createSignalRun, createSignalSource } from "@whytide/signals/testing";
 import { createTwoWorkspaces, type TestTenant, useTenancyClient } from "@whytide/tenancy/testing";
 import { share, sum } from "../domain/costs/decimal.ts";
@@ -197,6 +200,66 @@ test("leadCost: a signal-sourced lead is its assessment, its draft and the run's
   );
 });
 
+test("leadCost under both prices (beta-p1-090): a lead found by a run before the change shows its share of the run's blocks, one found after the committed engager credits of its candidates, one found by both the two; a released credit or another person's candidate costs nothing", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const before = await leadOf(a, "found-before", "signal");
+  const after = await leadOf(a, "found-after", "signal");
+  const both = await leadOf(a, "found-by-both", "signal");
+  const { id: sourceId } = await createSignalSource({ workspaceId, label: "Launch post" });
+  // A run before the change: a block of 2 credits over 40 candidates, two of them these leads'.
+  const old = await createSignalRun({
+    workspaceId,
+    sourceId,
+    status: "done",
+    counts: { staged: 40 },
+  });
+  await usage(a, { action: "signals.engager_read", credits: "2", subjectRef: old.id })("committed");
+  for (const personId of [before, both]) {
+    await createSignalEvent({ workspaceId, personId, sourceId, runId: old.id });
+  }
+  // A run after it: a credit per candidate read, its subject the candidate, whose event names it.
+  const run = await createSignalRun({
+    workspaceId,
+    sourceId,
+    status: "done",
+    counts: { staged: 3 },
+  });
+  const candidate = () => newId(signalsIds.signal_candidate);
+  const [ofAfter, ofBoth, ofNobody] = [candidate(), candidate(), candidate()];
+  const engager = (subjectRef: string) =>
+    usage(a, { action: "signals.engager", credits: "1", subjectRef });
+  await engager(ofAfter)("released");
+  await engager(ofAfter)("committed");
+  await engager(ofBoth)("committed");
+  await engager(ofNobody)("committed");
+  await createSignalEvent({
+    workspaceId,
+    personId: after,
+    sourceId,
+    runId: run.id,
+    candidateId: ofAfter,
+  });
+  await createSignalEvent({
+    workspaceId,
+    personId: both,
+    sourceId,
+    runId: run.id,
+    candidateId: ofBoth,
+  });
+
+  const signals = (personId: string, credits: string) => ({
+    personId,
+    credits,
+    money: "0",
+    byFeature: [{ feature: "signals", credits, money: "0" }],
+  });
+  const costOf = (personId: string) => inRun(workspaceId, () => leadCost(personId));
+  assert.deepEqual(await costOf(before), signals(before, "0.05"));
+  assert.deepEqual(await costOf(after), signals(after, "1"));
+  assert.deepEqual(await costOf(both), signals(both, "1.05"));
+});
+
 test("the week: ISO, in UTC, from Monday 00:00 to the next Monday excluded; a week the year lacks is null", () => {
   const w43 = { week: WEEK, start: MONDAY, end: NEXT_MONDAY };
   assert.deepEqual(weekOf(WEDNESDAY), w43);
@@ -229,6 +292,7 @@ test("the amounts: exact sums of decimal strings, and a share cut at the 30th de
     runId,
     candidates,
     personCandidates,
+    candidateIds: [],
   });
   const credits = new Map([
     ["run_a", "4"],

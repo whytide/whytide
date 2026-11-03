@@ -1,10 +1,11 @@
-// The writer's data, version 1 (agents/plan-message/README.md, agents/write-message/README.md): the
+// The writer's data, version 2 (agents/plan-message/README.md, agents/write-message/README.md): the
 // two agents' inputs, one field per data block of their prompts, built from the dossier by
 // domain/drafts/blocks.ts, and their outputs, whose angles and calls to action are closed lists
 // (security §6); and the issues of the gates (domain/gates/), which a regeneration sends back. The
 // inputs' objects are allow-lists: callAgent parses an input with its schema and drops any key it
-// does not declare before a block is written.
+// does not declare before a block is written. Version 2 adds <step>, a sequence step's (beta-p3-010).
 import { z } from "zod";
+import { EARLIER_DRAFTS_MAX, STEP_KEYS, WRITTEN_STEP_KINDS } from "../domain/drafts/constants.ts";
 
 /** The tasks' names in the agent registry. */
 export const PLAN_MESSAGE = "messaging.plan-message";
@@ -13,8 +14,15 @@ export const WRITE_MESSAGE = "messaging.write-message";
 export const CHANNELS = ["linkedin_note", "linkedin_message"] as const;
 export const ANGLES = ["signal_comment", "signal_reaction", "pain_point", "proof_point"] as const;
 export const CTAS = ["question", "soft_ask", "resource"] as const;
-/** The gates in the order they run: the plan's, then the text's. */
-export const GATES = ["facts_used", "placeholders", "length", "grounding", "red_lines"] as const;
+/** The gates in the order they run: the plan's, then the text's; colleague_signal is beta-p3-020's. */
+export const GATES = [
+  "facts_used",
+  "placeholders",
+  "length",
+  "grounding",
+  "red_lines",
+  "colleague_signal",
+] as const;
 export type Channel = (typeof CHANNELS)[number];
 export type GateName = (typeof GATES)[number];
 
@@ -25,6 +33,8 @@ export const gateIssue = z.discriminatedUnion("gate", [
   z.object({ gate: z.literal("length"), length: z.int(), min: z.int(), max: z.int() }),
   z.object({ gate: z.literal("grounding"), entity: z.string() }),
   z.object({ gate: z.literal("red_lines"), phrase: z.string() }),
+  /** The words that hit, as the text wrote them: a phrase of a colleague, or a colleague's name. */
+  z.object({ gate: z.literal("colleague_signal"), phrase: z.string() }),
 ]);
 export type GateIssue = z.output<typeof gateIssue>;
 
@@ -68,6 +78,22 @@ const replaced = z
     text: z.string().nullable(),
   })
   .nullable();
+/**
+ * The sequence's step the text is for (domain/drafts/write.ts): its kind, and the same person's
+ * earlier approved texts of the sequence, oldest first, empty ones left out. Absent for a lead's
+ * draft, so alpha's inputs, its eval cases among them, stay valid. Untrusted: a member may have
+ * edited the texts.
+ */
+const step = z
+  .object({
+    kind: z.enum(WRITTEN_STEP_KINDS),
+    earlier: z
+      .array(z.object({ stepKey: z.enum(STEP_KEYS), text: z.string().min(1) }))
+      .max(EARLIER_DRAFTS_MAX),
+  })
+  .nullable()
+  .optional();
+export type StepBlock = NonNullable<z.output<typeof step>>;
 
 export const planOutput = z.object({
   angle: z.enum(ANGLES),
@@ -76,9 +102,9 @@ export const planOutput = z.object({
   cta: z.enum(CTAS),
 });
 export type PlanOutput = z.output<typeof planOutput>;
-export const planInput = z.object({ ...blocks, failures, replaced });
+export const planInput = z.object({ ...blocks, step, failures, replaced });
 export type PlanInput = z.output<typeof planInput>;
 
 export const writeOutput = z.object({ text: z.string().min(1).max(4_000) });
-export const writeInput = z.object({ ...blocks, plan: planOutput, failures, replaced });
+export const writeInput = z.object({ ...blocks, step, plan: planOutput, failures, replaced });
 export type WriteInput = z.output<typeof writeInput>;

@@ -13,6 +13,19 @@ export const UNREADABLE = "linkedin_provider_error";
  * outage must not drop every candidate left and move the watermark.
  */
 export const UNREADABLE_IN_ROW_MAX = 3;
+/**
+ * linkedin_read_profile's refusals that stop the reading, the run then failing with the code: the
+ * account disconnected, or paused or held by its retry_at since the read was reserved (beta-p6-020),
+ * or stopped by a kill switch since then (beta-p6-040), which no next candidate would pass either.
+ */
+export const READING_ENDS: readonly string[] = Object.freeze([
+  "linkedin_account_disconnected",
+  "account_paused",
+  "linkedin_rate_limited",
+  "platform_stopped",
+  "workspace_stopped",
+  "account_stopped",
+]);
 
 /** The run's folder: every end deletes what is under it. */
 export const runFolder = (runId: string): string => `raw/signals/${runId}/`;

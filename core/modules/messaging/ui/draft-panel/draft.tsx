@@ -60,6 +60,7 @@ const MARK: Record<Draft["status"], [tone: BadgeTone, Icon: LucideIcon | undefin
   flagged: ["warning", Flag],
   failed: ["danger", CircleX],
   edited: ["neutral", PenLine],
+  approved: ["success", undefined],
 };
 const NOTE = "flex items-start gap-2 rounded-lg px-3 py-2.5";
 const ICON = "mt-0.5 size-4 shrink-0";

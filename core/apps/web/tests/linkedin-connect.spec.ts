@@ -1,7 +1,8 @@
 // The LinkedIn screen end to end (alpha-p7-030, acceptance criteria 1 and 4; core/modules/linkedin
 // README.md "Screen"), in a browser in Pacific/Auckland: the api refuses a connect without the
-// acknowledgment; on the screen, the disclosure's box, Connect, the fake's hosted link and back, the
-// account connected in the browser's zone; working hours saved and on the card again after a reload.
+// acknowledgment of the current disclosure or without the personal-account box (beta-p1-070); on the
+// screen, the disclosure's two boxes, Connect, the fake's hosted link and back, the account connected
+// in the browser's zone; working hours saved and on the card again after a reload.
 // The e2e api (core/apps/api/tests/e2e-server.ts) serves the fake's link, which the web's /api
 // rewrite reaches, and posts the link's webhook to its own webhook route.
 import linkedin from "../../../modules/linkedin/messages/en.json" with { type: "json" };
@@ -39,14 +40,23 @@ test("connect after the disclosure, back connected in the browser's zone; workin
       expect(await page.request.delete(`${ACCOUNTS}/${id}`, { headers })).toBeOK();
     }
   }
-  const unread = { timeZone: "Pacific/Auckland", acknowledged: false };
-  const refused = await page.request.post(`${ACCOUNTS}/connect`, { data: unread, headers });
-  expect([refused.status(), (await refused.json()).code]).toEqual([400, "disclosure_required"]);
+  const timeZone = "Pacific/Auckland";
+  const refusals = [
+    [{ timeZone, acknowledged: false, disclosureVersion: 2, personalAccount: true }, "disclosure"],
+    [{ timeZone, acknowledged: true }, "disclosure"], // alpha's body: no version
+    [{ timeZone, acknowledged: true, disclosureVersion: 2 }, "personal_account"],
+  ] as const;
+  for (const [data, code] of refusals) {
+    const refused = await page.request.post(`${ACCOUNTS}/connect`, { data, headers });
+    expect([refused.status(), (await refused.json()).code]).toEqual([400, `${code}_required`]);
+  }
 
   await page.goto(`/w/${WORKSPACE}/linkedin`);
   const connect = page.getByRole("button", { name: say("linkedin.connect.button") });
   await expect(connect).toBeDisabled();
   await page.getByRole("checkbox", { name: say("linkedin.connect.acknowledge") }).check();
+  await expect(connect).toBeDisabled();
+  await page.getByRole("checkbox", { name: say("linkedin.connect.personal_account") }).check();
   await connect.click();
   await page.waitForURL(`**/w/${WORKSPACE}/linkedin?connect=done`);
   const card = page.getByRole("region", { name: "LinkedIn", exact: true });

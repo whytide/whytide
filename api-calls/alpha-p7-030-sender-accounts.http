@@ -4,15 +4,15 @@
 # link; the browser follows it. The webhook's body and signature are made up: the api answers them
 # 401 linkedin_webhook_invalid, as it does to anything the provider did not sign.
 
-### POST /v1/workspaces/{workspaceId}/linkedin/accounts/connect: the provider's hosted link for the signed-in user's own account, after the risk disclosure
+### POST /v1/workspaces/{workspaceId}/linkedin/accounts/connect: the provider's hosted link for the signed-in user's own account, after the risk disclosure's current version and the personal-account box (beta-p1-070)
 POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/connect
 Content-Type: application/json
 Cookie: {{sessionCookie}}
 Origin: {{appOrigin}}
 
-{ "timeZone": "Europe/Paris", "acknowledged": true }
+{ "timeZone": "Europe/Paris", "acknowledged": true, "disclosureVersion": 2, "personalAccount": true }
 
-### GET /v1/workspaces/{workspaceId}/linkedin/accounts: the workspace's sender accounts, the caller's marked `mine`
+### GET /v1/workspaces/{workspaceId}/linkedin/accounts: the workspace's sender accounts, the caller's marked `mine`, each `paused` or not and `pausedBy` the tester, the operator or null (beta-p1-040), its `disclosureVersion` and `sendingDisclosureRequired` (beta-p1-070)
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts
 Accept: application/json
 Cookie: {{sessionCookie}}
@@ -23,7 +23,7 @@ Content-Type: application/json
 Cookie: {{sessionCookie}}
 Origin: {{appOrigin}}
 
-{ "label": "My LinkedIn", "timeZone": "Europe/Paris", "workingHours": { "start": "08:30", "end": "18:00", "days": [1, 2, 3, 4, 5] }, "dailyReadCap": 150 }
+{ "label": "My LinkedIn", "timeZone": "Europe/Paris", "workingHours": { "start": "08:30", "end": "18:00", "days": [1, 2, 3, 4, 5] }, "dailyReadCap": 80 }
 
 ### DELETE /v1/workspaces/{workspaceId}/linkedin/accounts/{id}: disconnects the account and forgets its reference; 204
 DELETE {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/{{accountId}}

@@ -20,4 +20,23 @@ export const errors = defineErrors({
   review_reason_required: { status: 400 },
   /** reviewLead: Good lead, or Not a fit for `other`, without its text. 400. */
   review_text_required: { status: 400 },
+  /** removeSuppression: no active entry of the workspace has the id. 404. */
+  suppression_not_found: {},
+  /** removeSuppression: the entry is an opt-out, which is never removed. 409. */
+  suppression_not_removable: { status: 409 },
+  /**
+   * addSuppression: the value normalizes to no profile, company page or domain of two labels or
+   * more, or the company has neither a domain nor a page. 400.
+   */
+  suppression_target_invalid: { status: 400 },
+  /**
+   * approveLead: the never-contact check refuses the person as a new enrollment;
+   * `details.reason` is its reason, recently_contacted included. 409.
+   */
+  person_suppressed: { status: 409 },
+  /**
+   * approveLead: a campaign has the lead or had it (in_campaign, replied, finished, or suppressed
+   * after an enrollment), so Approve no longer applies. 409.
+   */
+  lead_in_outreach: { status: 409 },
 });

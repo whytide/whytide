@@ -8,7 +8,7 @@ import { asRole } from "@whytide/db/testing";
 import { newId } from "@whytide/platform";
 import type { SignalEvent } from "../domain/evidence.ts";
 import type { SignalRun, SignalRunStatus, SignalSource } from "../domain/sources.ts";
-import { ids } from "../ids.ts";
+import { eventIdOf, ids } from "../ids.ts";
 
 export { useClient as useSignalsClient } from "../domain/client.ts";
 export { shortLinks } from "../sources/post_engagers/post-url.ts";
@@ -73,7 +73,8 @@ export function createSignalRun(
  * The person's engagement with a post, with its evidence: a like, or a comment with `commentText`,
  * unless `reaction` says otherwise; no source unless `sourceId` names one, no run unless `runId`
  * does; `occurredAt` now unless given. With `reducedAt`, reduced as alpha-p10-020 leaves it: no
- * excerpt or comment.
+ * excerpt or comment. With `candidateId`, the event a run's processing makes of that candidate since
+ * beta-p1-090, whose id carries the candidate's ULID; else one made before.
  */
 export async function createSignalEvent(
   input: {
@@ -86,6 +87,7 @@ export async function createSignalEvent(
     runId?: string;
     author?: string;
     reducedAt?: Date;
+    candidateId?: string;
   },
   client: PrismaClient = asRole("app"),
 ): Promise<SignalEvent> {
@@ -93,7 +95,8 @@ export async function createSignalEvent(
   const { author = "Test Engager", reducedAt = null } = input;
   const commentText = reducedAt === null ? (input.commentText ?? null) : null;
   const reaction = input.reaction ?? (input.commentText === undefined ? "like" : "comment");
-  const id = newId(ids.signal_event);
+  const { candidateId } = input;
+  const id = candidateId === undefined ? newId(ids.signal_event) : eventIdOf(candidateId);
   const dedupeKey = `test:${id}`;
   const kind = "post_engagement";
   const event = await client.signalEvent.create({

@@ -5,7 +5,8 @@
 // provenance, its company, its lead (source `signal`, with the source's label and post URL, which
 // contacts' lead list shows), an event (one per dedupe key) and its evidence. The chunk's new
 // leads go to qualification as signals.person_found, the known persons' new events as a re-score
-// request; its staging rows are deleted and its counts added to the run's.
+// request; its staging rows are deleted and its counts added to the run's. An event's id carries its
+// candidate's ULID (ids.ts).
 import { json } from "node:stream/consumers";
 import {
   errors as contactsErrors,
@@ -28,7 +29,7 @@ import {
   requestRescore,
 } from "@whytide/qualification";
 import { events } from "../../events.ts";
-import { ids } from "../../ids.ts";
+import { eventIdOf, ids } from "../../ids.ts";
 import type { SourceKind } from "../../sources/_contract.ts";
 import { sourceKind } from "../../sources/registry.ts";
 import { addCounts, type RunRef } from "../runs.ts";
@@ -160,8 +161,10 @@ async function processOne(
   const source = { kind: "signal" as const, ref: ref.sourceId, at, label, url: objectUrl };
   const { created } = await createLeadForPerson({ personId, source });
   const { providerMemberRef: actor, reaction: role } = candidate;
+  // The candidate's ULID: its credit's subject is the candidate, whose row goes with the run, so the
+  // event names it for the lead's cost (personReads, beta-p1-090).
   const event = {
-    id: newId(ids.signal_event),
+    id: eventIdOf(candidate.id),
     workspaceId: ref.workspaceId,
     personId,
     sourceId: ref.sourceId,

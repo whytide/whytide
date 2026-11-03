@@ -13,6 +13,7 @@
     "dev": "node scripts/dev.ts",
     "start": "node --enable-source-maps dist/src/main.js",
     "test": "pnpm run build && APP_ENV=test PROVIDER_AUTH=fake PROVIDER_LINKEDIN=fake node --env-file-if-exists=../../../.env.local --enable-source-maps --test \"dist/tests/*.test.js\"",
+    "test:safety": "pnpm run build && APP_ENV=test PROVIDER_AUTH=fake PROVIDER_LINKEDIN=fake node --env-file-if-exists=../../../.env.local --enable-source-maps --test \"dist/tests/safety/*.test.js\"",
     "lint": "node ../../../tools/lint/lint.ts .",
     "smoke": "node --env-file-if-exists=../../../.env.local tests/smoke.ts",
     "serve:e2e": "pnpm run build && APP_ENV=test node --env-file-if-exists=../../../.env.local --enable-source-maps dist/tests/e2e-server.js",

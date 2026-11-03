@@ -1,0 +1,128 @@
+// The tables of core/modules/campaigns (its docs/data.md), beta-p2-040; migration
+// campaigns_initial. Two tenant tables: a person's enrollment in the one fixed template, and its
+// step executions, one row per step. person_id and sender_account_id are plain ids: no foreign key
+// crosses modules. A step links its enrollment by the pair (workspace_id, enrollment_id), so the
+// database refuses a link across workspaces. Hand-written SQL in the migration, which the schema
+// cannot say: the partial unique keys enrollments_active_person, (workspace_id, person_id) WHERE
+// status = 'active', and step_executions_key_claimed, (workspace_id, idempotency_key) WHERE status
+// IN ('executing', 'succeeded'); and three CHECKs, enrollments_exit_reason (exit_reason set exactly
+// when the status is exited), enrollments_ended_at (ended_at set exactly when the status is not
+// active) and step_executions_quota_day_date (quota_day a YYYY-MM-DD text, as linkedin's).
+
+/// tenant
+model Enrollment {
+  id              String                @id
+  workspaceId     String                @map("workspace_id")
+  personId        String                @map("person_id")
+  /// The approver's connected account; null when it exited without one (no_sender, suppressed).
+  senderAccountId String?               @map("sender_account_id")
+  /// The template that stands where a campaign will (RB-9.3.3): linkedin_default.
+  templateId      String                @map("template_id")
+  templateVersion Int                   @map("template_version")
+  status          EnrollmentStatus
+  exitReason      EnrollmentExitReason? @map("exit_reason")
+  /// A code of domain/steps/constants.ts EXIT_DETAILS: the suppression reason behind suppressed.
+  exitDetail      String?               @map("exit_detail")
+  /// The contacts.lead_approved event it came from, so that a redelivery enrolls no one again.
+  sourceEventId   String                @map("source_event_id")
+  /// Null for an enrollment that ended as it was made: its sequence never started.
+  startedAt       DateTime?             @map("started_at") @db.Timestamptz()
+  endedAt         DateTime?             @map("ended_at") @db.Timestamptz()
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamptz()
+  stepExecutions  StepExecution[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, sourceEventId])
+  @@index([workspaceId, personId])
+  @@map("enrollments")
+}
+
+// active, then replied, completed or exited, never back (data model §5.2, reduced).
+enum EnrollmentStatus {
+  active
+  replied
+  completed
+  exited
+
+  @@map("enrollment_status")
+}
+
+enum EnrollmentExitReason {
+  suppressed
+  removed
+  no_sender
+  not_accepted
+  send_refused
+
+  @@map("enrollment_exit_reason")
+}
+
+/// tenant
+model StepExecution {
+  id               String              @id
+  workspaceId      String              @map("workspace_id")
+  enrollmentId     String              @map("enrollment_id")
+  personId         String              @map("person_id")
+  senderAccountId  String              @map("sender_account_id")
+  templateId       String              @map("template_id")
+  templateVersion  Int                 @map("template_version")
+  stepKey          String              @map("step_key")
+  position         Int
+  actionType       StepActionType      @map("action_type")
+  /// SHA-256, hex, of the step's canonical definition (domain/template/keys.ts).
+  stepTemplateHash String              @map("step_template_hash")
+  /// SHA-256, hex, of workspace, person, template and step hash: claimed once (the partial key).
+  idempotencyKey   String              @map("idempotency_key")
+  status           StepExecutionStatus @default(planned)
+  /// When the step may go: connect at the enrollment; the others once their anchor happens.
+  dueAt            DateTime?           @map("due_at") @db.Timestamptz()
+  scheduledFor     DateTime?           @map("scheduled_for") @db.Timestamptz()
+  /// The sender's date of the send, `YYYY-MM-DD`, as linkedin's quota_day.
+  quotaDay         String?             @map("quota_day")
+  executedAt       DateTime?           @map("executed_at") @db.Timestamptz()
+  /// The claims made; the credit key is `<idempotency_key>:<attempt>`.
+  attempt          Int                 @default(0)
+  /// What the gate saw at the send: ids, codes and instants.
+  jitChecks        Json?               @map("jit_checks")
+  /// Codes of domain/steps/constants.ts STEP_REASON_CODES.
+  skipReason       String?             @map("skip_reason")
+  errorCode        String?             @map("error_code")
+  approvalItemId   String?             @map("approval_item_id")
+  draftId          String?             @map("draft_id")
+  /// The credit reservation the send commits.
+  creditUsageId    String?             @map("credit_usage_id")
+  /// When the connection request's acceptance was detected.
+  acceptedAt       DateTime?           @map("accepted_at") @db.Timestamptz()
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime            @updatedAt @map("updated_at") @db.Timestamptz()
+  enrollment       Enrollment          @relation(fields: [workspaceId, enrollmentId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([workspaceId, enrollmentId, stepKey])
+  @@index([workspaceId, senderAccountId, status, scheduledFor])
+  @@index([workspaceId, personId])
+  @@map("step_executions")
+}
+
+enum StepActionType {
+  invite
+  message
+  withdraw
+
+  @@map("step_action_type")
+}
+
+// held is kept so gamma can resume what a reply held (architecture §14.2, §14.3).
+enum StepExecutionStatus {
+  planned
+  awaiting_approval
+  scheduled
+  executing
+  succeeded
+  failed
+  skipped
+  held
+  cancelled
+
+  @@map("step_execution_status")
+}

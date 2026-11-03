@@ -1,0 +1,17 @@
+{
+  "account_id": "fixture-account",
+  "account_type": "LINKEDIN",
+  "account_info": { "type": "LINKEDIN", "feature": "classic", "user_id": "fixture-member-self" },
+  "event": "message_read",
+  "chat_id": "fixture-chat-ada",
+  "timestamp": "2026-10-02T11:35:00.000Z",
+  "webhook_name": "whytide-messaging",
+  "message_id": "fixture-message-self-1",
+  "message": "fixture-body-marker: thanks for connecting.",
+  "sender": {
+    "attendee_id": "fixture-attendee-self",
+    "attendee_name": "Sam Sender",
+    "attendee_provider_id": "fixture-member-self",
+    "attendee_profile_url": "https://www.linkedin.com/in/sam-sender/"
+  }
+}

@@ -1,30 +1,47 @@
-// The read quota (docs/concepts.md "Read quota", docs/flows.md): reserve, read, then commit or release,
-// each in the caller's own tenant run (an activity's context.tenant), on its transaction, as credits'
-// reserve does. reserveReads takes the day's usage row (INSERT … ON CONFLICT DO NOTHING, then SELECT …
-// FOR UPDATE), so an account's reservations queue on it; commit and release take that row too. The
-// quota day and the window come from the account's time zone and working hours. A refusal is an
-// answer, not a throw, so the caller's run commits the action-log row that records it.
+// The read quota and the day's budgets (docs/concepts.md "Budgets", docs/flows.md): reserve, read,
+// then commit or release, each in the caller's own tenant run (an activity's context.tenant), on its
+// transaction, as credits' reserve does. reserveReads takes the day's usage row, made with its limits
+// drawn once when missing and locked (days.ts), so an account's reservations, reads and sends
+// (domain/send/), queue on it; commit and release take that row too (holds.ts). The quota day and
+// the window come from the account's time zone and working hours, through platform's time helpers.
+// A refusal is an answer, not a throw, so the caller's run commits the action-log row that records it.
 import { tenantClient } from "@whytide/db";
-import { AppError, currentTenant, newId } from "@whytide/platform";
+import { currentTenant, isWindowOpen, newId, nextWindowAt } from "@whytide/platform";
 import { linkedinConfig } from "../../config.ts";
-import { errors } from "../../errors.ts";
 import { ids } from "../../ids.ts";
-import { commitInput, type ReserveInput, releaseInput, reserveInput } from "../../schemas/quota.ts";
+import {
+  type ActionOutcome,
+  commitInput,
+  type ReserveInput,
+  releaseInput,
+  reserveInput,
+} from "../../schemas/quota.ts";
 import { findAccount } from "../accounts.ts";
 import { writeLog } from "../action-log/log.ts";
 import { now } from "../clock.ts";
+import { readControls, stopOf } from "../controls/controls.ts";
+import { sendingDisclosureRequired } from "../disclosure/disclosure.ts";
+import { isPaused } from "../health/states.ts";
 import { parseInput } from "../input.ts";
-import { isWindowOpen, nextQuotaDayAt, nextWindowAt, quotaDay } from "./window.ts";
-
-/** A reservation holds its reads this long; the next reservation of its day frees it after. */
-export const RESERVATION_MS = 60 * 60_000;
+import { heldRefusal } from "../invites/held.ts";
+import { isWeekend, type ReadStateRefusal, readStateRefusal, sendHours } from "../send/state.ts";
+import {
+  ACTIONS_PER_DAY_MAX,
+  INVITES_PER_WEEK,
+  RESERVATION_MS,
+  WITHDRAWALS_PER_DAY_MAX,
+} from "./constants.ts";
+import { dayOf, invitesBefore } from "./days.ts";
+import { lockReservation, moveCounters, notOpen, settle, sweep } from "./holds.ts";
+import { actionsLeft, actionsUsed, dayEndsAt, limitsFor, readsLeft, windowLeft } from "./limits.ts";
 
 export type Reservation = { readonly reservationId: string; readonly granted: number };
 export type Refusal = {
-  readonly refused: "read_cap_reached" | "outside_working_hours" | "linkedin_account_disconnected";
-  /** When to ask again: the next quota day's start, or the next window's; null when not connected. */
+  readonly refused: ReadStateRefusal["refused"] | "read_cap_reached" | "daily_actions_cap_reached";
+  /** When to ask again: retry_at, the next window's start or the next quota day's; null for a switch or no connection. */
   readonly retryAt: Date | null;
 };
+type Used = { readonly used: number };
 export type Usage = {
   readonly quotaDay: string;
   readonly cap: number;
@@ -33,42 +50,52 @@ export type Usage = {
   readonly committed: number;
   readonly windowOpen: boolean;
   readonly nextWindowAt: Date;
+  readonly readAllowance: number;
+  readonly invites: Used & { readonly limit: number };
+  readonly messages: Used & { readonly limit: number };
+  readonly withdrawals: Used & { readonly max: number };
+  readonly weekInvites: Used & { readonly cap: number };
+  readonly actions: Used & { readonly max: number };
 };
-type Day = { readonly id: string; readonly readsReserved: number; readonly readsCommitted: number };
-type Held = {
-  readonly id: string;
-  readonly usageId: string;
-  readonly count: number;
-  readonly committed: number | null;
-  readonly status: string;
+/** What a campaign may still send today, and when today's window ends (null: none is left, or no send may go). */
+export type RemainingToday = {
+  readonly invites: number;
+  readonly messages: number;
+  readonly withdrawals: number;
+  /** The actions left of the 200: it bounds each of the three, and their sum (beta-p4-010). */
+  readonly actions: number;
+  readonly windowEnd: Date | null;
 };
-
 /**
- * `count` reads for the account, all or none: refused while it is not connected, outside its working
- * hours, or when the day's reads reserved and made would pass its cap. One action-log row either way.
- * The cap is the account's row as this reservation reads it, so a cap changed since the last one
- * holds from here, on the same quota day.
+ * `count` reads for the account, all or none: refused while a kill switch is on (the platform's, the
+ * workspace's or the account's, docs/concepts.md "Kill switches"), while it is not connected, while
+ * its retry_at lies ahead, outside its working hours, when the day's reads reserved and made would
+ * pass the smaller of the day's read allowance and the account's cap, or when the day's actions
+ * would pass the 200.
+ * One action-log row either way. The cap is the account's row as this reservation reads it, so a
+ * lowered cap holds from here; the allowance was drawn with the day's row, so a raised one holds from
+ * the next quota day.
  */
 export async function reserveReads(input: ReserveInput): Promise<Reservation | Refusal> {
   const { accountId, count, kind, objectRef } = parseInput(reserveInput, input);
   const account = await findAccount(accountId);
-  const { timeZone, workingHours, dailyReadCap } = account;
   const at = now();
-  const log = (outcome: string) => writeLog(account.id, { kind, objectRef, count, outcome }, at);
-  const refuse = async (refused: Refusal["refused"], retryAt: Date | null): Promise<Refusal> => {
+  const log = (outcome: ActionOutcome) =>
+    writeLog(account.id, { kind, objectRef, count, outcome }, at);
+  const refuse = async ({ refused, retryAt }: Refusal): Promise<Refusal> => {
     await log(refused);
     return { refused, retryAt };
   };
-  if (account.status !== "connected") return refuse("linkedin_account_disconnected", null);
-  if (!isWindowOpen(at, timeZone, workingHours)) {
-    return refuse("outside_working_hours", nextWindowAt(at, timeZone, workingHours));
-  }
-  const day = await lockDay(account.id, quotaDay(at, timeZone));
-  const reserved = day.readsReserved - (await sweep(day.id, at));
-  if (reserved + day.readsCommitted + count > dailyReadCap) {
-    if (reserved !== day.readsReserved) await setReserved(day.id, reserved);
-    return refuse("read_cap_reached", nextQuotaDayAt(at, timeZone));
-  }
+  const state = await readStateRefusal(account, at);
+  if (state !== null) return refuse(state);
+  const day = await sweep(await dayOf(account, at, true), at);
+  const refused =
+    count > readsLeft(account, day)
+      ? "read_cap_reached"
+      : count > actionsLeft(day)
+        ? "daily_actions_cap_reached"
+        : undefined;
+  if (refused !== undefined) return refuse({ refused, retryAt: dayEndsAt(day, account.timeZone) });
   const reservationId = newId(ids.sender_quota_reservation);
   const expiresAt = new Date(at.getTime() + RESERVATION_MS);
   await tenantClient.senderQuotaReservation.create({
@@ -82,7 +109,7 @@ export async function reserveReads(input: ReserveInput): Promise<Reservation | R
       createdAt: at,
     },
   });
-  await setReserved(day.id, reserved + count);
+  await moveCounters(day.id, "read", count);
   await log("reserved");
   return { reservationId, granted: count };
 }
@@ -94,6 +121,7 @@ export async function commitReads(
 ): Promise<{ reservationId: string; committed: number }> {
   const valid = parseInput(commitInput, { reservationId, actual });
   const held = await lockReservation(valid.reservationId);
+  if (held.actionType !== "read") throw notOpen(held.id);
   if (held.status === "committed")
     return { reservationId: held.id, committed: held.committed ?? 0 };
   if (held.status === "released") throw notOpen(held.id);
@@ -105,92 +133,72 @@ export async function commitReads(
 export async function releaseReads(reservationId: string): Promise<void> {
   const valid = parseInput(releaseInput, { reservationId });
   const held = await lockReservation(valid.reservationId);
-  if (held.status === "committed") throw notOpen(held.id);
+  if (held.actionType !== "read" || held.status === "committed") throw notOpen(held.id);
   if (held.status === "reserved") await settle(held, "released", 0);
 }
 
-/** The account's reads today over its cap and its window now, in its time zone. */
+/**
+ * The account's quota day (days.ts): its reads over the cap, its budgets with what is used of each
+ * (reserved and made), the week's connection requests and the 200, and its window now. It makes
+ * today's row when missing, so the screen shows the limits the reservations check.
+ */
 export async function readUsage(accountId: string): Promise<Usage> {
   const account = await findAccount(accountId);
   const { timeZone, workingHours } = account;
   const at = now();
-  const date = quotaDay(at, timeZone);
-  const row = await tenantClient.senderQuotaUsage.findFirst({
-    where: { senderAccountId: account.id, quotaDay: date },
-  });
+  const day = await dayOf(account, at, false);
+  const invitesToday = day.invitesReserved + day.invitesCommitted;
+  const weekInvites = (await invitesBefore(account.id, day.quotaDay)) + invitesToday;
   return {
-    quotaDay: date,
+    quotaDay: day.quotaDay,
     cap: account.dailyReadCap,
     capMax: linkedinConfig.LINKEDIN_DAILY_READ_CAP_MAX,
-    reserved: row?.readsReserved ?? 0,
-    committed: row?.readsCommitted ?? 0,
+    reserved: day.readsReserved,
+    committed: day.readsCommitted,
     windowOpen: isWindowOpen(at, timeZone, workingHours),
     nextWindowAt: nextWindowAt(at, timeZone, workingHours),
+    readAllowance: day.readAllowance,
+    invites: { used: invitesToday, limit: day.inviteLimit },
+    messages: { used: day.messagesReserved + day.messagesCommitted, limit: day.messageLimit },
+    withdrawals: {
+      used: day.withdrawalsReserved + day.withdrawalsCommitted,
+      max: WITHDRAWALS_PER_DAY_MAX,
+    },
+    weekInvites: { used: weekInvites, cap: INVITES_PER_WEEK.cap },
+    actions: { used: actionsUsed(day), max: ACTIONS_PER_DAY_MAX },
   };
 }
 
-/** The day's usage row, made when missing, locked to the run's end. */
-async function lockDay(senderAccountId: string, date: string): Promise<Day> {
-  const { workspaceId } = currentTenant();
-  const id = newId(ids.sender_quota_usage);
-  await tenantClient.senderQuotaUsage.createMany({
-    data: [{ id, workspaceId, senderAccountId, quotaDay: date }],
-    skipDuplicates: true,
-  });
-  const [day] = await tenantClient.$queryRaw<Day[]>`
-    SELECT id, reads_reserved AS "readsReserved", reads_committed AS "readsCommitted"
-    FROM sender_quota_usage
-    WHERE workspace_id = ${workspaceId} AND sender_account_id = ${senderAccountId}
-      AND quota_day = ${date}
-    FOR UPDATE`;
-  if (day === undefined) throw new Error("no usage row after its insert");
-  return day;
+/**
+ * What the account may still send today, for campaigns' plan: limitsFor's answer over its quota day's
+ * row, made when missing so that the plan sees the limits the reservations check, and the end of
+ * today's window in the account's zone, null when none is left today. Nothing on Saturday and
+ * Sunday in the account's zone (send/state.ts), nor while sending is closed, a kill switch is on
+ * for the account, its health pauses it, its retry_at is still ahead, the sending disclosure is not
+ * accepted or the member id is not known (decisions.md Finding 56), so the plan places nothing that
+ * its reservation would refuse; no connection request while the platform's invites are paused, the
+ * account is at_risk, or the pending invitations' count, with the invites in flight, refuses one.
+ */
+export async function remainingToday(accountId: string): Promise<RemainingToday> {
+  const account = await findAccount(accountId);
+  const at = now();
+  const hours = sendHours(account.workingHours);
+  const controls = await readControls();
+  const closed = !controls.platform.sendingOpen || stopOf(controls, account) !== null;
+  const paused =
+    isPaused(account.healthState) || (account.retryAt !== null && account.retryAt > at);
+  const unready = sendingDisclosureRequired(account) || !account.memberIdKnown;
+  if (closed || paused || unready || hours === null || isWeekend(at, account.timeZone)) {
+    return { invites: 0, messages: 0, withdrawals: 0, actions: 0, windowEnd: null };
+  }
+  const day = await dayOf(account, at, false);
+  const usage = { invitesBefore: await invitesBefore(account.id, day.quotaDay) };
+  const { invites, messages, withdrawals, actions } = limitsFor(account, day, usage);
+  const window = windowLeft(at, account.timeZone, hours);
+  const noInvite =
+    controls.platform.invitesPaused ||
+    account.healthState === "at_risk" ||
+    (await heldRefusal(account, at)) !== null;
+  const invitesLeft = noInvite ? 0 : invites;
+  return { invites: invitesLeft, messages, withdrawals, actions, windowEnd: window?.to ?? null };
 }
-
-/** The lazy sweep: the day's reservations past their hour expire; the reads they held. */
-async function sweep(usageId: string, at: Date): Promise<number> {
-  const expired = await tenantClient.$queryRaw<{ count: number }[]>`
-    UPDATE sender_quota_reservations SET status = 'expired', settled_at = ${at}::timestamptz
-    WHERE workspace_id = ${currentTenant().workspaceId} AND usage_id = ${usageId}
-      AND status = 'reserved' AND expires_at <= ${at}::timestamptz
-    RETURNING count`;
-  return expired.reduce((sum, { count }) => sum + count, 0);
-}
-
-function setReserved(usageId: string, readsReserved: number) {
-  return tenantClient.senderQuotaUsage.update({ where: { id: usageId }, data: { readsReserved } });
-}
-
-/** The reservation, read again once its day's row is locked: a day's settlements queue there too. */
-async function lockReservation(id: string): Promise<Held> {
-  const found = await tenantClient.senderQuotaReservation.findFirst({
-    where: { id },
-    select: { usageId: true },
-  });
-  if (found === null) throw notOpen(id);
-  await tenantClient.$queryRaw`
-    SELECT id FROM sender_quota_usage
-    WHERE id = ${found.usageId} AND workspace_id = ${currentTenant().workspaceId}
-    FOR UPDATE`;
-  return tenantClient.senderQuotaReservation.findFirstOrThrow({
-    where: { id },
-    select: { id: true, usageId: true, count: true, committed: true, status: true },
-  });
-}
-
-/** The new status; on the day, the reads no longer held and the reads made. */
-async function settle(held: Held, status: "committed" | "released", made: number): Promise<void> {
-  const committed = status === "committed" ? made : null;
-  await tenantClient.senderQuotaReservation.update({
-    where: { id: held.id },
-    data: { status, committed, settledAt: now() },
-  });
-  const freed = held.status === "reserved" ? held.count : 0;
-  await tenantClient.senderQuotaUsage.update({
-    where: { id: held.usageId },
-    data: { readsReserved: { decrement: freed }, readsCommitted: { increment: made } },
-  });
-}
-
-const notOpen = (reservationId: string) =>
-  new AppError(errors.reservation_not_open, { details: { reservation_id: reservationId } });

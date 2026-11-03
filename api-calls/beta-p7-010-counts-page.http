@@ -1,0 +1,7 @@
+# campaigns' counts, the counts page (core/modules/campaigns/README.md "Routes"): a member's session,
+# campaigns.read. Put your workspaceId in http-client.private.env.json.
+
+### GET /v1/workspaces/{workspaceId}/campaigns/counts: per sender account of the workspace's enrollments, by label, the connection requests and messages sent, the invitations accepted and the people who replied, today, over the last 7 days and since the start, the days in the account's time zone; ids, labels, zones and numbers only; none without an enrollment
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/counts
+Accept: application/json
+Cookie: {{sessionCookie}}

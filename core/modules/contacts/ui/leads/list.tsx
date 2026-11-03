@@ -1,12 +1,15 @@
-// The lead list in the browser (page.tsx): the filters by status, tier and review, the sort by fit,
-// newest or unreviewed first, the counts per status, and the table, paged by the api's cursor; each
-// change reads GET …/contacts/leads again, the last one asked winning, and a filter or sort change
-// writes itself into the address first, so that a reload and Back return to it (query.ts). While a
-// filter change reads, the loading state stands in for the table; a sort or a page keeps it, busy,
-// and the focus where it was. A failed read shows its code in words and a retry; an empty view says
-// why: no lead yet, none in this view, or none left to review. A row's link opens the lead page
-// with the view in its query. Export downloads the CSV of the filters set (GET
-// …/contacts/exports/leads.csv), its failure in words with a retry.
+// The lead list in the browser (page.tsx): the filters by status, tier, review and outreach status,
+// the sort by fit, newest or unreviewed first, the counts per status, and the table, paged by the
+// api's cursor; each change reads GET …/contacts/leads again, the last one asked winning, and a
+// filter or sort change writes itself into the address first, so that a reload and Back return to
+// it (query.ts). While a filter change reads, the loading state stands in for the table; a sort or
+// a page keeps it, busy, and the focus where it was. A failed read shows its code in words and a
+// retry; an empty view says why: no lead yet, none in this view, or none left to review. A row's
+// link opens the lead page with the view in its query. The Outreach column shows each lead's
+// outreach status. The row menu, above the link, opens nothing: Approve (../lead/approve.tsx),
+// and the one-click blocks of the person or their company (../never-contact/block.tsx); a toast
+// says so, and the rows they change show their new status until the next read. Export downloads
+// the CSV of the filters set (GET …/contacts/exports/leads.csv), its failure in words with a retry.
 "use client";
 
 import {
@@ -19,13 +22,18 @@ import {
   DataTable,
   EmptyState,
   ErrorState,
+  Menu,
+  MenuItem,
   Meter,
   PageHeader,
   Select,
+  Toast,
   useKeyText,
 } from "@whytide/ui";
 import {
+  CircleCheck,
   Download,
+  Ellipsis,
   FileUp,
   Radar,
   SignalHigh,
@@ -38,10 +46,14 @@ import { ApiError, browserApi, data } from "@whytide/web/api/browser";
 import { useSearchParams } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { useRoleText } from "../lead/header.tsx";
+import { ApproveFailed, canApprove, useApprove } from "../lead/approve.tsx";
+import { OutreachBadge, useOutreachText, useRoleText } from "../lead/header.tsx";
+import { NeverContactItems, useToast } from "../never-contact/block.tsx";
 import { useReasonText } from "../review-panel/reasons.ts";
 import {
   filtersOf,
+  OUTREACH,
+  type Outreach,
   queryOf,
   SORTS,
   type Sort,
@@ -89,7 +101,7 @@ const DOT: Record<Status, string> = {
 };
 const CONFIDENCE_ICON = { high: SignalHigh, medium: SignalMedium, low: SignalLow };
 const sameFilters = (a: View, b: View) =>
-  a.status === b.status && a.tier === b.tier && a.review === b.review;
+  a.status === b.status && a.tier === b.tier && a.review === b.review && a.outreach === b.outreach;
 
 const read = (workspaceId: string, view: View, limit: number) => {
   const { status, sort, cursors } = view;
@@ -121,10 +133,15 @@ type Props = {
 export function LeadList({ workspace, counts, start, first, limit }: Props) {
   const t = useTranslations("contacts.leads");
   const decision = useTranslations("contacts.review");
+  const never = useTranslations("contacts.never_contact");
+  const [toast, setToast] = useToast();
   const format = useFormatter();
   const keyText = useKeyText();
   const reasonText = useReasonText();
   const roleText = useRoleText();
+  const outreachText = useOutreachText();
+  const outreachWords = useTranslations("contacts.outreach_status");
+  const approveWords = useTranslations("contacts.approve");
   const search = useSearchParams();
   const [view, setView] = useState(start);
   const [shown, setShown] = useState({ view: start, page: first });
@@ -132,6 +149,24 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
   const [exporting, setExporting] = useState<{ failed?: string; busy?: boolean }>({});
   const asked = useRef(0);
   const wanted = useRef(start);
+  const approval = useApprove(workspace, (personId, outreachStatus, approved) => {
+    mark(outreachStatus, (row) => row.personId === personId);
+    setToast(approveWords("done", { name: approved }));
+  });
+
+  /** The rows `which` picks show `outreachStatus`, as the api now has it, until the next read. */
+  function mark(
+    outreachStatus: Row["outreachStatus"],
+    which: (row: LeadPage["leads"][number]) => boolean,
+  ) {
+    setShown(({ view: of, page }) => ({
+      view: of,
+      page: {
+        ...page,
+        leads: page.leads.map((row) => (which(row) ? { ...row, outreachStatus } : row)),
+      },
+    }));
+  }
 
   function show(next: View) {
     wanted.current = next;
@@ -364,6 +399,59 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
         );
       },
     },
+    {
+      id: "outreach",
+      header: t("columns.outreach"),
+      cell: ({ outreachStatus }) => <OutreachBadge status={outreachStatus} />,
+    },
+    {
+      id: "menu",
+      header: t("columns.menu"),
+      // The kit's Menu, standing above the row's link, which covers the row: a click on it, or on
+      // one of its items, never opens the lead.
+      cell: (lead) => (
+        <div className="relative z-10 flex justify-end">
+          <Menu
+            trigger={
+              <>
+                <Ellipsis aria-hidden="true" className="size-4 shrink-0" />
+                <span className="sr-only">{t("row_menu", { name: name(lead) })}</span>
+              </>
+            }
+          >
+            {canApprove(lead.outreachStatus) && (
+              <MenuItem
+                disabled={approval.busy === lead.personId}
+                onClick={(event) => {
+                  event.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover();
+                  void approval.approve(lead.personId, name(lead));
+                }}
+              >
+                <CircleCheck aria-hidden="true" />
+                {lead.outreachStatus === "approved"
+                  ? approveWords("again")
+                  : approveWords("action")}
+              </MenuItem>
+            )}
+            <NeverContactItems
+              workspace={workspace}
+              personId={lead.personId}
+              companyId={lead.person.companyId}
+              labels={{ person: never("row.person"), company: never("row.company") }}
+              onBlocked={(kind) => {
+                setToast(kind === "person" ? never("toast.person") : never("toast.company"));
+                const { personId, person } = lead;
+                mark("suppressed", (row) =>
+                  kind === "person"
+                    ? row.personId === personId
+                    : row.person.companyId === person.companyId,
+                );
+              }}
+            />
+          </Menu>
+        </div>
+      ),
+    },
   ];
   const sortText: Record<Sort, string> = {
     fit: t("sort.fit"),
@@ -461,6 +549,19 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
             }
           />
         </div>
+        <div className="sm:w-44">
+          <Select
+            label={t("filter.outreach")}
+            value={view.outreach}
+            options={[
+              { value: "", label: outreachWords("all") },
+              ...OUTREACH.map((outreach) => ({ value: outreach, label: outreachText[outreach] })),
+            ]}
+            onChange={(event) =>
+              choose({ ...view, outreach: event.target.value as Outreach | "", cursors: [] })
+            }
+          />
+        </div>
         <div className="flex h-9 items-center sm:px-1">
           <Checkbox
             label={t("filter.review")}
@@ -482,6 +583,11 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
       {exporting.failed ? (
         <div className="mb-4">
           <ErrorState module="contacts" code={exporting.failed} onRetry={exportCsv} />
+        </div>
+      ) : null}
+      {approval.failure ? (
+        <div className="mb-4">
+          <ApproveFailed failure={approval.failure} />
         </div>
       ) : null}
       {failed ? (
@@ -523,6 +629,7 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
           />
         </div>
       )}
+      <Toast message={toast} />
     </>
   );
 }

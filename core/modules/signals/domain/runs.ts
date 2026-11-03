@@ -12,7 +12,14 @@ import {
   releaseReads,
   reserveReads,
 } from "@whytide/linkedin";
-import { credits, creditsCodes, isAppError, newId, publish } from "@whytide/platform";
+import {
+  credits,
+  creditsCodes,
+  isAppError,
+  newId,
+  publish,
+  type ReserveInput,
+} from "@whytide/platform";
 import { filesConfig, filesPort, getAdapter, linkedinPort } from "@whytide/providers";
 import { events } from "../events.ts";
 import { ids } from "../ids.ts";
@@ -20,6 +27,7 @@ import { signalsMetrics } from "../metrics.ts";
 import { prices } from "../prices.ts";
 import { settings } from "../settings.ts";
 import { sourceKind } from "../sources/registry.ts";
+import { ENGAGERS_PER_READ, engagerCreditKeyOf } from "./constants.ts";
 import { runFolder } from "./process/keys.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -42,7 +50,10 @@ export type RunStart =
       readonly reader: string;
       readonly readerInput: Readonly<Record<string, string>>;
       readonly pageSize: number;
-      /** A block's credits: SIGNALS_ESTIMATED_PAGES pages of engagers, in blocks of 30. */
+      /**
+       * A block's credits: SIGNALS_ESTIMATED_PAGES pages of engagers, in blocks of 30; read only by
+       * a run started before beta-p1-090.
+       */
       readonly quantity: number;
       /** Engaged before it is not new: the watermark, or the lookback's start. */
       readonly cutAt: string;
@@ -50,10 +61,11 @@ export type RunStart =
 export type ReadReservation =
   | { readonly reservationId: string }
   | { readonly refused: string; readonly retryAt: string | null };
+type Refused = { readonly refused: typeof creditsCodes.insufficient_credits };
 /** A block of credits: with the blocks billed before it, it pays for the engagers read up to `until`. */
-export type CreditsReservation =
-  | { readonly usageId: string; readonly until: number }
-  | { readonly refused: typeof creditsCodes.insufficient_credits };
+export type CreditsReservation = { readonly usageId: string; readonly until: number } | Refused;
+/** A candidate's credit, reserved for its profile read (beta-p1-090). */
+export type EngagerCredit = { readonly usageId: string } | Refused;
 export type StagedPage = { readonly reachedCut: boolean; readonly newest: string | null };
 export type RunEnd =
   | { readonly status: "done"; readonly newest?: string | undefined }
@@ -155,9 +167,10 @@ export async function settleRead(reservationId: string, made: boolean): Promise<
 }
 
 /**
- * A block of `quantity` credits, `sigrun:<runId>` first, then `sigrun:<runId>:<n>`: reserved before
- * the first read, once the next page could pass what the blocks pay for, and after a wait. With the
- * `billed` blocks committed before it, it pays for the engagers read up to `until`.
+ * A block of `quantity` credits, `sigrun:<runId>` first, then `sigrun:<runId>:<n>`, for a run started
+ * before beta-p1-090 only: reserved before the first read, once the next page could pass what the
+ * blocks pay for, and after a wait. With the `billed` blocks committed before it, it pays for the
+ * engagers read up to `until`.
  */
 export async function reserveCredits(
   { workspaceId, runId }: RunRef,
@@ -168,9 +181,43 @@ export async function reserveCredits(
   const idempotencyKey = attempt === 1 ? `sigrun:${runId}` : `sigrun:${runId}:${attempt}`;
   const action = prices["signals.engager_read"];
   const reserve = { workspaceId, action, quantity, idempotencyKey, subjectRef: runId };
+  const reserved = await reserveOrRefuse({ ...reserve, lease: "async" });
+  if ("refused" in reserved) return reserved;
+  return { usageId: reserved.usageId, until: (billed + quantity) * ENGAGERS_PER_BLOCK };
+}
+
+/**
+ * A credit for a candidate's profile read, after its read slot and before the read (beta-p1-090): one
+ * engager of `signals.engager`, keyed `sigprof:<runId>:<candidateId>:<n>`, its subject the candidate,
+ * as the person is known only once the read is processed; the 24-hour lease, which a settle right
+ * after the read never outlives. A retried step finds its key's row and charges once.
+ */
+export async function reserveEngagerCredit(
+  { workspaceId, runId }: RunRef,
+  candidateId: string,
+  n: number,
+): Promise<EngagerCredit> {
+  return reserveOrRefuse({
+    workspaceId,
+    action: prices["signals.engager"],
+    quantity: ENGAGERS_PER_READ,
+    idempotencyKey: engagerCreditKeyOf(runId, candidateId, n),
+    subjectRef: candidateId,
+    lease: "async",
+  });
+}
+
+/** A candidate's credit settled: committed when the read returned the profile, released otherwise. */
+export async function settleEngagerCredit(usageId: string, read: boolean): Promise<void> {
+  if (read) await credits.commit(usageId);
+  else await credits.release(usageId);
+}
+
+/** The reservation, or the refusal of a short balance, which the workflow ends the reading on. */
+async function reserveOrRefuse(input: ReserveInput): Promise<{ usageId: string } | Refused> {
   try {
-    const { usageId } = await credits.reserve({ ...reserve, lease: "async" });
-    return { usageId, until: (billed + quantity) * ENGAGERS_PER_BLOCK };
+    const { usageId } = await credits.reserve(input);
+    return { usageId };
   } catch (error) {
     const insufficient = isAppError(error) && error.code === creditsCodes.insufficient_credits;
     if (insufficient) return { refused: creditsCodes.insufficient_credits };

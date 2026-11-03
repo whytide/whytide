@@ -1,0 +1,14 @@
+{
+  "object": "MessageList",
+  "items": [
+    {
+      "object": "Message",
+      "id": "fixture-message-chidi-3",
+      "chat_id": "fixture-chat-chidi",
+      "text": "fixture-body-marker: message 3.",
+      "timestamp": "2026-10-02T11:30:00.000Z",
+      "is_sender": 1
+    }
+  ],
+  "cursor": null
+}

@@ -32,7 +32,14 @@ const NOTE =
 const EDITED = NOTE.replace("today", "this week");
 const AGAIN =
   "Draft, a short question for the Head of Data at Blue Harbor Labs: who answers warm leads?";
-const GATES = ["facts_used", "placeholders", "length", "grounding", "red_lines"];
+const GATES = [
+  "facts_used",
+  "placeholders",
+  "length",
+  "grounding",
+  "red_lines",
+  "colleague_signal",
+];
 /** A failed draft's codes (README.md "The writer"). */
 const FAILURES = [
   "ai_failed",

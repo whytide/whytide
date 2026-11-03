@@ -19,6 +19,7 @@
     { "path": "../../packages/platform" },
     { "path": "../../packages/db" },
     { "path": "../../packages/providers" },
+    { "path": "../../modules/approvals" },
     { "path": "../../modules/contacts" },
     { "path": "../../modules/credits" },
     { "path": "../../modules/discovery" },
