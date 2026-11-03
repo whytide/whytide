@@ -1,0 +1,26 @@
+# qualification's re-score (core/modules/qualification/README.md "The re-score"): after a criteria
+# save, the worker scores the scored leads again from their stored verdicts with the current
+# criteria, with no model call and no credits. `pnpm rescore --workspace <slug> [--person <id>]`
+# does the same. The route is @Idempotent(): the same Idempotency-Key answers the first answer again
+# for a day. A write sends the cookie, so it sends Origin: {{appOrigin}} too.
+# `personId` is a person of your workspace with a lead: put it in http-client.private.env.json.
+
+### POST /v1/workspaces/{workspaceId}/qualification/rescore: every scored lead of the workspace
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/qualification/rescore
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000040
+
+{}
+
+### POST /v1/workspaces/{workspaceId}/qualification/rescore: the named persons only, up to 500
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/qualification/rescore
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000041
+
+{ "personIds": ["{{personId}}"] }

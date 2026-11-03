@@ -1,0 +1,11 @@
+# credits' routes (core/modules/credits/README.md "Public interface"): a session with credits.read in the workspace, no body.
+
+### GET /v1/workspaces/{workspaceId}/credits/balance: the credits of the workspace's organization, available, granted, reserved, committed and the period's end
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/credits/balance
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/credits/usage: the workspace's usage rows, newest first, a page at a time (from, to, cursor, limit)
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/credits/usage?limit=20
+Accept: application/json
+Cookie: {{sessionCookie}}

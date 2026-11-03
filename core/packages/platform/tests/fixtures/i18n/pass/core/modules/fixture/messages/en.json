@@ -1,0 +1,8 @@
+{
+  "fixture.errors.thing_not_found": "There is no such thing.",
+  "fixture.invite.mail.body": "You have {count, plural, one {# invitation} other {# invitations}}.",
+  "fixture.invite.mail.subject": "{name} invited you",
+  "fixture.list.count": "{count, plural, one {# thing} other {# things}}",
+  "fixture.list.title": "Things",
+  "fixture.nav.label": "Things"
+}

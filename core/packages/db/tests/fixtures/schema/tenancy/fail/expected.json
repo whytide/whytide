@@ -1,0 +1,9 @@
+{
+  "no-workspace-id.prisma": ["tenant-workspace-id"],
+  "optional-workspace-id.prisma": ["tenant-workspace-id"],
+  "no-index.prisma": ["tenant-index", "tenant-index"],
+  "unique-without-workspace.prisma": ["tenant-unique", "tenant-unique", "tenant-unique"],
+  "pii-global.prisma": ["pii-tenant", "pii-tenant", "pii-tenant", "pii-tenant"],
+  "pii-on-model.prisma": ["pii-on-model"],
+  "other-schema.prisma": ["tenant-workspace-id"]
+}

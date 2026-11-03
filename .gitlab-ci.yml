@@ -1,0 +1,58 @@
+# The hand-triggered pipeline (docs/rules/delivery.md §4): nothing runs on a push or on a merge
+# request; a person starts it from Build > Pipelines > Run pipeline, a trigger token or the API, and
+# tools/ci/README.md says when. One job runs the steps of tools/ci/steps.json through `pnpm ci:local`,
+# one script line per step in the same order, which tools/ci/tests/pipeline.test.ts checks. The job
+# runs a Docker daemon of its own (a privileged runner), a Node container on its network and the
+# development stack of deploy/compose.yaml on that daemon; tools/ci/gitlab.sh does the work. Every
+# image is pinned by digest (docs/rules/security.md §7); there is no include.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "trigger"
+    - if: $CI_PIPELINE_SOURCE == "api"
+
+pipeline:
+  image: docker:29.9.1-dind@sha256:3e5756e2b6dad6a5f1f5deacf0a19f9eaa2581b76ae092b2d4a118162e1d4d4e
+  timeout: 40 minutes
+  variables:
+    # The Node container's image; the stack's images are the ones deploy/compose.yaml pins.
+    NODE_IMAGE: node:26.12.0-trixie@sha256:1b84b89ada025e3b14543cbb837ffaa1c1b5273b841c5b94dd1a8f9c1d8cf7fe
+    # The daemon is the job's own, on its socket: no TLS to set up, and not the tcp://docker:2375
+    # that the image's environment expects of a service container.
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: unix:///var/run/docker.sock
+    # The whole history, so the branch checks find the merge base with main.
+    GIT_DEPTH: "0"
+  cache:
+    # The pnpm store, the runner's records and the build outputs, keyed on the lockfile, so an
+    # unchanged package is not installed, built or tested again; kept after a failing run too.
+    key:
+      files:
+        - pnpm-lock.yaml
+    paths:
+      - .pnpm-store/
+      - node_modules/.cache/
+      - core/apps/*/dist/
+      - core/modules/*/dist/
+      - core/packages/*/dist/
+      - ee/modules/*/dist/
+    when: always
+  before_script:
+    - sh tools/ci/gitlab.sh start
+  script:
+    - sh tools/ci/gitlab.sh step lint
+    - sh tools/ci/gitlab.sh step typecheck
+    - sh tools/ci/gitlab.sh step test
+    - sh tools/ci/gitlab.sh step test:contract
+    - sh tools/ci/gitlab.sh step test:tenancy
+    - sh tools/ci/gitlab.sh step test:roles
+    - sh tools/ci/gitlab.sh step db:migrate:check
+    - sh tools/ci/gitlab.sh step openapi:build
+    - sh tools/ci/gitlab.sh step messages:check
+    - sh tools/ci/gitlab.sh step docs:check
+    - sh tools/ci/gitlab.sh step test:replay
+    - sh tools/ci/gitlab.sh step eval
+    - sh tools/ci/gitlab.sh step smoke
+    - sh tools/ci/gitlab.sh step secrets:scan
+    - sh tools/ci/gitlab.sh step deps:check
+    - sh tools/ci/gitlab.sh step changeset:check

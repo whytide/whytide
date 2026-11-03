@@ -1,0 +1,13 @@
+# credits' cost counter (core/modules/credits/README.md "The cost counter"): a session with
+# credits.read in the workspace, no body. `personId` is a person of your workspace: put it in
+# http-client.private.env.json with your workspaceId.
+
+### GET /v1/workspaces/{workspaceId}/credits/costs: an ISO week's costs in UTC, the current week without `week`: credits committed by action, vendor cost by vendor, the leads qualified and the cost per 100 of them; 400 credits_input_invalid for a week the year does not have
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/credits/costs?week=2026-W43
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/credits/leads/{personId}/cost: the lead's cost so far, by module: its assessments' credits and calls, its drafts' calls, its share of the signal runs' reads; 404 lead_not_found, also for another workspace's person
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/credits/leads/{{personId}}/cost
+Accept: application/json
+Cookie: {{sessionCookie}}

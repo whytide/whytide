@@ -1,0 +1,9 @@
+{
+  "tenancy.errors.organization_exists": "An organization with this address exists already.",
+  "tenancy.errors.organization_not_found": "This organization does not exist.",
+  "tenancy.errors.tenancy_input_invalid": "Some of these details are not valid.",
+  "tenancy.errors.user_not_found": "This account does not exist.",
+  "tenancy.errors.workspace_exists": "This organization has a workspace with this address already.",
+  "tenancy.errors.workspace_not_found": "This workspace does not exist.",
+  "tenancy.feedback.link": "Give feedback"
+}

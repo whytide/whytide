@@ -1,0 +1,9 @@
+// A model in a subfolder, which Prisma loads too.
+/// tenant
+model Note {
+  id          String @id
+  workspaceId String @map("workspace_id")
+
+  @@index([workspaceId])
+  @@map("notes")
+}

@@ -1,0 +1,155 @@
+// The tables of core/modules/signals (its docs/data.md), alpha-p8-010, alpha-p8-020 and alpha-p8-030;
+// migrations 20261022150800_signals_sources_and_runs, 20261022193000_signals_candidates,
+// 20261022196000_signals_run_cancelled (the status `cancelled`),
+// 20261022212000_signals_events_and_evidence and 20261028130900_signals_run_stop (a run's workflow
+// id and its stop, fix-run-stop). All are tenant tables. A source's kind is a string the
+// module checks against its registry of kinds on every write, not an enum: a kind is a folder of the
+// module (architecture §14.1). No foreign key to workspaces or to contacts' persons: Prisma would need
+// the opposite relation field in the other module's file. A run's source, a candidate's run and an
+// evidence's event are referenced by (workspace_id, id), so none can name a row of another workspace;
+// a source's runs, a run's candidates and an event's evidence go with it (ON DELETE CASCADE). An
+// event's source and run are referenced by id alone and set null when they go, so a source's delete
+// keeps the person's events (decisions.md, 2026-10-22): a composite key would null workspace_id too.
+
+/// tenant
+model SignalSource {
+  id              String      @id
+  workspaceId     String      @map("workspace_id")
+  kind            String
+  /// The kind's config, as its schema reads it: `{ postUrl }` for post_engagers. A post URL names its
+  /// author (docs/data.md).
+  /// pii
+  config          Json
+  label           String
+  /// The sender account whose own LinkedIn account reads, one of the workspace's (linkedin's).
+  senderAccountId String      @map("sender_account_id")
+  enabled         Boolean     @default(true)
+  /// The user who created it.
+  createdBy       String      @map("created_by")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz()
+  lastRunAt       DateTime?   @map("last_run_at") @db.Timestamptz()
+  /// Where the kind's reader stopped, in the kind's own shape; null before the first run.
+  watermark       Json?
+  runs            SignalRun[]
+  events          SignalEvent[]
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, enabled])
+  @@map("signal_sources")
+}
+
+/// tenant
+model SignalRun {
+  id              String            @id
+  workspaceId     String            @map("workspace_id")
+  sourceId        String            @map("source_id")
+  status          SignalRunStatus   @default(scheduled)
+  startedAt       DateTime?         @map("started_at") @db.Timestamptz()
+  finishedAt      DateTime?         @map("finished_at") @db.Timestamptz()
+  /// What the run read and kept, by name: ids and counts only.
+  counts          Json              @default("{}")
+  /// The machine code a failed run ended with.
+  error           String?
+  /// The id of the workflow that runs it, recorded at its start; null for a run not started yet, and
+  /// for one started before fix-run-stop.
+  workflowId      String?           @map("workflow_id")
+  /// When a stop was asked; the run ends `cancelled`, at its start when it had not started.
+  stopRequestedAt DateTime?         @map("stop_requested_at") @db.Timestamptz()
+  source          SignalSource      @relation(fields: [workspaceId, sourceId], references: [workspaceId, id], onDelete: Cascade)
+  candidates      SignalCandidate[]
+  events          SignalEvent[]
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, sourceId, startedAt(sort: Desc)])
+  @@map("signal_runs")
+}
+
+/// A staging row: someone a run read, business fields only, until the run's processing resolves it
+/// and its end empties the rest. One per member and reaction in a run. `raw_ref` is the key of the
+/// raw page file it came from (files port, `raw/signals/<runId>/<page>.json`, 72 hours).
+/// tenant
+model SignalCandidate {
+  id                String    @id
+  workspaceId       String    @map("workspace_id")
+  runId             String    @map("run_id")
+  /// pii
+  providerMemberRef String    @map("provider_member_ref")
+  /// pii
+  profileUrl        String    @map("profile_url")
+  /// pii
+  name              String
+  /// pii
+  headline          String
+  reaction          String
+  /// pii
+  commentText       String?   @map("comment_text")
+  engagedAt         DateTime  @map("engaged_at") @db.Timestamptz()
+  rawRef            String    @map("raw_ref")
+  run               SignalRun @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([workspaceId, runId, providerMemberRef, reaction])
+  @@map("signal_candidates")
+}
+
+/// One engagement of a person the run kept (alpha-p8-030): the kind's event, its subject the person
+/// (contacts'), its object and the actor's role hashed into `dedupe_key`, so an engagement seen twice
+/// is one row.
+/// tenant
+model SignalEvent {
+  id          String        @id
+  workspaceId String        @map("workspace_id")
+  personId    String        @map("person_id")
+  sourceId    String?       @map("source_id")
+  runId       String?       @map("run_id")
+  kind        String
+  dedupeKey   String        @map("dedupe_key")
+  occurredAt  DateTime      @map("occurred_at") @db.Timestamptz()
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  source      SignalSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  run         SignalRun?    @relation(fields: [runId], references: [id], onDelete: SetNull)
+  evidence    Evidence[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, dedupeKey])
+  @@index([workspaceId, personId, occurredAt(sort: Desc)])
+  @@map("signal_events")
+}
+
+/// What the lead page shows of an event (RB-4.4.3): the post, the person's own words, the reaction
+/// and the author; reduced to a summary after the kind's lookback by alpha-p10-020 (`reduced_at`).
+/// tenant
+model Evidence {
+  id          String      @id
+  workspaceId String      @map("workspace_id")
+  eventId     String      @map("event_id")
+  /// The post's URL, which names its author.
+  /// pii
+  url         String
+  /// The first 500 characters of the person's own words: the comment, null for a reaction.
+  /// pii
+  excerpt     String?
+  /// pii
+  commentText String?     @map("comment_text")
+  reaction    String
+  /// Who engaged, as the post's engagers list names them.
+  /// pii
+  author      String
+  capturedAt  DateTime    @map("captured_at") @db.Timestamptz()
+  reducedAt   DateTime?   @map("reduced_at") @db.Timestamptz()
+  event       SignalEvent @relation(fields: [workspaceId, eventId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, eventId])
+  @@map("evidence")
+}
+
+enum SignalRunStatus {
+  scheduled
+  running
+  waiting
+  done
+  failed
+  cancelled
+
+  @@map("signal_run_status")
+}

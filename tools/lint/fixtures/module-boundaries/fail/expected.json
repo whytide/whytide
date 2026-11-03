@@ -1,0 +1,8 @@
+{
+  "core/modules/a/index.ts": ["module-boundaries"],
+  "core/modules/a/api/controller.ts": ["module-boundaries", "module-boundaries"],
+  "core/modules/a/domain/seed.ts": ["module-boundaries"],
+  "core/modules/a/ui/list/page.tsx": ["module-boundaries"],
+  "core/modules/a/workflows/run.ts": ["module-boundaries", "module-boundaries"],
+  "core/packages/platform/tenant.ts": ["module-boundaries", "module-boundaries"]
+}

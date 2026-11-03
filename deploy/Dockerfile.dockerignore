@@ -1,0 +1,20 @@
+# The build context of Dockerfile is the repository root: what the images build from, and nothing of
+# a laptop's: no environment file above all (docs/rules/security.md §4), no install, no build output,
+# and of deploy/ only its package and the build's own script, so that a change there rebuilds nothing.
+.git
+**/.env*
+**/node_modules
+**/dist
+**/.next
+**/*.tsbuildinfo
+**/*.generated.*
+core/packages/db/generated
+.pnpm-store
+.tmp
+**/test-results
+**/playwright-report
+.changeset
+docs
+deploy/*
+!deploy/package.json
+!deploy/images

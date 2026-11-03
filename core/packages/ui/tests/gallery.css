@@ -1,0 +1,7 @@
+/* The gallery's stylesheet in the tests (gallery-page.ts), compiled by Tailwind as a host compiles
+   its own (README "Theme"): the classes of the components and of the gallery, nothing else. */
+@import "tailwindcss" source(none);
+@import "../theme.css";
+@import "../components.css";
+@source "../components";
+@source "../dev";

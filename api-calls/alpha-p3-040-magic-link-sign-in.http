@@ -1,0 +1,19 @@
+# The host's sign-in routes (core/apps/api/README.md "Sign-in"). Asking for a link is public and answers
+# every email alike; an invited email's link lands in Mailpit, and its confirm page's button signs in
+# (api-calls/alpha-p3-020-better-auth-adapter.http). GET /v1/me then lists the Owner membership.
+
+### POST /v1/sign-in: mails a link to an invited email once it has answered 202, as it answers any email; 429 rate_limited past 3 a minute for an email or 20 for an address
+POST {{baseUrl}}/v1/sign-in
+Content-Type: application/json
+
+{ "email": "tester@example.test", "next": "/w/{{workspaceId}}" }
+
+### GET /v1/me: the signed-in user; after the first sign-in, the Owner membership of the workspace
+GET {{baseUrl}}/v1/me
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/sign-out: ends every session of the user and clears the cookie with Max-Age=0; 204
+POST {{baseUrl}}/v1/sign-out
+Origin: {{appOrigin}}
+Cookie: {{sessionCookie}}

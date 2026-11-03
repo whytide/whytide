@@ -1,0 +1,15 @@
+{
+  "name": "@whytide/ci",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The pipeline runner behind pnpm ci:local, the branch checks docs:check and changeset:check, the supply-chain steps secrets:scan and deps:check with the pre-commit hook, the GitLab job's shell",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node tests/pipeline.test.ts && node tests/supply-chain.test.ts",
+    "docs:check": "node docs-check.ts",
+    "changeset:check": "node changeset-check.ts",
+    "secrets:scan": "node secrets-scan.ts && node secret-shapes.ts",
+    "deps:check": "node deps-check.ts"
+  }
+}

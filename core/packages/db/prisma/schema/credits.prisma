@@ -1,0 +1,123 @@
+// The tables of core/modules/credits (its docs/data.md), alpha-p3-050; migration
+// 20261022103000_credits_initial. One wallet per organization (architecture §10): plans and price_list
+// are global; subscriptions, credit_grants and credit_balances are per organization, read through
+// withoutTenant("credits.<reason>") with the organization of the workspace from tenancy, never one
+// from a request; credit_usage is a tenant table. organization_id carries no foreign key, since
+// organizations is tenancy's table. Hand-written SQL in the migration: the grants (`app` reads the six
+// tables and writes credit_usage only; `billing_writer` writes plans, subscriptions, credit_grants and
+// price_list), the triggers that keep credit_balances equal to the sums over credit_grants and
+// credit_usage, and credits_seed_self_hosted(organization_id), the subscription and the period's grant.
+// Migration 20261022160000_credits_reserve (alpha-p3-060), hand-written too: the non-negative CHECKs on
+// the amounts, `app`'s UPDATE on four columns of credit_usage only, the trigger that settles a usage
+// row once and never above its reservation, and credits_seed_self_hosted skipping a cancelled
+// subscription.
+
+model Plan {
+  id               String         @id
+  /// `self_hosted` in Core, from CREDITS_PLAN_CODE.
+  code             String         @unique
+  name             String
+  monthlyAllowance Decimal        @map("monthly_allowance")
+  /// The plan the seeder writes from .env, one at most: changed by a restart or by SQL only.
+  isFixed          Boolean        @default(false) @map("is_fixed")
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  subscriptions    Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id             String             @id
+  organizationId String             @unique @map("organization_id")
+  planId         String             @map("plan_id")
+  status         SubscriptionStatus @default(active)
+  /// The current period, moved by credits_seed_self_hosted when it grants a new one.
+  periodStart    DateTime           @map("period_start") @db.Timestamptz()
+  periodEnd      DateTime           @map("period_end") @db.Timestamptz()
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+  plan           Plan               @relation(fields: [planId], references: [id])
+  grants         CreditGrant[]
+
+  @@map("subscriptions")
+}
+
+model CreditGrant {
+  id             String       @id
+  organizationId String       @map("organization_id")
+  subscriptionId String       @map("subscription_id")
+  amount         Decimal
+  /// `allowance`: the plan's monthly allowance for the period, granted once.
+  reason         String
+  periodStart    DateTime     @map("period_start") @db.Timestamptz()
+  periodEnd      DateTime     @map("period_end") @db.Timestamptz()
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+
+  @@unique([organizationId, reason, periodStart])
+  @@map("credit_grants")
+}
+
+// A reservation and its state (architecture §10). The idempotency key is unique per workspace, which
+// belongs to one organization (coding §5: workspace_id in every unique key of a tenant table).
+/// tenant
+model CreditUsage {
+  id             String            @id
+  organizationId String            @map("organization_id")
+  workspaceId    String            @map("workspace_id")
+  action         String
+  quantity       Decimal
+  credits        Decimal
+  status         CreditUsageStatus @default(reserved)
+  idempotencyKey String            @map("idempotency_key")
+  leaseExpiresAt DateTime          @map("lease_expires_at") @db.Timestamptz()
+  /// The object the action is for, as an id (`lead_…`), never a person's data.
+  subjectRef     String            @map("subject_ref")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  settledAt      DateTime?         @map("settled_at") @db.Timestamptz()
+
+  @@unique([workspaceId, organizationId, idempotencyKey])
+  @@index([workspaceId, createdAt])
+  // The lease sweep of reserve: the organization's open reservations past their lease.
+  @@index([organizationId, status, leaseExpiresAt])
+  @@map("credit_usage")
+}
+
+// The wallet: written by the triggers only, as the sums over credit_grants and credit_usage.
+model CreditBalance {
+  id             String   @id
+  organizationId String   @unique @map("organization_id")
+  granted        Decimal  @default(0)
+  reserved       Decimal  @default(0)
+  committed      Decimal  @default(0)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz()
+
+  @@map("credit_balances")
+}
+
+model PriceListEntry {
+  id            String   @id
+  action        String
+  credits       Decimal
+  unit          String
+  version       Int
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz()
+
+  @@unique([action, version])
+  @@map("price_list")
+}
+
+enum SubscriptionStatus {
+  active
+  cancelled
+
+  @@map("subscription_status")
+}
+
+enum CreditUsageStatus {
+  reserved
+  committed
+  released
+  expired
+
+  @@map("credit_usage_status")
+}

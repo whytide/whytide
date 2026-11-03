@@ -1,0 +1,20 @@
+{
+  "object": "PostReactionList",
+  "items": [
+    {
+      "object": "PostReaction",
+      "value": "EMPATHY",
+      "post_id": "urn:li:activity:7000000000000000001",
+      "author": {
+        "id": "fixture-member-elif",
+        "type": "INDIVIDUAL",
+        "name": "Elif Placeholder",
+        "headline": "Founder at Blue Harbor Labs",
+        "profile_url": "https://www.linkedin.com/in/elif-placeholder",
+        "profile_picture_url": "https://media.example.com/elif.jpg",
+        "network_distance": "FIRST_DEGREE"
+      }
+    }
+  ],
+  "paging": { "cursor": null, "start": 3, "page_count": 1, "total_count": 4 }
+}

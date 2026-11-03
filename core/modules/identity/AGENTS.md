@@ -1,0 +1,7 @@
+# identity: the brief for a coding agent
+
+1. Read `README.md`, then `docs/concepts.md`, `docs/data.md`, `docs/flows.md`, `docs/security.md` and `docs/runbook.md`. They say what is true now and change in the same merge request as the behavior.
+2. The rules: [coding](../../../docs/rules/coding.md), [security](../../../docs/rules/security.md), [delivery](../../../docs/rules/delivery.md). The shape of this folder is [architecture §4.2](../../../docs/architecture.md#42-inside-a-module): rules in `domain/` without a framework, what the api host reads in `api/`, the commands in `cli/`, every screen string and error code a key in `messages/en.json`, the registries in `permissions.ts`, `prices.ts`, `events.ts` and `settings.ts`, the tests in `tests/`.
+3. Commands, from the repository root: `pnpm -F @whytide/identity build`, `typecheck`, `test`, `test:tenancy`, `lint`; `pnpm -F @whytide/api test` for the guard and the first sign-in; `pnpm invite <email>`; `pnpm tenant:create` and `pnpm workspace:create` (README "The tenant commands").
+4. Every access to `invites` goes through `domain/store.ts`, on its two paths; a new read across workspaces is a security change (`docs/security.md`). Users, workspaces and memberships are tenancy's: through its commands only.
+5. Tests import `domain/`, `cli/` and `testing/`, and tenancy's `@whytide/tenancy/testing`; never `index.ts` or a host. Stay inside this folder and `identity.prisma`; a change to a shared package is its own task.

@@ -1,0 +1,76 @@
+// The platform's own tables (core/packages/platform): the outbox, cost events and idempotency records, in this order; the runtime that writes them is in the platform, the stores here.
+
+// The outbox (architecture §4.3 rule 4, §7.6): a module's change and its event row commit together, the
+// worker delivers the row later (core/packages/platform/README.md "Events and the outbox"; the store is
+// src/outbox.ts). Monthly partitions arrive with analytics (gamma).
+/// tenant
+model OutboxEntry {
+  id            String    @id
+  workspaceId   String    @map("workspace_id")
+  eventName     String    @map("event_name")
+  /// Ids only: the event's registered schema admits nothing else.
+  payload       Json
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  deliveredAt   DateTime? @map("delivered_at") @db.Timestamptz()
+  /// Deliveries tried so far, the successful one included.
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz()
+  deadAt        DateTime? @map("dead_at") @db.Timestamptz()
+  /// The error code of the last failed delivery, never a message.
+  lastError     String?   @map("last_error")
+
+  @@index([workspaceId, createdAt])
+  /// The claim's index: the worker's poll reads the due rows by these three, never the workspace.
+  @@index([deliveredAt, deadAt, nextAttemptAt])
+  @@map("outbox")
+}
+
+// alpha-p1-055 (core/packages/platform/cost): what one provider or model call cost, the single record
+// of it (docs/rules/coding.md §9, docs/architecture.md §16). Written by recordCost through costStore
+// (src/cost-store.ts); the indexes serve the cost roll-ups per workspace and per lead. Monthly
+// partitions arrive with analytics (gamma). Migration: 20261021102315_platform_costs_idempotency.
+/// tenant
+model CostEvent {
+  id               String   @id
+  workspaceId      String   @map("workspace_id")
+  feature          String
+  task             String?
+  vendor           String
+  model            String?
+  /// A unit kind the vendor bills to its count: {"input_tokens": 1200, "output_tokens": 300}, or pages.
+  units            Json
+  /// What the units cost at the price list's prices, in its currency.
+  unitCost         Decimal  @map("unit_cost")
+  /// What the workspace was charged, when the caller knows it.
+  credits          Decimal?
+  priceListVersion String   @map("price_list_version")
+  /// A person id when the call was about one person: the cost counter per lead reads it.
+  subjectRef       String?  @map("subject_ref")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, subjectRef])
+  @@map("cost_events")
+}
+
+// alpha-p1-055 (core/packages/platform/idempotency): the response a POST with an idempotency key was
+// answered with, kept 24 hours and swept lazily by withIdempotency through idempotencyStore
+// (src/idempotency-store.ts) at the workspace's next request after that, by created_at on the index
+// below. One key per workspace. response_body is the endpoint's answer and may carry person data
+// until that sweep: the deletion script covers it (docs/rules/security.md §1).
+/// tenant
+model IdempotencyRecord {
+  id             String   @id
+  workspaceId    String   @map("workspace_id")
+  key            String
+  requestHash    String   @map("request_hash")
+  responseStatus Int      @map("response_status")
+  /// pii
+  responseBody   Json     @map("response_body")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz()
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId, createdAt])
+  @@map("idempotency_records")
+}

@@ -1,0 +1,39 @@
+{
+  "name": "@whytide/icp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Whytide module: icp",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "pnpm -F ai generate",
+    "build": "pnpm run generate && tsc -b",
+    "typecheck": "pnpm run generate && tsc -b",
+    "lint": "node ../../../tools/lint/lint.ts .",
+    "test": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test tests/*.test.ts",
+    "test:tenancy": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test tests/tenancy.test.ts",
+    "icp:draft": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/draft.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.1.3",
+    "@temporalio/workflow": "1.24.0",
+    "@whytide/ai": "workspace:*",
+    "@whytide/db": "workspace:*",
+    "@whytide/onboarding": "workspace:*",
+    "@whytide/platform": "workspace:*",
+    "@whytide/tenancy": "workspace:*",
+    "@whytide/ui": "workspace:*",
+    "@whytide/web": "workspace:*",
+    "next-intl": "4.14.9",
+    "react": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0"
+  }
+}

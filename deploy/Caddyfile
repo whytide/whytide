@@ -1,0 +1,51 @@
+# Caddy at the edge (README.md "Production"): HTTPS for APP_DOMAIN with a certificate from Let's
+# Encrypt, or from Caddy's own authority when CADDY_INTERNAL_TLS=1 (the test run); plain HTTP is
+# redirected. The routes are those of the web's next.config.ts: /api/auth/* to the api as it is,
+# the rest of /api/* to the api without /api, the providers' webhooks to the api, all else to the
+# web app. Every answer carries HSTS and no Server header; the web app's carry alpha-p2-030's
+# headers too, which the api sets on its own, and the policy of the web's proxy.ts, never Caddy's.
+# The admin endpoint is off.
+{
+	admin off
+	skip_install_trust
+}
+
+(tls-0) {
+}
+
+(tls-1) {
+	tls internal
+}
+
+# The container's health check, on its loopback only.
+http://127.0.0.1:2080 {
+	bind 127.0.0.1
+	respond "ok" 200
+}
+
+{$APP_DOMAIN} {
+	import tls-{$CADDY_INTERNAL_TLS:0}
+	header {
+		?Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	# Better Auth's routes keep their path: the api serves them under /api/auth/.
+	handle /api/auth/* {
+		reverse_proxy api:3001
+	}
+	handle_path /api/* {
+		reverse_proxy api:3001
+	}
+	# A provider calls its webhook at the api's own path, /v1/<module>/webhooks/<provider>.
+	handle /v1/*/webhooks/* {
+		reverse_proxy api:3001
+	}
+	handle {
+		header {
+			?X-Content-Type-Options nosniff
+			?Referrer-Policy no-referrer
+			?Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		}
+		reverse_proxy web:3000
+	}
+}

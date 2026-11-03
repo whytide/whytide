@@ -1,0 +1,10 @@
+{
+  "fixture.list.title": "Things",
+  "fixture.list.broken": "Hello {name",
+  "fixture.list.unused": "Nobody uses this.",
+  "fixture.list": "Two segments",
+  "other.list.title": "Another module's key",
+  "fixture.list.stray": "Hello name}",
+  "fixture.invite.mail": "A key that is also a namespace",
+  "fixture.invite.mail.subject": "You are invited"
+}

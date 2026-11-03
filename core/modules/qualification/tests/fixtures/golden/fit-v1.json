@@ -1,0 +1,230 @@
+{
+  "scorer": "fit-v1",
+  "about": "Ten verdict sets with their criteria and what computeFit and decide give under fit-v1 (docs/concepts.md, The score). Never edited: a change to the formula is a new scorer version with a file of its own. A case's own criteria replace these.",
+  "criteria": [
+    { "key": "title_function", "weight": 30, "isMust": true, "enabled": true },
+    { "key": "seniority", "weight": 15, "isMust": false, "enabled": true },
+    { "key": "company_size", "weight": 10, "isMust": false, "enabled": true },
+    { "key": "industry", "weight": 15, "isMust": false, "enabled": true },
+    { "key": "location", "weight": 10, "isMust": true, "enabled": true },
+    { "key": "must_haves", "weight": 20, "isMust": false, "enabled": true }
+  ],
+  "cases": [
+    {
+      "name": "six met",
+      "verdicts": {
+        "title_function": "met",
+        "seniority": "met",
+        "company_size": "met",
+        "industry": "met",
+        "location": "met",
+        "must_haves": "met"
+      },
+      "disqualifiers": [],
+      "expected": {
+        "fit": 100,
+        "confidence": "high",
+        "unknownCount": 0,
+        "status": "qualified",
+        "tier": "hot",
+        "reason": null
+      }
+    },
+    {
+      "name": "five met, must_haves unknown",
+      "verdicts": {
+        "title_function": "met",
+        "seniority": "met",
+        "company_size": "met",
+        "industry": "met",
+        "location": "met",
+        "must_haves": "unknown"
+      },
+      "disqualifiers": [],
+      "expected": {
+        "fit": 88,
+        "confidence": "high",
+        "unknownCount": 1,
+        "status": "qualified",
+        "tier": "hot",
+        "reason": null
+      }
+    },
+    {
+      "name": "title_function not_met, a must: 70 capped at 40",
+      "verdicts": {
+        "title_function": "not_met",
+        "seniority": "met",
+        "company_size": "met",
+        "industry": "met",
+        "location": "met",
+        "must_haves": "met"
+      },
+      "disqualifiers": [],
+      "expected": {
+        "fit": 40,
+        "confidence": "high",
+        "unknownCount": 0,
+        "status": "not_qualified",
+        "tier": "cool",
+        "reason": null
+      }
+    },
+    {
+      "name": "three unknown: low confidence above the gate",
+      "verdicts": {
+        "title_function": "met",
+        "seniority": "unknown",
+        "company_size": "met",
+        "industry": "unknown",
+        "location": "met",
+        "must_haves": "unknown"
+      },
+      "disqualifiers": [],
+      "expected": {
+        "fit": 70,
+        "confidence": "low",
+        "unknownCount": 3,
+        "status": "needs_review",
+        "tier": "warm",
+        "reason": null
+      }
+    },
+    {
+      "name": "location unknown, a must",
+      "verdicts": {
+        "title_function": "met",
+        "seniority": "met",
+        "company_size": "met",
+        "industry": "met",
+        "location": "unknown",
+        "must_haves": "met"
+      },
+      "disqualifiers": [],
+      "expected": {
+        "fit": 94,
+        "confidence": "high",
+        "unknownCount": 1,
+        "status": "needs_review",
+        "tier": "hot",
+        "reason": null
+      }
+    },
+    {
+      "name": "two disqualifiers at fit 100: the closed list's first is the reason",
+      "verdicts": {
+        "title_function": "met",
+        "seniority": "met",
+        "company_size": "met",
+        "industry": "met",
+        "location": "met",
+        "must_haves": "met"
+      },
+      "disqualifiers": ["recruiter", "competitor"],
+      "expected": {
+        "fit": 100,
+        "confidence": "high",
+        "unknownCount": 0,
+        "status": "not_qualified",
+        "tier": "hot",
+        "reason": "competitor"
+      }
+    },
+    {
+      "name": "partially met",
+      "verdicts": {
+        "title_function": "met",
+        "seniority": "partially_met",
+        "company_size": "partially_met",
+        "industry": "partially_met",
+        "location": "met",
+        "must_haves": "partially_met"
+      },
+      "disqualifiers": [],
+      "expected": {
+        "fit": 70,
+        "confidence": "high",
+        "unknownCount": 0,
+        "status": "qualified",
+        "tier": "warm",
+        "reason": null
+      }
+    },
+    {
+      "name": "must_haves disabled and unknown, industry not_met: 65 of 80",
+      "criteria": [
+        { "key": "title_function", "weight": 30, "isMust": true, "enabled": true },
+        { "key": "seniority", "weight": 15, "isMust": false, "enabled": true },
+        { "key": "company_size", "weight": 10, "isMust": false, "enabled": true },
+        { "key": "industry", "weight": 15, "isMust": false, "enabled": true },
+        { "key": "location", "weight": 10, "isMust": true, "enabled": true },
+        { "key": "must_haves", "weight": 20, "isMust": false, "enabled": false }
+      ],
+      "verdicts": {
+        "title_function": "met",
+        "seniority": "met",
+        "company_size": "met",
+        "industry": "not_met",
+        "location": "met",
+        "must_haves": "unknown"
+      },
+      "disqualifiers": [],
+      "expected": {
+        "fit": 81,
+        "confidence": "high",
+        "unknownCount": 0,
+        "status": "qualified",
+        "tier": "hot",
+        "reason": null
+      }
+    },
+    {
+      "name": "location disabled at not_met: a disabled must caps nothing",
+      "criteria": [
+        { "key": "title_function", "weight": 30, "isMust": true, "enabled": true },
+        { "key": "seniority", "weight": 15, "isMust": false, "enabled": true },
+        { "key": "company_size", "weight": 10, "isMust": false, "enabled": true },
+        { "key": "industry", "weight": 15, "isMust": false, "enabled": true },
+        { "key": "location", "weight": 10, "isMust": true, "enabled": false },
+        { "key": "must_haves", "weight": 20, "isMust": false, "enabled": true }
+      ],
+      "verdicts": {
+        "title_function": "met",
+        "seniority": "met",
+        "company_size": "met",
+        "industry": "met",
+        "location": "not_met",
+        "must_haves": "met"
+      },
+      "disqualifiers": [],
+      "expected": {
+        "fit": 100,
+        "confidence": "high",
+        "unknownCount": 0,
+        "status": "qualified",
+        "tier": "hot",
+        "reason": null
+      }
+    },
+    {
+      "name": "59.5 rounds half up to 60, at the gate",
+      "verdicts": {
+        "title_function": "met",
+        "seniority": "partially_met",
+        "company_size": "unknown",
+        "industry": "not_met",
+        "location": "met",
+        "must_haves": "unknown"
+      },
+      "disqualifiers": [],
+      "expected": {
+        "fit": 60,
+        "confidence": "medium",
+        "unknownCount": 2,
+        "status": "qualified",
+        "tier": "warm",
+        "reason": null
+      }
+    }
+  ]
+}

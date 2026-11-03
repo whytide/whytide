@@ -1,0 +1,6 @@
+// The auth library's own table: password_hash is allowed in core/packages/db/prisma/schema/auth.prisma.
+model Account {
+  id            String @id
+  user_id       String
+  password_hash String?
+}

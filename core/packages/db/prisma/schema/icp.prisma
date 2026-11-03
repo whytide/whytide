@@ -1,0 +1,57 @@
+// The tables of core/modules/icp (its docs/data.md), alpha-p4-040; migration
+// 20261022151000_icp_initial; the draft's columns, icp-draft, migration 20261029021500_icp_draft.
+// Both are tenant tables: one ICP per workspace and its six criteria.
+// criteria.icp_id is declared through the relation for its foreign key and queried model by model
+// (the tenant client refuses a relation in any argument). No foreign key to workspaces: Prisma would
+// need the opposite relation field in tenancy.prisma. The closed lists and the limits are the
+// module's (domain/lists.ts), checked by its commands, the only writer.
+
+/// tenant
+model Icp {
+  id            String      @id
+  workspaceId   String      @map("workspace_id")
+  name          String      @default("")
+  titles        String[]    @default([])
+  /// Values of the closed list in domain/lists.ts.
+  seniorities   String[]    @default([])
+  industries    String[]    @default([])
+  /// Values of the closed list in domain/lists.ts.
+  sizeRanges    String[]    @default([]) @map("size_ranges")
+  /// ISO 3166-1 alpha-2 codes.
+  countries     String[]    @default([])
+  mustHaves     String      @default("") @map("must_haves")
+  disqualifiers String      @default("")
+  /// Moves by one when a targeting field changes, never for the name alone.
+  version       Int         @default(1)
+  /// none, drafting, drafted or failed: the latest draft's run; it never moves the version.
+  draftStatus   String      @default("none") @map("draft_status")
+  /// The machine code of the last failed draft: ai_failed, draft_failed or icp_draft_no_source.
+  draftError    String?     @map("draft_error")
+  /// The latest draft's run (`idrun_…`): only that run writes the pending draft and the status.
+  draftRunId    String?     @map("draft_run_id")
+  /// The admin's brief the latest draft reads, trimmed, at most 2,000 characters.
+  draftBrief    String      @default("") @map("draft_brief")
+  /// The drafter's proposal: { model, promptVersion, decisionRecordId, fields }.
+  pendingDraft  Json?       @map("pending_draft")
+  updatedAt     DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  criteria      Criterion[]
+
+  @@unique([workspaceId])
+  @@map("icps")
+}
+
+/// tenant
+model Criterion {
+  id          String  @id
+  workspaceId String  @map("workspace_id")
+  icpId       String  @map("icp_id")
+  /// One of the six keys of domain/lists.ts, each once per ICP.
+  key         String
+  weight      Int
+  isMust      Boolean @map("is_must")
+  enabled     Boolean @default(true)
+  icp         Icp     @relation(fields: [icpId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, icpId, key])
+  @@map("criteria")
+}

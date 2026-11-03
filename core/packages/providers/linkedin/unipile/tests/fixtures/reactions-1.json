@@ -1,0 +1,49 @@
+{
+  "object": "PostReactionList",
+  "items": [
+    {
+      "object": "PostReaction",
+      "value": "LIKE",
+      "post_id": "urn:li:activity:7000000000000000001",
+      "author": {
+        "id": "fixture-member-bao",
+        "type": "INDIVIDUAL",
+        "name": "Bao Sample",
+        "headline": "Founder at Blue Harbor Labs",
+        "profile_url": "https://www.linkedin.com/in/bao-sample",
+        "profile_picture_url": "https://media.example.com/bao.jpg",
+        "network_distance": "SECOND_DEGREE",
+        "contact_info": { "emails": ["bao@example.com"], "phones": ["+1 555 0100"] }
+      }
+    },
+    {
+      "object": "PostReaction",
+      "value": "PRAISE",
+      "post_id": "urn:li:activity:7000000000000000001",
+      "author": {
+        "id": "fixture-member-chidi",
+        "type": "INDIVIDUAL",
+        "name": "Chidi Fixture",
+        "headline": "Founder at Blue Harbor Labs",
+        "profile_url": "https://www.linkedin.com/in/chidi-fixture",
+        "profile_picture_url": "https://media.example.com/chidi.jpg",
+        "network_distance": "THIRD_DEGREE"
+      }
+    },
+    {
+      "object": "PostReaction",
+      "value": "LIKE",
+      "post_id": "urn:li:activity:7000000000000000001",
+      "author": {
+        "id": "fixture-member-hidden",
+        "type": "INDIVIDUAL",
+        "name": "LinkedIn Member",
+        "headline": null,
+        "profile_url": null,
+        "profile_picture_url": null,
+        "network_distance": "OUT_OF_NETWORK"
+      }
+    }
+  ],
+  "paging": { "cursor": "reactions-page-2", "start": 0, "page_count": 3, "total_count": 4 }
+}

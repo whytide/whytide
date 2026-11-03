@@ -1,0 +1,18 @@
+[
+  { "name": "lint" },
+  { "name": "typecheck" },
+  { "name": "test", "serial": true },
+  { "name": "test:contract" },
+  { "name": "test:tenancy" },
+  { "name": "test:roles" },
+  { "name": "db:migrate:check" },
+  { "name": "openapi:build" },
+  { "name": "messages:check", "cache": false },
+  { "name": "docs:check", "cache": false },
+  { "name": "test:replay" },
+  { "name": "eval", "cache": false },
+  { "name": "smoke", "cache": false, "only": ["deploy"] },
+  { "name": "secrets:scan", "cache": false },
+  { "name": "deps:check", "cache": false },
+  { "name": "changeset:check", "cache": false }
+]

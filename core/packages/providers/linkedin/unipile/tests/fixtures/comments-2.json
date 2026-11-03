@@ -1,0 +1,26 @@
+{
+  "object": "CommentList",
+  "items": [
+    {
+      "object": "Comment",
+      "id": "fixture-comment-greta",
+      "post_id": "urn:li:activity:7000000000000000001",
+      "post_urn": "urn:li:activity:7000000000000000001",
+      "author": "Greta Mockridge",
+      "author_details": {
+        "id": "fixture-member-greta",
+        "headline": "Founder at Blue Harbor Labs",
+        "profile_url": "https://www.linkedin.com/in/greta-mockridge",
+        "profile_picture_url": "https://media.example.com/greta.jpg",
+        "network_distance": "OUT_OF_NETWORK"
+      },
+      "date": "2026-10-01T09:00:00.000Z",
+      "text": "Following",
+      "reaction_counter": 0,
+      "reply_counter": 0
+    }
+  ],
+  "cursor": null,
+  "total_items": 3,
+  "paging": { "start": 2, "page_count": 1, "total_count": 3 }
+}

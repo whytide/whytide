@@ -1,0 +1,45 @@
+/// tenant
+model Person {
+  id          String     @id
+  workspaceId String     @map("workspace_id")
+  fullName    String?    @map("full_name")
+  kind        PersonKind
+  createdAt   DateTime   @map("created_at") @db.Timestamptz()
+  updatedAt   DateTime   @map("updated_at") @db.Timestamptz(6)
+  leads       Lead[]
+
+  @@unique([workspaceId, id])
+  @@map("persons")
+}
+
+/// tenant
+model Lead {
+  id          String @id
+  workspaceId String @map("workspace_id")
+  personId    String @map("person_id")
+  person      Person @relation(fields: [personId], references: [id])
+  score       Int?
+  providerRefs Json? @map("provider_refs")
+
+  @@map("leads")
+}
+
+model UnipileAccount {
+  id               String @id
+  unipileAccountId String @map("unipile_account_id")
+
+  @@map("unipile_accounts")
+}
+
+model ListMember {
+  listId   String @map("list_id")
+  personId String @map("person_id")
+
+  @@id([listId, personId])
+  @@map("list_members")
+}
+
+enum PersonKind {
+  prospect
+  customer
+}

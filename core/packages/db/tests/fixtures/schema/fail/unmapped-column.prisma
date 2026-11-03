@@ -1,0 +1,7 @@
+model Person {
+  id          String @id
+  workspaceId String
+  fullName    String @map("FullName")
+
+  @@map("persons")
+}

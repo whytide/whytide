@@ -1,0 +1,6 @@
+{
+  "status": 401,
+  "type": "errors/disconnected_account",
+  "title": "Disconnected account",
+  "detail": "fixture-body-marker: the account appears to be disconnected."
+}

@@ -1,0 +1,11 @@
+{
+  "core/modules/a/ui/page.tsx": [
+    "no-literal-strings-in-screens",
+    "no-literal-strings-in-screens",
+    "no-literal-strings-in-screens",
+    "no-literal-strings-in-screens",
+    "no-literal-strings-in-screens"
+  ],
+  "core/apps/web/app/not-found.tsx": ["no-literal-strings-in-screens"],
+  "core/packages/ui/button.tsx": ["no-literal-strings-in-screens"]
+}

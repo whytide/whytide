@@ -1,0 +1,51 @@
+// The tables of the Better Auth adapter (core/packages/providers/auth/better-auth/README.md),
+// alpha-p3-020; migration 20261022150000_auth_better_auth_tables. Users are tenancy's: the adapter
+// keeps sessions, accounts and verifications only, global tables, under the names Better Auth gives
+// its models. No foreign key reaches users: the port's users hook is the store of users, and a test's
+// hook keeps them in memory. Ids are ses_, acc_ and ver_; no row holds a usable token.
+
+/// A sign-in session; the cookie carries its token, signed.
+model Session {
+  id        String   @id
+  /// The SHA-256 of the session's token, base64url.
+  token     String   @unique @map("token_hash")
+  /// The users hook's id of the user, usr_ in the app.
+  userId    String   @map("user_id")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz()
+  /// The client's address as the api host sees it.
+  ipAddress String?  @map("ip")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz()
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+/// A way a user signs in other than the link; the link writes none, so no token column yet.
+model Account {
+  id         String   @id
+  accountId  String   @map("account_id")
+  providerId String   @map("provider_id")
+  userId     String   @map("user_id")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz()
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+/// A sign-in link not followed yet.
+model Verification {
+  id         String   @id
+  /// `magic-link:` and the SHA-256 of the link's token.
+  identifier String
+  /// What Better Auth keeps of the link, as JSON: `{ "type": "magic-link", "email": … }`.
+  value      String
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz()
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz()
+
+  @@index([identifier])
+  @@map("verifications")
+}

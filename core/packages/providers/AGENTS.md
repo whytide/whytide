@@ -1,0 +1,7 @@
+# @whytide/providers: the brief for a coding agent
+
+Read [README.md](README.md) first: a port, an adapter, the fake, the registry, the boundary, the contract suite, `provider_refs`. Then the rules, [coding §6](../../../docs/rules/coding.md#6-ports-and-adapters), [security](../../../docs/rules/security.md) and [delivery](../../../docs/rules/delivery.md).
+
+- A port task adds `<port>/port.ts`, `config.ts` (`PROVIDER_<PORT>`, and its line in `deploy/.env.example`), `contract.ts`, `fake/index.ts` with `fake/tests/contract.test.ts`, `README.md`, and one export line in the package `index.ts`. An adapter task adds `<port>/<vendor>/index.ts`, `tests/contract.test.ts` (one `contractSuite` call) and `README.md`, its variables and its entry in `tools/lint/vendor-sdks.json`. `<port>/tests/` holds port-level tests only. Nothing else changes: the registry is generated, and `getAdapter` (async) loads the one adapter the selector names.
+- Inside the package import from `_pattern/index.ts` and the port's files by relative path, never from the package `index.ts` or `registry.ts`. Relative imports end in `.ts`; tests under `tests/` with `node:test`, fixtures under `tests/fixtures/<area>/`; `tests/fixtures/pattern/fixture/` is the model of a port.
+- Commands: `pnpm -F providers test`, `test:contract`, `lint`, `typecheck`; `pnpm format`; `pnpm env:check` when a variable changed. Never commit `registry.generated.ts` or `dist/`.

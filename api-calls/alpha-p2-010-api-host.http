@@ -1,0 +1,9 @@
+# The api host's own routes (core/apps/api/README.md "Health"): public, no session, no body.
+
+### GET /health: runs the registered checks; 200 with the checks and the version, 503 naming the failing ones
+GET {{baseUrl}}/health
+Accept: application/json
+
+### GET /health/live: 200 while the process answers, without running a check
+GET {{baseUrl}}/health/live
+Accept: application/json

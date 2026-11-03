@@ -1,0 +1,56 @@
+# onboarding's routes (core/modules/onboarding/README.md "Routes"): the workspace's Company Knowledge,
+# the Draft from its website, and the review of the draft. The Draft, the accept and the discard are
+# @Idempotent(): each Idempotency-Key is an example UUID; another one makes a new request, the same one
+# answers the first answer again for a day. Without a pending draft, the accept and the discard answer
+# 409 company_knowledge_no_draft. A write sends the cookie, so it sends Origin: {{appOrigin}} too (the
+# api's origin check).
+
+### GET /v1/workspaces/{workspaceId}/onboarding/company-knowledge: the record, its fetch status, the pages read and the pending draft; the first read creates it empty
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/onboarding/company-knowledge
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PUT /v1/workspaces/{workspaceId}/onboarding/company-knowledge: saves it; changed fields become human
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/onboarding/company-knowledge
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{
+  "sourceUrl": "https://acme.example",
+  "oneLiner": "Warehouse robots that pick and pack around the clock.",
+  "longDescription": "Acme builds picking robots for mid-sized warehouses.",
+  "products": ["Picking arm", "Packing cell"],
+  "painPoints": ["Pickers are hard to hire for night shifts"],
+  "featuresBenefits": ["Installs over a weekend"],
+  "proofPoints": [
+    { "text": "Picking is 40% faster at Beta Logistics", "sourceUrl": "https://acme.example/customers" },
+    { "text": "Used in 120 warehouses" }
+  ],
+  "competitors": ["Gamma Robotics"],
+  "tone": "Plain and practical, no hype."
+}
+
+### POST /v1/workspaces/{workspaceId}/onboarding/company-knowledge/draft: drafts from the saved website; 202, fetchStatus fetching, the pending draft dropped
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/onboarding/company-knowledge/draft
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000001
+
+### POST /v1/workspaces/{workspaceId}/onboarding/company-knowledge/draft/accept: accepts the pending draft; replaceEdited also replaces what a person wrote
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/onboarding/company-knowledge/draft/accept
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000301
+
+{ "replaceEdited": false }
+
+### POST /v1/workspaces/{workspaceId}/onboarding/company-knowledge/draft/discard: discards the pending draft; the record keeps every field
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/onboarding/company-knowledge/draft/discard
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000302

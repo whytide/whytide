@@ -1,0 +1,312 @@
+[
+  {
+    "name": "jackspeak",
+    "license": "BlueOak-1.0.0",
+    "reason": "The Blue Oak Model License 1.0.0 is a permissive, OSI-approved license with notice and no-warranty terms like MIT, absent from coding §10's list; a dependency of glob and rimraf inside the OpenTelemetry auto-instrumentation set (@opentelemetry/auto-instrumentations-node)"
+  },
+  {
+    "name": "minipass",
+    "license": "BlueOak-1.0.0",
+    "reason": "The Blue Oak Model License 1.0.0 is a permissive, OSI-approved license with notice and no-warranty terms like MIT, absent from coding §10's list; a dependency of glob and rimraf inside the OpenTelemetry auto-instrumentation set (@opentelemetry/auto-instrumentations-node)"
+  },
+  {
+    "name": "package-json-from-dist",
+    "license": "BlueOak-1.0.0",
+    "reason": "The Blue Oak Model License 1.0.0 is a permissive, OSI-approved license with notice and no-warranty terms like MIT, absent from coding §10's list; a dependency of glob and rimraf inside the OpenTelemetry auto-instrumentation set (@opentelemetry/auto-instrumentations-node)"
+  },
+  {
+    "name": "path-scurry",
+    "license": "BlueOak-1.0.0",
+    "reason": "The Blue Oak Model License 1.0.0 is a permissive, OSI-approved license with notice and no-warranty terms like MIT, absent from coding §10's list; a dependency of glob and rimraf inside the OpenTelemetry auto-instrumentation set (@opentelemetry/auto-instrumentations-node)"
+  },
+  {
+    "name": "elkjs",
+    "license": "EPL-2.0",
+    "reason": "EPL-2.0 is a weak, file-level copyleft that does not reach code which only uses the library; elkjs is a graph layout library inside Prisma Studio (@prisma/studio-core), part of the Prisma CLI, a development and migration tool never linked into our code or shipped in an image. For the owner to confirm"
+  },
+  {
+    "name": "@isaacs/cliui",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of glob and rimraf inside the OpenTelemetry auto-instrumentation set (@opentelemetry/auto-instrumentations-node)"
+  },
+  {
+    "name": "@prisma/dev",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "cliui",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of yargs inside @grpc/proto-loader, which the OpenTelemetry Node SDK's gRPC exporters bring"
+  },
+  {
+    "name": "d3-array",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "d3-color",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "d3-delaunay",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "d3-format",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "d3-geo",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "d3-interpolate",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "d3-path",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "d3-scale",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "d3-shape",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "d3-time",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "d3-time-format",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "delaunator",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "foreground-child",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "get-caller-file",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of yargs inside @grpc/proto-loader, which the OpenTelemetry Node SDK's gRPC exporters bring"
+  },
+  {
+    "name": "glob",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of glob and rimraf inside the OpenTelemetry auto-instrumentation set (@opentelemetry/auto-instrumentations-node)"
+  },
+  {
+    "name": "graceful-fs",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "internmap",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "isexe",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "lru-cache",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of glob and rimraf inside the OpenTelemetry auto-instrumentation set (@opentelemetry/auto-instrumentations-node)"
+  },
+  {
+    "name": "minimatch",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of glob and rimraf inside the OpenTelemetry auto-instrumentation set (@opentelemetry/auto-instrumentations-node)"
+  },
+  {
+    "name": "pg-int8",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of node-postgres (pg), which @prisma/adapter-pg brings"
+  },
+  {
+    "name": "picocolors",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of @changesets/cli"
+  },
+  {
+    "name": "rimraf",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of glob and rimraf inside the OpenTelemetry auto-instrumentation set (@opentelemetry/auto-instrumentations-node)"
+  },
+  {
+    "name": "semver",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of @changesets/cli"
+  },
+  {
+    "name": "signal-exit",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "split2",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of node-postgres (pg), which @prisma/adapter-pg brings"
+  },
+  {
+    "name": "which",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "y18n",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of yargs inside @grpc/proto-loader, which the OpenTelemetry Node SDK's gRPC exporters bring"
+  },
+  {
+    "name": "yaml",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of @changesets/cli"
+  },
+  {
+    "name": "yargs-parser",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of yargs inside @grpc/proto-loader, which the OpenTelemetry Node SDK's gRPC exporters bring"
+  },
+  {
+    "name": "@visx/vendor",
+    "license": "MIT and ISC",
+    "reason": "ISC, the second half of this AND expression, is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of Prisma Studio inside the Prisma CLI (prisma)"
+  },
+  {
+    "name": "postgres",
+    "license": "Unlicense",
+    "reason": "The Unlicense dedicates the work to the public domain, more permissive than MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "robust-predicates",
+    "license": "Unlicense",
+    "reason": "The Unlicense dedicates the work to the public domain, more permissive than MIT, absent from coding §10's list; a dependency of the Prisma CLI (prisma)"
+  },
+  {
+    "name": "nodemailer",
+    "license": "MIT-0",
+    "reason": "MIT No Attribution: the MIT license without its notice requirement, OSI-approved and more permissive than MIT, absent from coding §10's list; the SMTP library of the app-mail port's smtp adapter (alpha-p1-110)"
+  },
+  {
+    "name": "@isaacs/ttlcache",
+    "license": "BlueOak-1.0.0",
+    "reason": "The Blue Oak Model License 1.0.0 is a permissive, OSI-approved license with notice and no-warranty terms like MIT, absent from coding §10's list; a time-to-live cache inside @mastra/core, the agent runtime of core/packages/ai (alpha-p1-130)"
+  },
+  {
+    "name": "lru-cache",
+    "license": "BlueOak-1.0.0",
+    "reason": "The Blue Oak Model License 1.0.0 is a permissive, OSI-approved license with notice and no-warranty terms like MIT, absent from coding §10's list; version 11, a cache inside @mastra/core, the agent runtime of core/packages/ai (alpha-p1-130); version 10 stays ISC above"
+  },
+  {
+    "name": "fastq",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a work queue inside @mastra/core, the agent runtime of core/packages/ai (alpha-p1-130)"
+  },
+  {
+    "name": "json-schema-to-zod",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of @mastra/schema-compat inside @mastra/core, the agent runtime of core/packages/ai (alpha-p1-130)"
+  },
+  {
+    "name": "@axe-core/playwright",
+    "license": "MPL-2.0",
+    "reason": "The Mozilla Public License 2.0 is a file-level weak copyleft license, OSI-approved: changes to its own files stay under MPL-2.0, while code that uses them unmodified keeps its own license; absent from coding §10's list; the Playwright bindings of axe-core, a test-only devDependency of core/packages/ui for the gallery's accessibility checks (alpha-p1-150), never part of a host or a shipped bundle; flagged for the owner"
+  },
+  {
+    "name": "axe-core",
+    "license": "MPL-2.0",
+    "reason": "The Mozilla Public License 2.0 is a file-level weak copyleft license, OSI-approved: changes to its own files stay under MPL-2.0, while code that uses them unmodified keeps its own license; absent from coding §10's list; the accessibility rules engine that @axe-core/playwright injects into the test page, a test-only devDependency of core/packages/ui (alpha-p1-150), never part of a host or a shipped bundle; flagged for the owner"
+  },
+  {
+    "name": "iterare",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of @nestjs/common and @nestjs/core, the api host's framework (alpha-p2-010)"
+  },
+  {
+    "name": "inherits",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of http-errors inside Express, which @nestjs/platform-express brings (alpha-p2-010)"
+  },
+  {
+    "name": "setprototypeof",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of http-errors inside Express, which @nestjs/platform-express brings (alpha-p2-010)"
+  },
+  {
+    "name": "once",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of Express 5, which @nestjs/platform-express brings (alpha-p2-010)"
+  },
+  {
+    "name": "wrappy",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of once inside Express, which @nestjs/platform-express brings (alpha-p2-010)"
+  },
+  {
+    "name": "argparse",
+    "license": "Python-2.0",
+    "reason": "The Python Software Foundation License 2.0 is a permissive, OSI-approved license with notice and no-warranty terms like MIT, absent from coding §10's list; a dependency of js-yaml inside @redocly/openapi-core, which openapi-typescript brings: the generator of the web's API client and the validator of the api's OpenAPI document, both build tools (alpha-p2-020)"
+  },
+  {
+    "name": "electron-to-chromium",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; a dependency of browserslist inside webpack, which @temporalio/worker uses to bundle the workflow code of the worker host (alpha-p2-050)"
+  },
+  {
+    "name": "caniuse-lite",
+    "license": "CC-BY-4.0",
+    "reason": "Creative Commons Attribution 4.0 covers the browser-support data this package is: permissive, attribution only, no share-alike, so not copyleft; absent from coding §10's list; a dependency of browserslist inside webpack, which @temporalio/worker uses to bundle the workflow code of the worker host (alpha-p2-050), and of next, whose build reads it for the web host's browser targets (alpha-p2-040); never shipped to a browser; flagged for the owner"
+  },
+  {
+    "name": "fs-monkey",
+    "license": "Unlicense",
+    "reason": "The Unlicense dedicates the work to the public domain, more permissive than MIT, absent from coding §10's list; a dependency of unionfs inside @temporalio/worker, the worker host's Temporal SDK (alpha-p2-050)"
+  },
+  {
+    "name": "unionfs",
+    "license": "Unknown",
+    "reason": "Its package.json has no license field, so pnpm reports Unknown; its LICENSE file is the Unlicense, which dedicates the work to the public domain, more permissive than MIT; the in-memory file system overlay @temporalio/worker bundles workflow code with, in the worker host (alpha-p2-050)"
+  },
+  {
+    "name": "lightningcss",
+    "license": "MPL-2.0",
+    "reason": "The Mozilla Public License 2.0 is a file-level weak copyleft license, OSI-approved: changes to its own files stay under MPL-2.0, while code that uses them unmodified keeps its own license; absent from coding §10's list; the CSS parser and minifier inside @tailwindcss/node, which Tailwind CSS runs at build time on the web host's stylesheet and the ui gallery's (ui-tailwind); a build tool, never part of a shipped bundle; flagged for the owner"
+  },
+  {
+    "name": "lightningcss-linux-x64-gnu",
+    "license": "MPL-2.0",
+    "reason": "The Mozilla Public License 2.0 is a file-level weak copyleft license, OSI-approved: changes to its own files stay under MPL-2.0, while code that uses them unmodified keeps its own license; absent from coding §10's list; the prebuilt binary of lightningcss for linux x64 (glibc), the platform of the laptops, the pipeline and the web image's build stage (ui-tailwind); a build tool, never part of a shipped bundle; flagged for the owner"
+  },
+  {
+    "name": "lucide-react",
+    "license": "ISC",
+    "reason": "ISC is a permissive license equivalent to MIT, absent from coding §10's list; the icon set of @whytide/ui, which re-exports it for every screen (ui-tailwind); the icons it derives from Feather are under MIT"
+  },
+  {
+    "name": "@fontsource-variable/inter",
+    "license": "OFL-1.1",
+    "reason": "The SIL Open Font License 1.1 is the OSI-approved license of open fonts: the font may be used, embedded and redistributed with any software, and only the font itself, modified or not, stays under the OFL; absent from coding §10's list; Inter, the web host's typeface, compiled into its stylesheet and served from its own origin (ui-tailwind); flagged for the owner"
+  }
+]

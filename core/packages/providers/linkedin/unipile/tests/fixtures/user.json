@@ -1,0 +1,42 @@
+{
+  "object": "UserProfile",
+  "provider": "LINKEDIN",
+  "provider_id": "fixture-member-ada",
+  "public_identifier": "ada-example",
+  "public_profile_url": "https://www.linkedin.com/in/ada-example",
+  "first_name": "Ada",
+  "last_name": "Example",
+  "pronoun": "she/her",
+  "headline": "Head of Growth at Example Ltd",
+  "summary": "A synthetic summary.",
+  "location": "London, United Kingdom",
+  "birthdate": { "day": 1, "month": 1 },
+  "contact_info": {
+    "emails": ["ada@example.com"],
+    "phones": ["+44 20 7946 0000"],
+    "adresses": ["1 Example Street, London"],
+    "socials": []
+  },
+  "websites": ["https://example.com"],
+  "profile_picture_url": "https://media.example.com/ada.jpg",
+  "profile_picture_url_large": "https://media.example.com/ada-large.jpg",
+  "is_open_profile": false,
+  "is_premium": false,
+  "network_distance": "SECOND_DEGREE",
+  "follower_count": 120,
+  "connections_count": 80,
+  "work_experience": [
+    {
+      "position": "Head of Growth",
+      "company": "Example Ltd",
+      "company_id": "1000001",
+      "company_url": "https://www.linkedin.com/company/example-ltd",
+      "industry": "Software Development",
+      "location": "London",
+      "current": true,
+      "start": "1/1/2024",
+      "end": null
+    },
+    { "position": "Growth Lead", "company": "Sample Systems", "current": false }
+  ]
+}

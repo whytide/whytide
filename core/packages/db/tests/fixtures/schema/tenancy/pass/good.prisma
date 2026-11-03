@@ -1,0 +1,48 @@
+/// tenant
+model Person {
+  id          String   @id
+  workspaceId String   @map("workspace_id")
+  /// pii: business_contact
+  email       String?
+  /// pii:personal
+  phone       String?
+  /// PII
+  // the title as written on the profile
+  title       String?
+  createdAt   DateTime @map("created_at") @db.Timestamptz()
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("persons")
+}
+
+/// tenant
+model ListMember {
+  workspaceId String @map("workspace_id")
+  listId      String @map("list_id")
+  personId    String @map("person_id")
+
+  @@id([workspaceId, listId, personId])
+  @@map("list_members")
+}
+
+/// tenant
+model Note {
+  id          String   @id
+  workspaceId String   @map("workspace_id")
+  personId    String   @map("person_id")
+  /// pii
+  body        String
+  createdAt   DateTime @map("created_at") @db.Timestamptz()
+
+  @@unique(fields: [workspaceId, personId, createdAt], name: "one_note_per_instant")
+  @@index(fields: [workspaceId, createdAt], map: "notes_by_time")
+  @@map("notes")
+}
+
+model Plan {
+  id   String @id
+  name String @unique
+
+  @@map("plans")
+}

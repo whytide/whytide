@@ -1,0 +1,144 @@
+// The tables of core/modules/qualification (its docs/data.md), alpha-p6-020; migrations
+// 20261022191000_qualification_snapshots, 20261022195000_qualification_criteria_hash and
+// 20261022211000_qualification_batch_robustness. Three tenant tables: a person's assessment against
+// the ICP at one version, a score snapshot whose fit, confidence, tier and status alpha-p6-030 fills,
+// its six criterion verdicts, and the batch's attempts at a lead (alpha-p10-100). The model call's decision record is core/packages/ai's decision_records
+// row, linked by id. A verdict links its snapshot by the pair (workspace_id, snapshot_id), so the
+// database refuses a link across workspaces, and goes with it (ON DELETE CASCADE): the module's
+// erasePerson deletes a person's snapshots. The criteria, verdicts and disqualifiers are the closed
+// lists of the module's schemas/assess-fit.ts.
+
+/// tenant
+model ScoreSnapshot {
+  id               String                      @id
+  workspaceId      String                      @map("workspace_id")
+  personId         String                      @map("person_id")
+  icpVersion       Int                         @map("icp_version")
+  modelId          String                      @map("model_id")
+  promptVersion    Int                         @map("prompt_version")
+  /// The scorer that filled fit_score (alpha-p6-030); null until scored.
+  scorerVersion    String?                     @map("scorer_version")
+  /// 0 to 100; null until scored.
+  fitScore         Int?                        @map("fit_score")
+  confidence       ScoreConfidence?
+  tier             ScoreTier?
+  status           ScoreSnapshotStatus         @default(assessed)
+  /// The codes the model found, each once; empty when none.
+  disqualifiers    QualificationDisqualifier[]
+  /// The model's one sentence about the fit; it may quote the profile.
+  /// pii: business_contact
+  summary          String
+  /// The decision record of the model call (core/packages/ai).
+  decisionRecordId String                      @map("decision_record_id")
+  /// A re-score's copy (alpha-p6-040): the criteria it was scored with, hashed (their key, weight,
+  /// must and enabled); empty for the assessment's own snapshot.
+  criteriaHash     String                      @default("") @map("criteria_hash")
+  /// The same hash of the criteria that scored it, empty until scored (alpha-p10-100): outside the
+  /// key, so that a re-score with those criteria writes no copy of the assessment's own snapshot.
+  scoredCriteriaHash String                    @default("") @map("scored_criteria_hash")
+  createdAt        DateTime                    @default(now()) @map("created_at") @db.Timestamptz()
+  verdicts         CriterionVerdict[]
+
+  @@unique([workspaceId, id])
+  // One snapshot per decision record, ICP version and re-score's criteria: a retried activity, which
+  // the record's cache answers, gets the stored one.
+  @@unique([workspaceId, decisionRecordId, icpVersion, criteriaHash])
+  @@index([workspaceId, personId, createdAt])
+  @@map("score_snapshots")
+}
+
+/// tenant
+model CriterionVerdict {
+  id          String                 @id
+  workspaceId String                 @map("workspace_id")
+  snapshotId  String                 @map("snapshot_id")
+  criterion   QualificationCriterion
+  verdict     QualificationVerdict
+  /// The model's quote or paraphrase of the profile, empty when unknown.
+  /// pii: business_contact
+  evidence    String
+  /// The criterion's weight in the fit (alpha-p6-030); null until scored.
+  weight      Int?
+  /// The points the verdict earned (alpha-p6-030); null until scored.
+  points      Decimal?               @db.Decimal(5, 2)
+  snapshot    ScoreSnapshot          @relation(fields: [workspaceId, snapshotId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([workspaceId, snapshotId, criterion])
+  @@map("criterion_verdicts")
+}
+
+/// tenant
+/// The batch's attempt at a lead's assessment at one ICP version (alpha-p10-100), in its reservation's
+/// key from the second: each release moves it, so a released key is never reserved again; a provider
+/// failure at the third makes the lead ai_failed. No row is the first attempt.
+model AssessmentAttempt {
+  workspaceId String @map("workspace_id")
+  personId    String @map("person_id")
+  icpVersion  Int    @map("icp_version")
+  /// The attempt the lead's next reservation is for, 2 or more.
+  attempt     Int
+
+  @@id([workspaceId, personId, icpVersion])
+  @@map("assessment_attempts")
+}
+
+enum ScoreSnapshotStatus {
+  assessed
+  qualified
+  not_qualified
+  needs_review
+
+  @@map("score_snapshot_status")
+}
+
+enum ScoreConfidence {
+  high
+  medium
+  low
+
+  @@map("score_confidence")
+}
+
+enum ScoreTier {
+  hot
+  warm
+  cool
+
+  @@map("score_tier")
+}
+
+enum QualificationCriterion {
+  title_function
+  seniority
+  company_size
+  industry
+  location
+  must_haves
+
+  @@map("qualification_criterion")
+}
+
+enum QualificationVerdict {
+  met
+  partially_met
+  not_met
+  unknown
+
+  @@map("qualification_verdict")
+}
+
+enum QualificationDisqualifier {
+  competitor
+  agency_or_consultant
+  freelancer
+  student_or_intern
+  job_seeker
+  recruiter
+  wrong_business_model
+  own_company
+  existing_customer
+  left_company
+  fake_or_inactive_profile
+
+  @@map("qualification_disqualifier")
+}

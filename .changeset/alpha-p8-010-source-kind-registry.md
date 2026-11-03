@@ -1,0 +1,4 @@
+---
+---
+
+signals: sources and kinds

@@ -1,0 +1,84 @@
+// The tables of core/modules/onboarding (its docs/data.md): company_knowledge, alpha-p4-010, migration
+// 20261022181000_onboarding_company_knowledge; website_pages and draft_run_id, alpha-p4-020, migration
+// 20261022192000_onboarding_website_pages; pending_draft, alpha-p4-030, migration
+// 20261022194000_onboarding_pending_draft; company_documents, knowledge-draft, migration
+// 20261029014500_onboarding_company_documents. Tenant tables: one Company Knowledge record per
+// workspace, the pages its last website fetch read and the documents its latest Draft was given (the
+// script pnpm knowledge:draft). No foreign key to workspaces: Prisma would need the
+// opposite relation field in tenancy.prisma. The limits, the statuses and the shape of the two JSON
+// columns are the module's (domain/fields.ts), checked by its commands, the only writer.
+
+/// tenant
+model CompanyKnowledge {
+  id               String    @id
+  workspaceId      String    @map("workspace_id")
+  /// The company's website, http or https only; the website fetch reads it (alpha-p4-020).
+  sourceUrl        String?   @map("source_url")
+  /// none, fetching, fetched, drafted or failed.
+  fetchStatus      String    @default("none") @map("fetch_status")
+  fetchedAt        DateTime? @map("fetched_at") @db.Timestamptz()
+  /// The machine code of the last failed run: the fetch's, or the drafter's ai_failed or draft_failed.
+  fetchError       String?   @map("fetch_error")
+  /// The latest Draft's run (`drun_…`): only that run writes the pages, the draft and the status.
+  draftRunId       String?   @map("draft_run_id")
+  oneLiner         String    @default("") @map("one_liner")
+  longDescription  String    @default("") @map("long_description")
+  products         String[]  @default([])
+  painPoints       String[]  @default([]) @map("pain_points")
+  featuresBenefits String[]  @default([]) @map("features_benefits")
+  /// [{ text, sourceUrl? }]
+  proofPoints      Json      @default("[]") @map("proof_points")
+  competitors      String[]  @default([])
+  tone             String    @default("")
+  /// { <field>: { kind: "ai_draft" | "human", at, sourceUrl? } }: who wrote each field last.
+  fieldSources     Json      @default("{}") @map("field_sources")
+  /// 1 when created; one more with every save that changes a field.
+  version          Int       @default(1)
+  /// The drafter's draft until it is accepted or discarded: { model, promptVersion, decisionRecordId, fields }.
+  pendingDraft     Json?     @map("pending_draft")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  @@unique([workspaceId])
+  @@map("company_knowledge")
+}
+
+/// tenant
+model WebsitePage {
+  id                 String   @id
+  workspaceId        String   @map("workspace_id")
+  companyKnowledgeId String   @map("company_knowledge_id")
+  /// The page that answered, after its redirects: where `text` comes from.
+  url                String
+  /// fetched, or truncated when the page or its text was cut at its limit.
+  status             String
+  fetchedAt          DateTime @map("fetched_at") @db.Timestamptz()
+  title              String   @default("")
+  /// The page's headings and paragraphs, at most 50,000 characters.
+  text               String   @default("")
+  /// The SHA-256 of `text`, in hex.
+  contentHash        String   @map("content_hash")
+
+  @@unique([workspaceId, companyKnowledgeId, url])
+  @@map("website_pages")
+}
+
+/// tenant
+model CompanyDocument {
+  id                 String   @id
+  workspaceId        String   @map("workspace_id")
+  companyKnowledgeId String   @map("company_knowledge_id")
+  /// The file's base name: a drafted value cites the document as `document:<name>`.
+  name               String
+  /// application/pdf, text/plain or text/markdown.
+  mediaType          String   @map("media_type")
+  /// read, or truncated when its text was cut at 50,000 characters.
+  status             String
+  /// The document's text, at most 50,000 characters.
+  text               String   @default("")
+  /// The SHA-256 of `text`, in hex.
+  contentHash        String   @map("content_hash")
+  addedAt            DateTime @map("added_at") @db.Timestamptz()
+
+  @@unique([workspaceId, companyKnowledgeId, name])
+  @@map("company_documents")
+}

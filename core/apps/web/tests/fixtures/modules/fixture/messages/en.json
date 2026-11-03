@@ -1,0 +1,10 @@
+{
+  "fixture.errors.fixture_not_found": "No fixture has that name.",
+  "fixture.evidence.body": "The fixture’s evidence for {personId}",
+  "fixture.failing.body": "The fixture’s draft, after a wait",
+  "fixture.greeting.body": "The api says {greeting} to {name}.",
+  "fixture.greeting.title": "Fixture greeting",
+  "fixture.nav.greeting": "Greeting",
+  "fixture.why.data_gap": "No {field} on the profile",
+  "fixture.why.match": "{title} is a title the ICP wants"
+}

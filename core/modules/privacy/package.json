@@ -1,0 +1,32 @@
+{
+  "name": "@whytide/privacy",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Whytide module: privacy",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "pnpm -F ai generate && node ../signals/scripts/kinds-generate.ts",
+    "build": "pnpm run generate && tsc -b",
+    "typecheck": "pnpm run generate && tsc -b",
+    "lint": "node ../../../tools/lint/lint.ts .",
+    "test": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test tests/*.test.ts",
+    "test:tenancy": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test tests/tenancy.test.ts",
+    "erase": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/erase.js"
+  },
+  "dependencies": {
+    "@whytide/ai": "workspace:*",
+    "@whytide/contacts": "workspace:*",
+    "@whytide/db": "workspace:*",
+    "@whytide/messaging": "workspace:*",
+    "@whytide/platform": "workspace:*",
+    "@whytide/qualification": "workspace:*",
+    "@whytide/signals": "workspace:*",
+    "@whytide/tenancy": "workspace:*"
+  }
+}

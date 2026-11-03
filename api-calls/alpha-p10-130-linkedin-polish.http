@@ -1,0 +1,13 @@
+# linkedin's Refresh status (core/modules/linkedin/README.md "API"): the worker asks the provider for
+# the account's status now; GET …/linkedin/accounts (alpha-p7-030-sender-accounts.http) shows it
+# once the worker has it. One variable besides the usual ones goes in http-client.private.env.json:
+# `accountId`, an id the list answers. The route is @Idempotent(): its Idempotency-Key is an example
+# UUID; another one asks again, the same one answers the first answer again for a day. A write sends
+# the cookie, so it sends Origin: {{appOrigin}} too.
+
+### POST /v1/workspaces/{workspaceId}/linkedin/accounts/{id}/refresh: asks the worker for the account's status at the provider now; 202 with the account
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/{{accountId}}/refresh
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000130

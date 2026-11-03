@@ -1,0 +1,10 @@
+{
+  "core/modules/a/domain/score.ts": [
+    "no-framework-in-domain",
+    "no-framework-in-domain",
+    "no-framework-in-domain",
+    "no-framework-in-domain",
+    "no-framework-in-domain",
+    "mastra-in-ai-only"
+  ]
+}

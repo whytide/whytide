@@ -1,0 +1,33 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    // NestJS reads constructor and parameter types from the metadata these two emit; Node cannot run
+    // decorated sources, so the api runs and tests its compiled output (README "Build").
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["dist", "node_modules", ".tmp"],
+  "references": [
+    { "path": "../../packages/platform" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/providers" },
+    { "path": "../../modules/contacts" },
+    { "path": "../../modules/credits" },
+    { "path": "../../modules/discovery" },
+    { "path": "../../modules/icp" },
+    { "path": "../../modules/identity" },
+    { "path": "../../modules/linkedin" },
+    { "path": "../../modules/messaging" },
+    { "path": "../../modules/onboarding" },
+    { "path": "../../modules/signals" },
+    { "path": "../../modules/tenancy" }
+  ]
+}

@@ -1,0 +1,8 @@
+// A model of Mastra's schema, skipped by name: without the exclusion it fails tenant-workspace-id.
+/// tenant
+model MastraSnapshot {
+  id String @id
+
+  @@map("mastra_snapshots")
+  @@schema("mastra")
+}

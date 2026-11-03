@@ -1,0 +1,35 @@
+[
+  {
+    "name": "hiring-signal",
+    "input": {
+      "profile": "Head of data at a logistics company, 200 employees",
+      "evidence": ["Posted a job for a data engineer last week"]
+    },
+    "fake": [{ "verdict": "met" }],
+    "expected": { "status": "ok", "verdict": "met" }
+  },
+  {
+    "name": "no-signal",
+    "input": {
+      "profile": "Office manager at a bakery, 12 employees",
+      "evidence": ["Shared a photo of the summer party"]
+    },
+    "fake": [{ "verdict": "not_met" }],
+    "expected": { "status": "ok", "verdict": "not_met" }
+  },
+  {
+    "name": "invalid-then-valid",
+    "input": {
+      "profile": "CTO at a software company, 80 employees",
+      "evidence": ["Announced a new data platform team"]
+    },
+    "fake": [{ "verdict": "maybe" }, { "verdict": "met" }],
+    "expected": { "status": "ok", "verdict": "met" }
+  },
+  {
+    "name": "met-without-evidence",
+    "input": { "profile": "CTO at a software company, 80 employees", "evidence": [] },
+    "fake": [{ "verdict": "met" }, { "verdict": "met" }],
+    "expected": { "status": "ai_failed", "reason": "gates" }
+  }
+]

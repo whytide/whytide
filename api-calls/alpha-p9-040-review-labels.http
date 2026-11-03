@@ -1,0 +1,24 @@
+# contacts' review routes (core/modules/contacts/README.md "Routes"): a member's session,
+# reviews.write for the decision, reviews.read for the history and the summary. A decision is
+# append-only: no route updates or deletes one. A write sends the cookie, so it sends
+# Origin: {{appOrigin}} too.
+# `personId` is a person of your workspace with a lead: put it in http-client.private.env.json.
+
+### POST /v1/workspaces/{workspaceId}/contacts/leads/{personId}/review: appends a decision, here Not a fit with a reason code, with the lead's snapshot, fit and tier of now, and makes it the lead's latest; 400 review_reason_required without a code, review_text_required for `other` without reasonText or Good lead without goodReasonText; 404 lead_not_found
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/{{personId}}/review
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "decision": "not_a_fit", "reasonCode": "company_wrong_size" }
+
+### GET /v1/workspaces/{workspaceId}/contacts/leads/{personId}/reviews: the lead's decisions, newest first; 404 lead_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/{{personId}}/reviews
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/contacts/reviews/summary: an ISO week in UTC: its decisions, the latest per lead, counted by kind and reason, and the good-lead rate of its top twenty qualified leads by fit
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/reviews/summary?week=2026-W43
+Accept: application/json
+Cookie: {{sessionCookie}}

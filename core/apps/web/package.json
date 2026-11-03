@@ -1,0 +1,50 @@
+{
+  "name": "@whytide/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Next.js host for tenants",
+  "type": "module",
+  "browserslist": [
+    "chrome >= 123",
+    "edge >= 123",
+    "firefox >= 120",
+    "safari >= 17.5"
+  ],
+  "exports": {
+    "./api/browser": "./src/api/browser.ts",
+    "./api/server": "./src/api/server.ts"
+  },
+  "scripts": {
+    "build": "pnpm run client:generate && pnpm run web:routes --production && tsc -b ../../packages/ui && node scripts/next.ts build",
+    "dev": "pnpm run client:generate && pnpm run web:routes && tsc -b ../../packages/ui && node scripts/next.ts dev",
+    "start": "node scripts/next.ts start",
+    "serve:e2e": "pnpm run client:generate && pnpm run web:routes --fixtures && tsc -b ../../packages/ui && node scripts/next.ts build && node scripts/next.ts start",
+    "test": "APP_ENV=test node --test tests/*.test.ts && playwright test",
+    "typecheck": "pnpm -F api openapi:build && node scripts/client-generate.ts --check && pnpm run web:routes --fixtures && node scripts/next.ts typegen && tsc -b",
+    "lint": "node ../../../tools/lint/lint.ts .",
+    "client:generate": "pnpm -F api openapi:build && node scripts/client-generate.ts",
+    "openapi:build": "node scripts/client-generate.ts",
+    "web:routes": "node --env-file-if-exists=../../../.env.local scripts/web-routes.ts"
+  },
+  "dependencies": {
+    "@whytide/platform": "workspace:*",
+    "@whytide/ui": "workspace:*",
+    "next": "16.4.1",
+    "next-intl": "4.14.9",
+    "openapi-fetch": "0.17.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@fontsource-variable/inter": "5.3.0",
+    "@playwright/test": "1.64.1",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@whytide/api": "workspace:*",
+    "openapi-typescript": "7.13.0",
+    "tailwindcss": "4.3.3"
+  }
+}

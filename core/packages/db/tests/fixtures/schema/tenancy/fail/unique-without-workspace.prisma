@@ -1,0 +1,22 @@
+/// tenant
+model Person {
+  id          String @id
+  workspaceId String @map("workspace_id")
+  email       String @unique
+  linkedinUrl String @map("linkedin_url")
+
+  @@unique([linkedinUrl])
+  @@index([workspaceId])
+  @@map("persons")
+}
+
+/// tenant
+model Company {
+  id          String @id
+  workspaceId String @map("workspace_id")
+  domain      String
+
+  @@unique(fields: [domain], name: "company_by_domain")
+  @@index([workspaceId])
+  @@map("companies")
+}

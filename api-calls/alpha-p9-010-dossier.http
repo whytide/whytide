@@ -1,0 +1,7 @@
+# A lead's dossier (core/modules/messaging/README.md "Route"): a member's session, drafts.read.
+# `personId` is a person of your workspace with a lead: put it in http-client.private.env.json with your workspaceId.
+
+### GET /v1/workspaces/{workspaceId}/messaging/leads/{personId}/dossier: the lead's dossier, its sender, offer, lead, company and why-now blocks, every value a fact with its id and source, the entities and the hash; 404 dossier_lead_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/leads/{{personId}}/dossier
+Accept: application/json
+Cookie: {{sessionCookie}}

@@ -1,0 +1,7 @@
+# icp: the brief for a coding agent
+
+1. Read `README.md`, then `docs/concepts.md`, `docs/data.md`, `docs/flows.md`, `docs/security.md` and `docs/runbook.md`. They say what is true now and change in the same merge request as the behavior.
+2. The rules: [coding](../../../docs/rules/coding.md), [security](../../../docs/rules/security.md), [delivery](../../../docs/rules/delivery.md). The shape of this folder is [architecture §4.2](../../../docs/architecture.md#42-inside-a-module): the lists and rules in `domain/` without a framework, the Zod schemas in `schemas/`, the routes in `api/`, the labels in `ui/`, every error code a key in `messages/en.json`, the registries in `permissions.ts`, `events.ts`, `errors.ts` and `ids.ts`, the tests in `tests/`.
+3. Commands, from the repository root: `pnpm -F icp build`, `typecheck`, `test`, `test:tenancy`, `lint`; `pnpm -F api test` for the routes (`core/apps/api/tests/icp-api.test.ts`); `pnpm -F web test` and `pnpm -F web typecheck` for the screen (`core/apps/web/tests/icp-screen.spec.ts`), `pnpm -F platform messages:check` for its keys.
+4. Every query goes through `tenantClient`, inside the caller's tenant run; no command opens a run or keeps a client. A new closed-list value or label changes `domain/lists.ts`, `ui/labels.ts` and `messages/en.json` together.
+5. Tests import `domain/`, never `index.ts`, `api/` or a host. Stay inside this folder and `icp.prisma`; a change to a shared package is its own task.

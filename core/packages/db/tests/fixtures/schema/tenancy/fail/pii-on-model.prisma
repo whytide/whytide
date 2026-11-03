@@ -1,0 +1,10 @@
+/// tenant
+/// pii
+model Contact {
+  id          String @id
+  workspaceId String @map("workspace_id")
+  email       String
+
+  @@index([workspaceId])
+  @@map("contacts")
+}

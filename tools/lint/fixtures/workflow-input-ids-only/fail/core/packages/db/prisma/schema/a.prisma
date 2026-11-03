@@ -1,0 +1,7 @@
+/// tenant
+model Note {
+  id          String @id
+  workspaceId String @map("workspace_id")
+  /// pii
+  noteText    String @map("note_text")
+}

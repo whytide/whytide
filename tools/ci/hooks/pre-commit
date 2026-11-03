@@ -1,0 +1,5 @@
+#!/bin/sh
+# The pre-commit hook: no commit carries a secret (docs/rules/security.md §4). `pnpm install` installs
+# it through the root's prepare script, which points core.hooksPath here; tools/ci/README.md
+# "Supply chain" says how it runs. Git runs hooks from the root of the working tree.
+exec node tools/ci/secrets-scan.ts staged

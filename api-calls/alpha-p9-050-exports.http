@@ -1,0 +1,12 @@
+# The exports (core/modules/contacts/README.md "Routes", core/modules/qualification/README.md "The
+# golden set"): a member's session and contacts' exports.read. The answer is a file, not JSON.
+
+### GET /v1/workspaces/{workspaceId}/contacts/exports/leads.csv: the leads of the list's view as a CSV file, UTF-8 with a byte-order mark, by descending fit; every filter optional (status, tier, review=unreviewed); 400 validation_failed for a value off its list
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/exports/leads.csv?status=qualified&tier=hot&review=unreviewed
+Accept: text/csv
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/qualification/exports/golden-set.jsonl: the golden set, a JSON line per reviewed lead (the input the model saw, its verdicts, fit and tier, the tester's decision; no name, URL or id), also written to the workspace's exports/golden-set-<date>.jsonl; `week` optional, an ISO week; 400 contacts_input_invalid for a week the year does not have
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/qualification/exports/golden-set.jsonl?week=2026-W43
+Accept: application/jsonl
+Cookie: {{sessionCookie}}

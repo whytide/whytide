@@ -1,0 +1,20 @@
+# signals' run by hand and its stop (core/modules/signals/README.md "Runs"): the run is written
+# `scheduled` and the worker starts it; a stop sets its stop_requested_at and the worker cancels its
+# workflow (fix-run-stop). `sourceId` and `runId` go in http-client.private.env.json, a source's id
+# from GET …/signals/sources and a run's from GET …/sources/{id}/runs. Both routes are @Idempotent():
+# the Idempotency-Key is an example UUID; another one asks again, the same one answers the first answer
+# again for a day. A write sends the cookie, so it sends Origin: {{appOrigin}} too.
+
+### POST /v1/workspaces/{workspaceId}/signals/sources/{id}/run: runs a source now; 202 with the run; 409 signal_run_open while one of its runs is running or waiting (alpha-p10-110)
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}/run
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000020
+
+### POST /v1/workspaces/{workspaceId}/signals/sources/{id}/runs/{runId}/stop: stops a run that has not ended; 202 with the run and its stopRequestedAt; 409 signal_run_not_open once it ended (fix-run-stop)
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}/runs/{{runId}}/stop
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000021

@@ -1,0 +1,13 @@
+# Grafana's dashboard provider for the otel-lgtm container (compose.yaml mounts it with the folder):
+# every JSON file of dashboards/ in the folder "Whytide", read again every 30 seconds, never saved
+# from the UI. docs/observability.md says how to add one.
+apiVersion: 1
+providers:
+  - name: whytide
+    folder: Whytide
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /otel-lgtm/whytide/dashboards

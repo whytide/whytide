@@ -1,0 +1,84 @@
+{
+  "uid": "whytide-worker",
+  "title": "Whytide worker",
+  "description": "The worker host: workflow runs, schedule fires, activity failures, the outbox, health (deploy/docs/observability.md)",
+  "tags": ["whytide"],
+  "schemaVersion": 41,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Workflow runs, by workflow and outcome",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (workflow, outcome) (increase(worker_workflow_runs_total[$__rate_interval]))",
+          "legendFormat": "{{workflow}} {{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Schedule fires, by workflow",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (workflow) (increase(worker_workflow_starts_total{trigger=\"schedule\"}[$__rate_interval]))",
+          "legendFormat": "{{workflow}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Activity failures, by activity and code",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (activity, code) (increase(worker_activity_failures_total[$__rate_interval]))",
+          "legendFormat": "{{activity}} {{code}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker health (1 ok, 0 failing)",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "min(worker_health)", "legendFormat": "health" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox lag: the oldest due row's wait",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "max(outbox_lag_seconds)", "legendFormat": "lag" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Dead letters: rows waiting, and new ones by event",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "max(outbox_dead_rows)", "legendFormat": "dead rows" },
+        {
+          "refId": "B",
+          "expr": "sum by (event) (increase(outbox_dead_letters_total[$__rate_interval]))",
+          "legendFormat": "new: {{event}}"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "web.error.title": "Something went wrong",
+  "web.home.body": "Work through your day from the top: tell Whytide about your company and your ideal customer, choose where it listens, then work the leads it finds.",
+  "web.home.step": "Step {number, number}",
+  "web.home.title": "Welcome to {workspace}",
+  "web.nav.company": "Company",
+  "web.nav.icp": "ICP",
+  "web.nav.import": "Import",
+  "web.nav.leads": "Leads",
+  "web.nav.linkedin": "LinkedIn",
+  "web.nav.sources": "Sources",
+  "web.not_found.body": "There is no page at this address. Check the link, or go back.",
+  "web.not_found.home": "Back to Whytide",
+  "web.not_found.title": "Page not found",
+  "web.shell.close_navigation": "Close navigation",
+  "web.shell.navigation": "Navigation",
+  "web.shell.open_navigation": "Open navigation",
+  "web.shell.skip": "Skip to content",
+  "web.shell.workspaces": "Workspaces"
+}

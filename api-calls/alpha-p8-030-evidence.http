@@ -1,0 +1,7 @@
+# A lead's signal events and their evidence (core/modules/signals/README.md "API"): a member's session, leads.read.
+# `personId` is a person of your workspace: put it in http-client.private.env.json with your workspaceId.
+
+### GET /v1/workspaces/{workspaceId}/signals/leads/{personId}/evidence: the person's events, newest first, each with its source's label and its evidence (the post, the comment's first 500 characters, the comment, the reaction, the author), and the lead's attribution, its first source and the others (alpha-p8-050); none for a person without one, and no attribution without a lead; 404 person_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/leads/{{personId}}/evidence
+Accept: application/json
+Cookie: {{sessionCookie}}

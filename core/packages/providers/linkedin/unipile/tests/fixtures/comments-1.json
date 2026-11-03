@@ -1,0 +1,44 @@
+{
+  "object": "CommentList",
+  "items": [
+    {
+      "object": "Comment",
+      "id": "fixture-comment-dana",
+      "post_id": "urn:li:activity:7000000000000000001",
+      "post_urn": "urn:li:activity:7000000000000000001",
+      "author": "Dana Specimen",
+      "author_details": {
+        "id": "fixture-member-dana",
+        "headline": "Founder at Blue Harbor Labs",
+        "profile_url": "https://www.linkedin.com/in/dana-specimen",
+        "profile_picture_url": "https://media.example.com/dana.jpg",
+        "network_distance": "SECOND_DEGREE"
+      },
+      "date": "2026-10-03T09:00:00.000Z",
+      "text": "Useful, thanks",
+      "reaction_counter": 1,
+      "reply_counter": 0
+    },
+    {
+      "object": "Comment",
+      "id": "fixture-comment-femi",
+      "post_id": "urn:li:activity:7000000000000000001",
+      "post_urn": "urn:li:activity:7000000000000000001",
+      "author": "Femi Testwell",
+      "author_details": {
+        "id": "fixture-member-femi",
+        "headline": "Founder at Blue Harbor Labs",
+        "profile_url": "https://www.linkedin.com/in/femi-testwell",
+        "profile_picture_url": "https://media.example.com/femi.jpg",
+        "network_distance": "THIRD_DEGREE"
+      },
+      "date": "2026-10-02T09:00:00.000Z",
+      "text": "How does it handle ten sources?",
+      "reaction_counter": 0,
+      "reply_counter": 1
+    }
+  ],
+  "cursor": "comments-page-2",
+  "total_items": 3,
+  "paging": { "start": 0, "page_count": 2, "total_count": 3 }
+}

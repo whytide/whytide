@@ -1,0 +1,74 @@
+// The tables of core/modules/tenancy (its docs/data.md), alpha-p3-010; migration
+// 20261022100100_tenancy_initial. users, organizations and workspaces are global tables, read
+// through withoutTenant("tenancy"); memberships is a tenant table. The relations are declared for
+// their foreign keys and queried model by model (the tenant client refuses a relation in any
+// argument). Hand-written SQL in the migration: users_email_lowercase, a CHECK that keeps every
+// email lowercased, so that the unique email is unique whatever the case it was typed in.
+
+// A person who signs in: the authentication adapter maps its users onto this table (alpha-p3-020).
+// email and display_name are the account holder's own, not a lead's: docs/security.md of tenancy.
+model User {
+  id          String       @id
+  /// Lowercased: upsertUser normalizes it, the CHECK refuses anything else.
+  email       String       @unique
+  displayName String?      @map("display_name")
+  /// A BCP 47 tag the i18n runtime prefers to the browser's; null until the user picks one.
+  locale      String?
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  /// Set by the authentication adapter's revokeUser (alpha-p3-020).
+  disabledAt  DateTime?    @map("disabled_at") @db.Timestamptz()
+  memberships Membership[]
+
+  @@map("users")
+}
+
+model Organization {
+  id         String      @id
+  name       String
+  /// The slug of its first workspace (bootstrapOrganization), unique across organizations.
+  slug       String      @unique
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz()
+  workspaces Workspace[]
+
+  @@map("organizations")
+}
+
+model Workspace {
+  id             String       @id
+  organizationId String       @map("organization_id")
+  name           String
+  /// The workspace in a URL, unique per organization.
+  slug           String
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  memberships    Membership[]
+
+  @@unique([organizationId, slug])
+  @@map("workspaces")
+}
+
+// A user's role in one workspace. The index on user_id serves the one read across workspaces,
+// a user's own memberships (tenancy's docs/security.md).
+/// tenant
+model Membership {
+  id          String         @id
+  workspaceId String         @map("workspace_id")
+  userId      String         @map("user_id")
+  role        MembershipRole
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id])
+  user        User           @relation(fields: [userId], references: [id])
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+/// The roles of the platform's principal; every member is Owner in alpha.
+enum MembershipRole {
+  Owner
+  Admin
+  Member
+
+  @@map("membership_role")
+}

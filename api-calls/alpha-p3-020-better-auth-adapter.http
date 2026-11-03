@@ -1,0 +1,11 @@
+# The Better Auth adapter's one route (core/packages/providers/auth/better-auth/README.md): public, no
+# body. `linkToken` is the token of a link mailed to Mailpit: put it in http-client.private.env.json,
+# never here. The GET spends nothing (the confirm step); the POST works once, and a used, expired or
+# refused link lands on the same failure page.
+
+### GET /api/auth/magic-link/verify: opens a sign-in link; 303 to /sign-in/confirm?link=<the link>, no session
+GET {{baseUrl}}/api/auth/magic-link/verify?token={{linkToken}}&callbackURL=/
+
+### POST /api/auth/magic-link/verify: the confirm page's button; 303 to callbackURL with the session cookie, or 303 to /sign-in/expired?code=auth_link_expired
+POST {{baseUrl}}/api/auth/magic-link/verify?token={{linkToken}}&callbackURL=/
+Origin: {{appOrigin}}

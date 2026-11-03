@@ -1,0 +1,12 @@
+# The lead page's reads (core/modules/qualification/README.md and core/modules/contacts/README.md "Routes"): a member's session, leads.read.
+# `personId` is a person of your workspace with a lead: put it in http-client.private.env.json with your workspaceId.
+
+### GET /v1/workspaces/{workspaceId}/qualification/leads/{personId}/snapshot: the lead's current snapshot, its six verdicts with evidence, weight and points, the disqualifiers and the model's summary; 404 score_snapshot_not_found without one, lead_not_found without a lead
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/qualification/leads/{{personId}}/snapshot
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/contacts/leads/{personId}/neighbours: the leads just before and just after this one in the list's view, here the qualified leads without a review decision by fit; 404 lead_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/{{personId}}/neighbours?status=qualified&sort=fit&review=unreviewed
+Accept: application/json
+Cookie: {{sessionCookie}}

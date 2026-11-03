@@ -1,0 +1,34 @@
+# signals' sources routes (core/modules/signals/README.md "API"), under the workspace. Two variables
+# besides the usual ones go in http-client.private.env.json: `senderAccountId`, a sender account of the
+# workspace (GET …/linkedin/accounts), and `sourceId`, the id the first request answers.
+
+### POST /v1/workspaces/{workspaceId}/signals/sources: creates a source of a registered kind, enabled; 201 with the row
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "kind": "post_engagers", "config": { "postUrl": "https://www.linkedin.com/feed/update/urn:li:activity:7250000000000000000" }, "label": "Launch post", "senderAccountId": "{{senderAccountId}}" }
+
+### GET /v1/workspaces/{workspaceId}/signals/sources: the workspace's sources, newest first, each with its next fire times (alpha-p8-040), runOpen, one of its runs running or waiting (alpha-p10-110), and openRun, that run's { id, status } or null (fix-run-wait)
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PATCH /v1/workspaces/{workspaceId}/signals/sources/{id}: enables, disables or relabels a source
+PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "enabled": false, "label": "Launch post, paused" }
+
+### GET /v1/workspaces/{workspaceId}/signals/sources/{id}/runs: the source's runs, newest first
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}/runs
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### DELETE /v1/workspaces/{workspaceId}/signals/sources/{id}: deletes the source and its runs; 204
+DELETE {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}

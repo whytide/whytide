@@ -1,0 +1,8 @@
+# identity: runbook
+
+- **Inviting a tester**: `pnpm invite <email>` (README "The invite command"), then pass on the sign-in page it prints. A second run is harmless. On an empty database, the first run also makes the organization and the workspace.
+- **A tenant for testing**: `pnpm tenant:create` for an organization and its workspace, `pnpm workspace:create` for another workspace of one (README "The tenant commands"). The admin is mailed the sign-in page; with `--no-mail`, or `APP_PUBLIC_ORIGIN` empty, pass it on yourself. Exit 3: the mail failed, the rows are made; the admin may still sign in.
+- **Reading the link in development**: every worktree's mail lands in the one Mailpit (`MAILPIT_API_URL`, its web page at the same address); search for the email. For the link to open the web's pages and set the cookie there, `AUTH_BASE_URL` and `APP_PUBLIC_ORIGIN` in `.env.local` are the web's origin, `http://127.0.0.1:WEB_PORT`.
+- **Settings**: `SMOKE_EMAIL`, the smoke test's email; the default workspace is tenancy's `WORKSPACE_SLUG`, the mail the app-mail port's `PROVIDER_APP_MAIL`.
+- **Logs**: tenancy's global reads log `tenant: running without a tenant context`, `reason: "tenancy"`, during `pnpm invite` and a sign-in.
+- **Failure modes**: `workspace_not_found` from `pnpm invite`: no workspace has the slug while an organization exists, or workspaces of two organizations do: pass the id. A tester on `/sign-in/expired`: the link was used, is older than 15 minutes, or was replaced; ask for a new one. `auth_invite_required` (403) for a tester: the invite is for another email. 403 `forbidden` on a workspace route for a member: the URL names a workspace they do not belong to.

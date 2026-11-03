@@ -1,0 +1,59 @@
+// The tables of core/modules/messaging (its docs/data.md), alpha-p9-020; migration
+// 20261027100000_messaging_drafts. One tenant table: a draft of a first LinkedIn message to a lead,
+// planned and written by the module's two agents and checked by its gates, with the record of how it
+// was made (briefs RB-10.1.5). The model calls' decision records are core/packages/ai's, linked by
+// id. The module's erasePerson deletes a person's drafts.
+
+/// tenant
+model MessageDraft {
+  id               String             @id
+  workspaceId      String             @map("workspace_id")
+  personId         String             @map("person_id")
+  channel          MessageChannel
+  status           MessageDraftStatus @default(drafting)
+  /// The plan the text was written from: `angle`, `factIds`, `cta` and the plan call's
+  /// `decisionRecordId`; null until a plan answered.
+  plan             Json?
+  /// The writer's last text; null until one answered.
+  /// pii: business_contact
+  text             String?
+  /// The member's edit: the draft is `edited`, and no regeneration touches it again.
+  /// pii: business_contact
+  editedText       String?            @map("edited_text")
+  editedAt         DateTime?          @map("edited_at") @db.Timestamptz()
+  /// The last model call's, the write's or else the plan's, with its record.
+  modelId          String?            @map("model_id")
+  promptVersion    Int?               @map("prompt_version")
+  decisionRecordId String?            @map("decision_record_id")
+  /// The dossier's hash (domain/dossier/hash.ts): a changed fact shows.
+  dossierHash      String?            @map("dossier_hash")
+  /// The last round's gates, `{ gate, issues }` each, no issue for a pass; an issue names the text.
+  /// pii: business_contact
+  gates            Json               @default("[]")
+  regenerations    Int                @default(0)
+  /// Why it is flagged (the failing gates' issues) or failed (`{ code }`); empty otherwise.
+  /// pii: business_contact
+  flagReasons      Json               @default("[]") @map("flag_reasons")
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz()
+
+  @@index([workspaceId, personId, createdAt])
+  @@map("message_drafts")
+}
+
+enum MessageChannel {
+  linkedin_note
+  linkedin_message
+
+  @@map("message_channel")
+}
+
+enum MessageDraftStatus {
+  drafting
+  ready
+  flagged
+  failed
+  edited
+
+  @@map("message_draft_status")
+}

@@ -1,0 +1,36 @@
+# The pnpm workspace, laid out as docs/architecture.md §4.1 says, plus the tooling under tools/.
+# core/modules/_template is not a package: `pnpm module:new <name>` copies it. deploy/ is a package
+# for its tests only.
+packages:
+  - core/apps/*
+  - core/modules/*
+  - "!core/modules/_template"
+  - core/packages/*
+  - ee/modules/*
+  - tools/*
+  - deploy
+
+# The supply chain in alpha (docs/adr/0002-supply-chain.md, docs/rules/security.md §7); pnpm 12 reads
+# these here, not from .npmrc. The lockfile is frozen under CI=true by pnpm itself.
+minimumReleaseAge: 10080 # minutes: a version published less than seven days ago is not installed
+strictDepBuilds: true # a dependency's install script fails the install until it is reviewed below
+allowBuilds: # one line per package: `<name>: true` runs its scripts, `<name>: false` refuses them
+  prisma: false # its preinstall only checks the Node version
+  "@prisma/engines": false # its postinstall downloads the engine binaries; the CLI fetches them on first use
+  protobufjs: false # its postinstall only writes its version string into its own files
+  esbuild: false # its postinstall hard-links the platform binary over the JS shim, or fetches it outside the lockfile when the optional @esbuild/<platform> package is missing; the JS API finds that package without it
+  "@swc/core": false # its postinstall checks that the optional @swc/core-<platform> binary loads, else installs @swc/wasm with npm outside the lockfile; the binary package is installed, so nothing is needed
+  "@parcel/watcher": false # its install script builds the watcher from source only when the optional @parcel/watcher-<platform> binary is missing; that package is installed (next-intl's message extractor, unused by the web host)
+
+# sharp is an optional dependency of next: its @img/sharp-libvips-<platform> binaries are LGPL-3.0-or-later,
+# outside coding §10's licenses, and it serves only the image optimizer, which the web host turns off
+# (core/apps/web/next.config.ts, images.unoptimized).
+ignoredOptionalDependencies:
+  - sharp
+
+# Two high advisories in dependencies the Prisma CLI pins (GHSA-ggr8-5vv4-36mx in deepmerge-ts,
+# GHSA-3f6p-5ww8-9rcr in mysql2), fixed by prisma 7.10.1, which is younger than the release age until
+# 2026-10-22: the versions prisma 7.10.1 pins, until the update bot moves prisma and drops these.
+overrides:
+  deepmerge-ts: 8.0.2
+  mysql2: 3.24.4

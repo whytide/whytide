@@ -1,0 +1,32 @@
+# dependencies and build outputs; .pnpm-store is the GitLab job's store, cached between runs, and
+# .tmp its temporary files (tools/ci/gitlab.sh)
+node_modules/
+.pnpm-store/
+.tmp/
+dist/
+.next/
+*.tsbuildinfo
+coverage/
+*.log
+# Playwright's output and report (core/packages/ui)
+test-results/
+playwright-report/
+
+# generated at build, never committed (docs/architecture.md §4.2, docs/rules/coding.md §10)
+*.generated.*
+openapi.json
+core/packages/db/generated/
+# the lock db's generate holds while it runs (core/packages/db/src/generate.ts)
+core/packages/db/generated.lock/
+
+# the local environment and secrets (docs/rules/security.md §4); deploy/.env holds the stack's passwords
+.env
+.env.local
+.env.*.local
+# the session cookie of the .http files (api-calls/README.md)
+api-calls/http-client.private.env.json
+# the JetBrains HTTP Client's cookie jar and request history
+.idea/httpRequests/
+
+# editors and operating systems
+.DS_Store

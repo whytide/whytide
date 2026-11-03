@@ -1,0 +1,19 @@
+/// tenant
+model Lead {
+  id          String   @id
+  workspaceId String   @map("workspace_id")
+  createdAt   DateTime @map("created_at") @db.Timestamptz()
+
+  @@index([createdAt, workspaceId])
+  @@map("leads")
+}
+
+/// tenant
+model Visit {
+  id          String   @id
+  workspaceId String   @map("workspace_id")
+  createdAt   DateTime @map("created_at") @db.Timestamptz()
+
+  @@index(fields: [createdAt, workspaceId], map: "visits_by_time")
+  @@map("visits")
+}

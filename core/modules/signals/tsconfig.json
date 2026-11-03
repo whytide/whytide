@@ -1,0 +1,29 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    // The NestJS controller of api/ needs both (core/apps/api/README.md "Modules"); Node cannot run
+    // decorated sources, so the api host loads this module's dist/, and the tests import no controller.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["dist", "node_modules", ".tmp"],
+  "references": [
+    { "path": "../../packages/platform" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/providers" },
+    { "path": "../contacts" },
+    { "path": "../icp" },
+    { "path": "../linkedin" },
+    { "path": "../onboarding" },
+    { "path": "../qualification" },
+    { "path": "../tenancy" }
+  ]
+}

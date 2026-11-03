@@ -1,0 +1,18 @@
+{
+  "core/modules/a/api/qualify.ts": ["mastra-in-ai-only"],
+  "core/packages/platform/memory.ts": ["mastra-in-ai-only", "mastra-in-ai-only"],
+  "core/packages/ai/auth.ts": ["mastra-in-ai-only"],
+  "core/packages/ai/auth-ee.ts": ["mastra-in-ai-only"],
+  "core/packages/ai/license.ts": ["mastra-in-ai-only"],
+  "core/modules/a/agents/builder.ts": ["mastra-in-ai-only"],
+  "core/modules/a/agents/task.ts": ["mastra-in-ai-only"],
+  "core/packages/ai/ee-paths.ts": [
+    "mastra-in-ai-only",
+    "mastra-in-ai-only",
+    "mastra-in-ai-only",
+    "mastra-in-ai-only"
+  ],
+  "core/packages/ai/ee-chunk.ts": ["mastra-in-ai-only", "mastra-in-ai-only"],
+  "core/packages/ai/file-url.ts": ["mastra-in-ai-only", "mastra-in-ai-only"],
+  "core/packages/ai/dots.ts": ["mastra-in-ai-only", "mastra-in-ai-only"]
+}

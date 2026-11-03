@@ -1,0 +1,320 @@
+# The one Compose file for every environment, selected by profiles (docs/architecture.md §3, §18).
+# alpha-p0-030 fills the state and tool services of the shared development stack: one project per
+# laptop, `whytide`, started with `pnpm stack:up` from any worktree and never duplicated per task
+# (docs/rules/delivery.md §2). The application services (api, worker, web, caddy) are alpha-p10-070's,
+# in the profile `production` only; in development they run as processes from the worktree. Every image
+# is pinned by digest and listed in images.md, but our own, which are tagged by commit; every port
+# binds to localhost, but Caddy's on a server; the DEV_* defaults are the ones in .env.example, and
+# deploy/.env (git-ignored) overrides them. Every container is named `<project>-<service>`,
+# `whytide-postgres` for the laptop's stack.
+name: whytide
+
+# The production profile's settings (README.md "Production"): every container of it runs without
+# capabilities, unable to gain privileges, on a read-only root file system with a writable /tmp.
+x-production: &production
+  profiles: [production]
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+# The apps read deploy/.env, the server's, as their environment; compose.yaml sets what its own
+# network decides, and keeps Postgres's superuser password out of them.
+x-app-environment: &app-environment
+  TRUST_PROXY: ${EDGE_PREFIX:-192.168.255}.2
+  S3_ACCESS_KEY: ${DEV_MINIO_ROOT_USER:-whytide}
+  S3_SECRET_KEY: ${DEV_MINIO_ROOT_PASSWORD:-whytide-development}
+  DEV_POSTGRES_PASSWORD: ""
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD:-whytide}
+      POSTGRES_DB: app
+    volumes:
+      - postgres:/var/lib/postgresql
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "127.0.0.1:${DEV_POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "app"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-redis
+    # Disposable (docs/rules/coding.md §5): no snapshots, no append-only file, no volume.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:${DEV_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  temporal:
+    image: temporalio/auto-setup:1.29.7@sha256:f14912b699cf73015ad5c4fc18d522d4b014db90e794039214dfb7c022c2644f
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-temporal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PWD: ${DEV_POSTGRES_PASSWORD:-whytide}
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      # postgres/init.sql created both databases; auto-setup only sets up the schema.
+      SKIP_DB_CREATE: "true"
+      ENABLE_ES: "false"
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CLI_ADDRESS: temporal:7233
+    ports:
+      - "127.0.0.1:${DEV_TEMPORAL_PORT:-7233}:7233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+    restart: unless-stopped
+
+  temporal-ui:
+    image: temporalio/ui:2.56.0@sha256:66d55d383bfb334ee0781f21a3b36c865b3f0f2262491a070bb2143394e9fe88
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-temporal-ui
+    profiles: [tools]
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:${DEV_TEMPORAL_UI_PORT:-8233}
+    ports:
+      - "127.0.0.1:${DEV_TEMPORAL_UI_PORT:-8233}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  minio:
+    # The last community release, built by the alpine-docker project: see images.md. It runs as the
+    # user `minio`, which owns /home/minio and not /data; a fresh volume takes the owner of the
+    # directory it mounts on, so the volume sits on the home and the drive is a folder inside it.
+    image: alpine/minio:RELEASE.2025-10-15T17-29-55Z@sha256:cf23643a6cf9ce159c57643ceb88279e431262282428c9e0bf3a7ef1a97e84b4
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-minio
+    command: ["server", "/home/minio/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${DEV_MINIO_ROOT_USER:-whytide}
+      MINIO_ROOT_PASSWORD: ${DEV_MINIO_ROOT_PASSWORD:-whytide-development}
+    volumes:
+      - minio:/home/minio
+    ports:
+      - "127.0.0.1:${DEV_MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${DEV_MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.31.6@sha256:23fe39e81bde596a918000b3135c0f85dc8bb4c9ea6be274b051143f3e300387
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-mailpit
+    profiles: [dev]
+    environment:
+      # Any credentials, or none, over plain SMTP: every worktree's mail lands in this one inbox.
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      - "127.0.0.1:${DEV_MAILPIT_PORT:-1025}:1025"
+      - "127.0.0.1:${DEV_MAILPIT_UI_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.37.0@sha256:57b5ab1ca6619beb180174e2fccce04762470750669d043f544b4726d0582d07
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-otel-lgtm
+    profiles: [observability]
+    # Prometheus counts a counter's first export as an increase from zero, not as its start.
+    environment:
+      PROMETHEUS_EXTRA_ARGS: --enable-feature=created-timestamp-zero-ingestion
+    # Grafana provisions the dashboards and the alert rules of observability/ at every start
+    # (docs/observability.md); they are read-only in the UI.
+    volumes:
+      - otel-lgtm:/data
+      - ./observability/dashboards:/otel-lgtm/whytide/dashboards:ro
+      - ./observability/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/whytide.yaml:ro
+      - ./observability/alerts.json:/otel-lgtm/grafana/conf/provisioning/alerting/whytide.json:ro
+    ports:
+      - "127.0.0.1:${DEV_OTEL_PORT:-4318}:4318"
+      - "127.0.0.1:${DEV_OTEL_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${DEV_GRAFANA_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+    restart: unless-stopped
+
+  # ---- production (alpha-p10-070) ----
+  # Two one-shot services before the api: the database's login roles, from the three connection
+  # strings of deploy/.env (postgres/roles.sh), and the bucket S3_BUCKET names (minio/bucket.sh).
+  # Each runs at every `up` and changes nothing the second time.
+  postgres-setup:
+    <<: *production
+    image: pgvector/pgvector:0.8.7-pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-postgres-setup
+    user: postgres
+    entrypoint: ["bash", "/setup/roles.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGPASSWORD: ${DEV_POSTGRES_PASSWORD:-whytide}
+      DATABASE_URL_OWNER: ${DATABASE_URL_OWNER:-}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_URL_BILLING_WRITER: ${DATABASE_URL_BILLING_WRITER:-}
+    volumes:
+      - ./postgres/roles.sh:/setup/roles.sh:ro
+
+  minio-setup:
+    <<: *production
+    # The Temporal image's curl signs S3 requests, as scripts/env.sh does: MinIO's image has no client.
+    image: temporalio/auto-setup:1.29.7@sha256:f14912b699cf73015ad5c4fc18d522d4b014db90e794039214dfb7c022c2644f
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-minio-setup
+    entrypoint: ["sh", "/setup/bucket.sh"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      S3_KEY: ${DEV_MINIO_ROOT_USER:-whytide}
+      S3_SECRET: ${DEV_MINIO_ROOT_PASSWORD:-whytide-development}
+      S3_BUCKET: ${S3_BUCKET:-}
+    volumes:
+      - ./minio/bucket.sh:/setup/bucket.sh:ro
+
+  # The api: the migrations and the modules' start (credits' seeder) before it listens on 3001, on the
+  # edge network for Caddy and the web and nowhere else outside; it publishes no port.
+  api:
+    <<: *production
+    image: ${IMAGE_REGISTRY:-localhost/whytide}/api:${IMAGE_TAG:-local}
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-api
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *app-environment
+      API_PORT: "3001" # where Caddy and the web image call it
+    depends_on:
+      postgres-setup:
+        condition: service_completed_successfully
+      minio-setup:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    networks: [default, edge]
+    restart: unless-stopped
+
+  worker:
+    <<: *production
+    image: ${IMAGE_REGISTRY:-localhost/whytide}/worker:${IMAGE_TAG:-local}
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-worker
+    # @swc/core, which bundles the workflows at start, unpacks its native addon into a private cache
+    # it can run code from, which /tmp is not.
+    tmpfs: [/tmp, "/home/node/.cache:uid=1000,gid=1000,mode=0700,exec"]
+    env_file:
+      - path: .env
+        required: false
+    environment: *app-environment
+    depends_on:
+      api:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # The web app, Next.js's standalone server on 3000: no environment file and no secret, on the edge
+  # network only, where Caddy reaches it and it calls the api at http://api:3001, built into its image.
+  web:
+    <<: *production
+    image: ${IMAGE_REGISTRY:-localhost/whytide}/web:${IMAGE_TAG:-local}
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-web
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [edge]
+    restart: unless-stopped
+
+  # The edge (Caddyfile): TLS for APP_DOMAIN, the only published ports, at a fixed address on the
+  # edge network, the one the api trusts for X-Forwarded-For (TRUST_PROXY). Its certificates and its
+  # authority live in the volume caddy-data. It binds 80 and 443 as a user, which Docker allows in a
+  # container; NET_BIND_SERVICE stays in the bounding set only because the binary carries it as a
+  # file capability, and with no-new-privileges the process gets none.
+  caddy:
+    <<: *production
+    image: caddy:2.11.7-alpine@sha256:24ec7b05bc532c7bb57f727030c5056e257ff7138b4b50460306819ff79362bd
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-caddy
+    user: "10001:10001"
+    cap_add: [NET_BIND_SERVICE]
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-}
+      CADDY_INTERNAL_TLS: ${CADDY_INTERNAL_TLS:-0}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "${CADDY_HTTP_PUBLISH:-80}:80"
+      - "${CADDY_HTTPS_PUBLISH:-443}:443"
+      - "${CADDY_HTTPS_PUBLISH:-443}:443/udp"
+    networks:
+      edge:
+        ipv4_address: ${EDGE_PREFIX:-192.168.255}.2
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2080/"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+
+volumes:
+  postgres:
+  minio:
+  otel-lgtm:
+  caddy-data:
+  caddy-config:
+
+networks:
+  # Caddy and the apps it proxies to: Caddy at <prefix>.2, the others from <prefix>.8 up.
+  edge:
+    ipam:
+      config:
+        - subnet: ${EDGE_PREFIX:-192.168.255}.0/28
+          ip_range: ${EDGE_PREFIX:-192.168.255}.8/29

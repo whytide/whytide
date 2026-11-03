@@ -1,0 +1,7 @@
+# tenancy's account route (core/modules/tenancy/README.md "GET /v1/me"): a session, no workspace, no body.
+
+### GET /v1/me: the signed-in user and their memberships with roles; 401 auth_session_invalid without a session
+# feedbackUrl (alpha-p10-040): FEEDBACK_URL, the header's "Give feedback" link, or null when it is unset.
+GET {{baseUrl}}/v1/me
+Accept: application/json
+Cookie: {{sessionCookie}}

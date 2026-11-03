@@ -1,0 +1,4 @@
+{
+  "core/modules/linkedin/api/connect.ts": ["vendor-sdk-in-adapter-only"],
+  "core/packages/providers/linkedin/port.ts": ["vendor-sdk-in-adapter-only"]
+}

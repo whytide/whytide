@@ -1,0 +1,12 @@
+{
+  "core/apps/api/secrets.ts": ["decrypt-in-worker-only"],
+  "core/apps/api/relative.ts": ["decrypt-in-worker-only", "decrypt-in-worker-only"],
+  "core/apps/api/workflows.ts": ["decrypt-in-worker-only", "decrypt-in-worker-only"],
+  "core/modules/a/api/connect.ts": ["decrypt-in-worker-only"],
+  "core/modules/a/api/refresh.ts": ["decrypt-in-worker-only"],
+  "core/modules/a/domain/token.ts": ["decrypt-in-worker-only"],
+  "core/modules/a/index.ts": ["decrypt-in-worker-only"],
+  "core/packages/db/secrets.ts": ["decrypt-in-worker-only"],
+  "core/packages/platform/index.ts": ["decrypt-in-worker-only"],
+  "core/apps/api/keys.ts": ["decrypt-in-worker-only"]
+}

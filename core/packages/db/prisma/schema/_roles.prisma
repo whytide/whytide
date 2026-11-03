@@ -1,0 +1,12 @@
+// The database roles (docs/rules/security.md §3, docs/architecture.md §6, docs/adr/0003-roles-from-alpha.md).
+// Prisma's schema language cannot say roles, so they are hand-written SQL in the first migration
+// (docs/rules/coding.md §5):
+//   prisma/migrations/20261021000000_db_roles/migration.sql
+// It creates the group roles `app` and `billing_writer` when they are missing, lets them connect and
+// see the schema `public`, and sets the owner's default privileges: every table a later migration
+// creates is readable and writable by `app` and closed to `billing_writer`, until a module's migration
+// restricts or grants per table in the same way. The login roles come from the environment: per slice
+// from `pnpm env:create` in development (deploy/README.md), per deployment later. The three connection
+// strings are DATABASE_URL_OWNER (migrations), DATABASE_URL (`app`: the api and the worker) and
+// DATABASE_URL_BILLING_WRITER (the seeder), in deploy/.env.example under packages/db.
+// This file holds no model.

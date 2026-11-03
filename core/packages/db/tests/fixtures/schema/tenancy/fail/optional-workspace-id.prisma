@@ -1,0 +1,8 @@
+/// tenant
+model Lead {
+  id          String  @id
+  workspaceId String? @map("workspace_id")
+
+  @@index([workspaceId])
+  @@map("leads")
+}

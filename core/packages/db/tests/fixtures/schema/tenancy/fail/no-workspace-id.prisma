@@ -1,0 +1,7 @@
+/// tenant
+model Lead {
+  id    String @id
+  score Int?
+
+  @@map("leads")
+}

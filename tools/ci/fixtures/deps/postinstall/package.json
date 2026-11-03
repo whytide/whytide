@@ -1,0 +1,8 @@
+{
+  "name": "whytide-fixture-postinstall",
+  "version": "0.0.0",
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "node -e \"require('node:fs').writeFileSync('ran', '')\""
+  }
+}

@@ -1,0 +1,24 @@
+// The table of core/modules/privacy (its docs/data.md), alpha-p10-030; migration
+// 20261027140000_privacy_erasure_log. erasure_log is a tenant table: one row per erasure the deletion
+// script committed, with no personal data beyond the salted hash contacts keeps of the person's URL.
+// Append-only: the migration's hand-written REVOKE keeps UPDATE and DELETE from app.
+
+/// tenant
+model ErasureLog {
+  id          String   @id
+  workspaceId String   @map("workspace_id")
+  /// The salted hash of the person's LinkedIn URL, as contacts' erased hash holds it: pseudonymous.
+  /// pii: personal
+  personHash  String   @map("person_hash")
+  /// When the command started.
+  requestedAt DateTime @map("requested_at") @db.Timestamptz()
+  /// When the erasers had all run, just before the commit.
+  completedAt DateTime @map("completed_at") @db.Timestamptz()
+  /// The rows removed, by module and table: { "signals": { "signal_events": 2, "evidence": 2 } }.
+  counts      Json
+  /// The operator who ran the command (`--operator`), never the person.
+  performedBy String   @map("performed_by")
+
+  @@index([workspaceId, completedAt])
+  @@map("erasure_log")
+}

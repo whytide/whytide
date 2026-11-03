@@ -1,0 +1,31 @@
+{
+  "name": "@whytide/ai",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Mastra setup, the task registry, the eval runner",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm generate && tsc -b",
+    "typecheck": "pnpm generate && tsc -b",
+    "lint": "node ../../../tools/lint/lint.ts .",
+    "test": "pnpm generate && tsc -b && APP_ENV=test PROVIDER_LLM=fake node --test tests/*.test.ts",
+    "test:tenancy": "pnpm generate && tsc -b && APP_ENV=test PROVIDER_LLM=fake node --test tests/tenancy.test.ts",
+    "eval": "pnpm generate && tsc -b && APP_ENV=test node --env-file-if-exists=../../../.env.local evals/run.ts",
+    "purge-raw": "pnpm generate && tsc -b && node --env-file-if-exists=../../../.env.local call/purge.ts",
+    "generate": "pnpm -F providers generate && pnpm -F db generate && node registry/generate.ts"
+  },
+  "dependencies": {
+    "@mastra/core": "1.77.0",
+    "@mastra/pg": "1.31.1",
+    "@whytide/db": "workspace:*",
+    "@whytide/platform": "workspace:*",
+    "@whytide/providers": "workspace:*",
+    "zod": "4.6.7"
+  }
+}

@@ -1,0 +1,15 @@
+# credits: runbook
+
+- **Settings**: `CREDITS_MONTHLY_ALLOWANCE` and `CREDITS_PLAN_CODE` (README "Settings"); a value off the rules stops the api's start with `config_invalid`, `details.block` `modules/credits`, `details.variables` naming the variable.
+- **Change the allowance with `.env`**: set `CREDITS_MONTHLY_ALLOWANCE` and restart the api, or run `pnpm credits:seed`. The plan changes at once; the current period keeps its grant, and the next period is granted the new value.
+- **Change the allowance with SQL**, as `billing_writer` (`psql "$DATABASE_URL_BILLING_WRITER"`): `UPDATE plans SET monthly_allowance = 20000000 WHERE is_fixed;`, effective from the next period. The next start writes `.env`'s value again: change `.env` too.
+- **Change a price**: set `PRICE_<ACTION>` in `.env` (README "Declaring a price") and restart the api; a malformed value stops the start, `config_invalid` naming the variable.
+- **Read the week's cost for the alpha review**: open `/w/<workspace>/credits` (or click the balance in the header) and pick the week, Monday to Sunday in UTC; or `GET /v1/workspaces/<workspace>/credits/costs?week=2026-W44` (`api-calls/alpha-p10-010-cost-counter.http`). Note `credits`, `money`, `qualified` and `costPer100Qualified`; `byAction` and `byVendor` say where they went. `money` is the price list's currency and leaves out LinkedIn reads. A lead's own cost is the line on its page, or `GET …/credits/leads/<personId>/cost`.
+- **Metrics**: `credits_usage_total` by `outcome` (reserved, insufficient, committed, released, expired), on the dashboard `deploy/observability/dashboards/credits.json`; a rise of `insufficient` means wallets running dry.
+- **Logs**: `credits: the plan and the periods are seeded` at every start, with `plan_id`, `granted_count` and `period_start_at`; `credits: prices written` with `price_list_version` and `price_count` when the list changed; `tenant: running without a tenant context` with `reason: "credits.balance"` on every balance read.
+- **Failure modes**:
+  - the api does not start, `module_invalid` for `credits` with `field: "onStart"`: the seeder failed; the cause is in the log line. Check `DATABASE_URL_BILLING_WRITER` and its login role (`pnpm env:status`), then run `pnpm credits:seed`;
+  - `credits_seed_self_hosted: no fixed plan, run pnpm credits:seed` (SQLSTATE `P0002`) when an event is delivered: the seeder never ran on this database; run it, and the event's retry grants;
+  - after a change of `CREDITS_PLAN_CODE`, the new plan is fixed for organizations subscribed later, and a subscription keeps its plan: move it as `billing_writer` with `UPDATE subscriptions SET plan_id = (SELECT id FROM plans WHERE is_fixed);`;
+  - `insufficient_credits` (402): the organization's wallet has less than price × quantity left; a reservation of a crashed caller holds until its lease ends and the next reserve expires it;
+  - a balance that looks wrong: compare it with the sums over `credit_grants` and `credit_usage` (the query of `tests/balance-trigger.test.ts`); only the triggers write it.

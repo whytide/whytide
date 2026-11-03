@@ -1,0 +1,6 @@
+# contacts' lead counts (core/modules/contacts/README.md "Routes"), shown above the lead list: a member's session, leads.read.
+
+### GET /v1/workspaces/{workspaceId}/contacts/leads/counts: how many of the workspace's leads are in each status, every status named
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/counts
+Accept: application/json
+Cookie: {{sessionCookie}}

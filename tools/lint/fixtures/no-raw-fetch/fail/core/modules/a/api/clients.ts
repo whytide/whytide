@@ -1,0 +1,10 @@
+import "isomorphic-fetch";
+import crossFetch from "cross-fetch";
+import { https } from "follow-redirects";
+import got from "got";
+import ky from "ky";
+import needle from "needle";
+import { ofetch } from "ofetch";
+import superagent from "superagent";
+import WebSocketClient from "ws";
+export const clients = [crossFetch, got, ky, superagent, WebSocketClient, https, needle, ofetch];

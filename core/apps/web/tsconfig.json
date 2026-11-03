@@ -1,0 +1,24 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  // Checked only, never emitted: Next.js compiles the app; tsc -b builds ui and the platform first.
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noEmit": true,
+    "tsBuildInfoFile": ".tmp/tsconfig.tsbuildinfo",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    // A module's screens, compiled here, reach the API client by name (next.config.ts, screenApi).
+    "paths": { "@whytide/web/api/*": ["./src/api/*.ts"] },
+    "plugins": [{ "name": "next" }]
+  },
+  "include": ["**/*.ts", "**/*.tsx", "next-env.d.ts"],
+  "exclude": ["node_modules", ".next", ".tmp", "test-results", "playwright-report"],
+  "references": [{ "path": "../../packages/platform" }, { "path": "../../packages/ui" }]
+}

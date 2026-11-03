@@ -1,0 +1,39 @@
+{
+  "name": "@whytide/db",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Prisma: one schema file per module, migrations, database roles",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node src/cli.ts generate && tsc -b",
+    "typecheck": "node src/cli.ts generate && tsc -b",
+    "lint": "node ../../../tools/lint/lint.ts . && node src/cli.ts schema-lint && node src/cli.ts migrations-check",
+    "test": "node src/cli.ts generate && tsc -b && APP_ENV=test node --test tests/*.test.ts",
+    "generate": "node src/cli.ts generate",
+    "migrate": "node src/cli.ts migrate",
+    "migrate:dev": "node src/cli.ts migrate-dev",
+    "reset": "node src/cli.ts reset",
+    "studio": "node src/cli.ts studio",
+    "release-snapshot": "node src/cli.ts release-snapshot",
+    "db:migrate:check": "node src/cli.ts migrate-check",
+    "test:tenancy": "node src/cli.ts generate && tsc -b && APP_ENV=test node --test tests/tenancy.test.ts",
+    "test:roles": "node src/cli.ts generate && tsc -b && APP_ENV=test node --test tests/roles.test.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "@whytide/platform": "workspace:*",
+    "prisma": "7.10.0",
+    "zod": "4.6.7"
+  }
+}

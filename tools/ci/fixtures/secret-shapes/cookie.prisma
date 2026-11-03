@@ -1,0 +1,6 @@
+// A LinkedIn session cookie, which Whytide never stores (docs/rules/security.md §1), under any file.
+model SenderAccount {
+  id             String @id
+  workspace_id   String
+  session_cookie String @map("li_at")
+}

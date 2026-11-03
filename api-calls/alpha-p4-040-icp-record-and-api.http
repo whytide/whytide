@@ -1,0 +1,46 @@
+# icp's routes (core/modules/icp/README.md "Routes"): the workspace's one ICP and its six criteria.
+# A write sends the cookie, so it sends Origin: {{appOrigin}} too (the api's origin check).
+
+### GET /v1/workspaces/{workspaceId}/icp: the ICP; the first read creates it empty, with its six criteria
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PUT /v1/workspaces/{workspaceId}/icp: saves the ICP; a targeting change moves its version
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{
+  "name": "EMEA mid-market",
+  "titles": ["Head of Sales", "VP Sales"],
+  "seniorities": ["vp", "head"],
+  "industries": ["Software"],
+  "sizeRanges": ["51-200", "201-500"],
+  "countries": ["FR", "DE"],
+  "mustHaves": "Sells to finance teams.",
+  "disqualifiers": "Agencies and consultancies."
+}
+
+### GET /v1/workspaces/{workspaceId}/icp/criteria: the six criteria with their weights and flags
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/criteria
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PUT /v1/workspaces/{workspaceId}/icp/criteria: saves the six criteria; the weights sum to 100
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/criteria
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{
+  "criteria": [
+    { "key": "title_function", "weight": 30, "isMust": true, "enabled": true },
+    { "key": "seniority", "weight": 15, "isMust": false, "enabled": true },
+    { "key": "company_size", "weight": 10, "isMust": false, "enabled": true },
+    { "key": "industry", "weight": 15, "isMust": false, "enabled": true },
+    { "key": "location", "weight": 10, "isMust": true, "enabled": true },
+    { "key": "must_haves", "weight": 20, "isMust": false, "enabled": true }
+  ]
+}

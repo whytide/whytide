@@ -1,0 +1,37 @@
+{
+  "name": "@whytide/worker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Temporal host that runs the modules' workflows and agents",
+  "type": "module",
+  "scripts": {
+    "generate": "pnpm -F ai generate && node ../../modules/signals/scripts/kinds-generate.ts && node scripts/modules-generate.ts",
+    "modules:generate": "node scripts/modules-generate.ts",
+    "modules:build": "node scripts/modules-build.ts",
+    "build": "pnpm run generate && pnpm run modules:build && tsc -b",
+    "typecheck": "pnpm run generate && tsc -b",
+    "dev": "pnpm run build && node --watch src/main.ts",
+    "start": "node src/main.ts",
+    "test": "pnpm run build && APP_ENV=test node --env-file-if-exists=../../../.env.local --test \"tests/*.test.ts\"",
+    "test:replay": "pnpm run build && APP_ENV=test node --env-file-if-exists=../../../.env.local scripts/replay.ts",
+    "lint": "node ../../../tools/lint/lint.ts .",
+    "smoke": "node --env-file-if-exists=../../../.env.local tests/smoke.ts",
+    "history:record": "node --env-file-if-exists=../../../.env.local scripts/history-record.ts",
+    "grounding-sample": "pnpm run build && node --env-file-if-exists=../../../.env.local scripts/grounding-sample.ts"
+  },
+  "dependencies": {
+    "@temporalio/activity": "1.24.0",
+    "@temporalio/client": "1.24.0",
+    "@temporalio/common": "1.24.0",
+    "@temporalio/worker": "1.24.0",
+    "@temporalio/workflow": "1.24.0",
+    "@whytide/ai": "workspace:*",
+    "@whytide/db": "workspace:*",
+    "@whytide/platform": "workspace:*",
+    "@whytide/providers": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@whytide/credits": "workspace:*"
+  }
+}

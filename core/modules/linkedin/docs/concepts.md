@@ -1,0 +1,13 @@
+# linkedin: concepts
+
+- **Sender account**: a user's own LinkedIn account in one workspace, a row of `sender_accounts`, connected through the provider's hosted page. One per user and workspace. Never a shared, rented or fake account, never a password or a cookie.
+- **Risk disclosure**: what the tester reads and acknowledges before Connect: Whytide reads business profile fields through their own account, at most the daily cap, inside their working hours, never sends anything, and LinkedIn may restrict an account it finds automated. The acknowledgment's time is stored; the api refuses a connect without it (`disclosure_required`).
+- **Status**: `pending` (waiting for the provider's webhook), `connected`, `credentials_required` (the user signs in again at the provider), `error`, `disconnected`. Only the provider's webhook, or the worker's refresh, sets `connected`.
+- **Status refresh**: the worker asks the provider for an account's status: every hour for each account with a reference, the catch-up for a webhook that never came, and at once for one account when its user presses Refresh status.
+- **Reference**: the provider's id of the account, what every read names. Sealed at rest for the workspace's organization, opened in the worker only; its hash finds the account when a webhook names it.
+- **Working hours**: local `HH:MM` start and end in the account's IANA time zone and the ISO days (1 is Monday) the reads may run on. The start is before the end, the days distinct, one at least.
+- **Daily read cap**: the reads a day at most, 100 by default: a profile counts one, a page of a post's engagers one. A member with `linkedin.manage` changes it on the screen, as the "Daily read limit", from 1 to `LINKEDIN_DAILY_READ_CAP_MAX` (250 by default), under a warning; the next reservation reads the new cap.
+- **Quota day**: the account's date in its time zone, `YYYY-MM-DD`; it turns at local midnight. Its usage row holds the reads reserved and the reads made (committed) that day.
+- **Window**: the working hours in the account's zone, open from `start` until before `end` on the working days. Reads run only inside it; outside, a reservation is refused with the next start.
+- **Reservation**: `count` reads held against the day's cap before they run, all or none, for an hour; committed with the reads made, or released. Past its hour, the next reservation of the day frees it.
+- **Action log**: a row per reservation (its answer), per read made and per status check: the kind (`read_engagers`, `read_profile`, `status_check`), the object (a post's URL or a person's id, never a profile's URL), the count and the outcome. The metric `linkedin.actions` counts the same by kind and outcome, never the object.

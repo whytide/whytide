@@ -1,0 +1,8 @@
+// Only the schemas named are skipped: a model of any other schema is checked.
+/// tenant
+model Snapshot {
+  id String @id
+
+  @@map("snapshots")
+  @@schema("crm")
+}

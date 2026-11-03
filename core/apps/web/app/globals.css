@@ -1,0 +1,12 @@
+/*
+ * The web host's one stylesheet (README "Styles"): Inter, served from this origin; Tailwind CSS 4 with
+ * the theme and the public classes of @whytide/ui; the classes Tailwind finds in the host, in the ui
+ * package and in every module's ui/. Logical properties only (tools/lint).
+ */
+@import "@fontsource-variable/inter/opsz.css";
+@import "tailwindcss";
+@import "@whytide/ui/theme.css";
+@import "@whytide/ui/components.css";
+@source "../../../packages/ui/components";
+@source "../../../packages/ui/dev";
+@source "../../../modules/*/ui/**/*.{ts,tsx}";

@@ -1,0 +1,27 @@
+// The table of core/modules/identity (its docs/data.md), alpha-p3-030; migration
+// 20261022100200_identity_invites. invites is a tenant table; allowSignIn reads an email's invites
+// across workspaces on a path of its own (identity's docs/security.md), which the index on email
+// serves. No foreign key to workspaces or users: Prisma would need the opposite relation fields in
+// tenancy.prisma; createInvite checks the workspace, and addMember checks it again at the first
+// sign-in. Hand-written SQL in the migration: invites_email_lowercase, a CHECK that keeps every
+// email lowercased, so that the unique (workspace_id, email) holds whatever the case it was typed in.
+
+/// tenant
+model Invite {
+  id          String         @id
+  workspaceId String         @map("workspace_id")
+  /// Lowercased: createInvite normalizes it, the CHECK refuses anything else.
+  /// pii
+  email       String
+  /// The membership's role at the first sign-in; Owner in alpha.
+  role        MembershipRole @default(Owner)
+  /// The user who invited; null for the invite command.
+  invitedBy   String?        @map("invited_by")
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  /// Set by the first sign-in that accepts it.
+  acceptedAt  DateTime?      @map("accepted_at") @db.Timestamptz()
+
+  @@unique([workspaceId, email])
+  @@index([email])
+  @@map("invites")
+}

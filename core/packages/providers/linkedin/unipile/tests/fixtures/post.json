@@ -1,0 +1,25 @@
+{
+  "object": "Post",
+  "provider": "LINKEDIN",
+  "id": "7000000000000000001",
+  "social_id": "urn:li:activity:7000000000000000001",
+  "share_url": "https://www.linkedin.com/posts/ada-example_fixture-activity-7000000000000000001-AbCd",
+  "date": "3w",
+  "parsed_datetime": "2026-09-30T08:00:00.000Z",
+  "text": "A synthetic post for the mapping tests.",
+  "reaction_counter": 4,
+  "comment_counter": 3,
+  "repost_counter": 0,
+  "impressions_counter": 120,
+  "author": {
+    "public_identifier": "ada-example",
+    "id": "fixture-member-ada",
+    "name": "Ada Example",
+    "is_company": false,
+    "headline": "Head of Growth at Example Ltd"
+  },
+  "permissions": { "can_post_comments": true, "can_react": true, "can_share": true },
+  "is_repost": false,
+  "mentions": [],
+  "attachments": []
+}

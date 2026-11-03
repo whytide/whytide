@@ -1,0 +1,6 @@
+# Written by `pnpm web:routes` (README "Routes") and by Next.js, never committed: the modules' pages,
+# public ones included, the development gallery and Next.js's type references.
+/app/w/\[workspace\]/(modules)/*/
+/app/(public)/
+/app/dev/
+/next-env.d.ts

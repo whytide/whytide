@@ -1,0 +1,181 @@
+/*
+ * The Whytide theme on Tailwind CSS 4 (README "Theme"): colours, type, shadows and motion as theme
+ * variables, so that `bg-surface`, `text-ink-muted` or `shadow-md` exist. Each colour holds its light
+ * and its dark value in `light-dark()`, which `color-scheme` resolves: the system's choice, or
+ * `data-theme="light"` or `"dark"` on <html> (the theme cookie, theme.ts) or on any element. A host's
+ * stylesheet imports it once, after `@import "tailwindcss"`; logical properties only (tools/lint).
+ */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:not([data-theme="light"], [data-theme="light"] *)) {
+      @slot;
+    }
+  }
+}
+
+@theme static {
+  --color-*: initial;
+  --color-white: #fff;
+  --color-black: #000;
+  /* Surfaces, from the page's canvas up to a menu; lines; text, each AA on every surface. */
+  --color-canvas: light-dark(#f3f5f8, #070b13);
+  --color-surface: light-dark(#fff, #0c121d);
+  --color-raised: light-dark(#fff, #131b28);
+  --color-muted: light-dark(#f1f3f7, #161f2d);
+  --color-hover: light-dark(#e8ecf2, #1b2535);
+  --color-line: light-dark(#e3e7ee, #222c3b);
+  --color-line-strong: light-dark(#848e9f, #64707f);
+  --color-ink: light-dark(#0e1525, #e7ecf3);
+  --color-ink-muted: light-dark(#556070, #9aa5b5);
+  --color-ink-subtle: light-dark(#6b7585, #8792a3);
+  /* The tide: one accent, deep in light and luminous in dark. */
+  --color-accent: light-dark(#0e7490, #22d3ee);
+  --color-accent-hover: light-dark(#155e75, #67e8f9);
+  --color-on-accent: light-dark(#fff, #052b33);
+  --color-accent-ink: light-dark(#0e7490, #5edcf0);
+  --color-accent-soft: light-dark(#e6f6f9, #0f2a33);
+  --color-focus: light-dark(#0891b2, #22d3ee);
+  /* The brand's gradient, the same in both themes: the logo mark and the sign-in panel. */
+  --color-tide-start: #22d3ee;
+  --color-tide-mid: #0891b2;
+  --color-tide-end: #4f46e5;
+  --color-danger: light-dark(#d92d20, #c9302c);
+  --color-danger-hover: light-dark(#b42318, #b42318);
+  --color-danger-ink: light-dark(#b42318, #fda29b);
+  --color-danger-soft: light-dark(#fef0ef, #2a1414);
+  --color-danger-line: light-dark(#fecdca, #5c2420);
+  --color-success-ink: light-dark(#067647, #75e0a7);
+  --color-success-soft: light-dark(#e7f8ef, #0c2a1e);
+  /* A lead's tiers: a word on a tint, with a dot. */
+  --color-hot-ink: light-dark(#b42318, #fda29b);
+  --color-hot-soft: light-dark(#feeceb, #3a1715);
+  --color-hot-dot: light-dark(#f04438, #f97066);
+  --color-warm-ink: light-dark(#93370d, #fec84b);
+  --color-warm-soft: light-dark(#fef4dc, #33240d);
+  --color-warm-dot: light-dark(#f79009, #fdb022);
+  --color-cool-ink: light-dark(#1849a9, #84caff);
+  --color-cool-soft: light-dark(#eaf2ff, #102440);
+  --color-cool-dot: light-dark(#2e90fa, #53b1fd);
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans--font-feature-settings: "cv11", "ss03";
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  --shadow-xs: 0 1px 2px light-dark(rgb(16 24 40 / 0.05), rgb(0 0 0 / 0.4));
+  --shadow-sm:
+    0 1px 3px light-dark(rgb(16 24 40 / 0.08), rgb(0 0 0 / 0.45)),
+    0 1px 2px -1px light-dark(rgb(16 24 40 / 0.06), rgb(0 0 0 / 0.4));
+  --shadow-md:
+    0 6px 16px -4px light-dark(rgb(16 24 40 / 0.1), rgb(0 0 0 / 0.5)),
+    0 2px 4px -2px light-dark(rgb(16 24 40 / 0.06), rgb(0 0 0 / 0.4));
+  --shadow-lg:
+    0 18px 40px -12px light-dark(rgb(16 24 40 / 0.2), rgb(0 0 0 / 0.65)),
+    0 4px 12px -4px light-dark(rgb(16 24 40 / 0.08), rgb(0 0 0 / 0.4));
+
+  /* Motion, 150 to 200 ms; all of it off under prefers-reduced-motion (below). */
+  --ease-snappy: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-pop: pop 160ms var(--ease-snappy);
+  --animate-rise: rise 200ms var(--ease-snappy);
+  --animate-fade: fade 200ms ease-out;
+  --animate-drawer: drawer 200ms var(--ease-snappy);
+  --animate-drawer-rtl: drawer-rtl 200ms var(--ease-snappy);
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+
+  @keyframes pop {
+    from {
+      opacity: 0;
+      scale: 0.96;
+    }
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      translate: 0 0.5rem;
+    }
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes drawer {
+    from {
+      translate: -100% 0;
+    }
+  }
+  @keyframes drawer-rtl {
+    from {
+      translate: 100% 0;
+    }
+  }
+  @keyframes shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -100% 0;
+    }
+  }
+}
+
+/* The sign-in panel's sky: the brand's light from two corners over the dark canvas. */
+@utility tide-glow {
+  background:
+    radial-gradient(
+      55% 45% at 90% 0%,
+      color-mix(in oklab, var(--color-tide-end) 40%, transparent),
+      transparent
+    ),
+    radial-gradient(
+      45% 40% at 5% 20%,
+      color-mix(in oklab, var(--color-tide-start) 22%, transparent),
+      transparent
+    ),
+    linear-gradient(var(--color-surface), var(--color-canvas));
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+  [data-theme="light"] {
+    color-scheme: light;
+  }
+  [data-theme="dark"] {
+    color-scheme: dark;
+  }
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-line);
+  }
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-size: var(--text-sm);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--color-accent) 22%, transparent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after,
+    ::backdrop {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

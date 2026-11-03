@@ -1,0 +1,98 @@
+{
+  "about": "The title rule of the hard filters in fifty pairs (docs/concepts.md, Titles): [a person's title, an ICP title, whether the person passes]. Each group shows one part of the rule; tests/hard-filters.test.ts runs every pair.",
+  "groups": [
+    {
+      "rule": "vice president, v.p., svp and evp are vp",
+      "pairs": [
+        ["VP Sales", "Vice President of Sales", true],
+        ["Vice-President, Sales", "VP Sales", true],
+        ["V.P. of Sales", "VP Sales", true],
+        ["SVP Sales", "VP Sales", true],
+        ["EVP, Global Sales", "VP Sales", true]
+      ]
+    },
+    {
+      "rule": "director and dir are head, wherever they stand: director of sales is head of sales",
+      "pairs": [
+        ["Director of Sales", "Head of Sales", true],
+        ["Sales Director, EMEA", "Head of Sales", true],
+        ["Dir. of Sales Ops", "Head of Sales Operations", true]
+      ]
+    },
+    {
+      "rule": "a chief officer is its letters: ceo, cto, cfo, coo, cmo, cro, cio, cpo",
+      "pairs": [
+        ["Chief Executive Officer", "CEO", true],
+        ["CTO", "Chief Technology Officer", true],
+        ["Chief Revenue Officer", "CRO", true],
+        ["Chief Marketing Officer (CMO)", "CMO", true]
+      ]
+    },
+    {
+      "rule": "a function's letters are its words: sdr, bdr, ae, bd, hr, gm, revops, ops, mgr, rep",
+      "pairs": [
+        ["SDR", "Sales Development Representative", true],
+        ["BDR", "Business Development Representative", true],
+        ["Senior AE", "Account Executive", true],
+        ["HR Manager", "Human Resources Manager", true],
+        ["Marketing Mgr", "Marketing Manager", true],
+        ["GM, EMEA", "General Manager", true],
+        ["Head of BD", "Head of Business Development", true],
+        ["RevOps Lead", "Revenue Operations", true],
+        ["Inside Sales Rep", "Sales Representative", true]
+      ]
+    },
+    {
+      "rule": "a title of several roles passes when one of them matches; co-founder is founder",
+      "pairs": [["Co-Founder & CEO", "Founder", true], ["Founder | CEO", "CEO", true]]
+    },
+    {
+      "rule": "seniority noise drops on both sides: senior, sr, snr, junior, jr, interim, acting",
+      "pairs": [
+        ["Senior Account Executive", "Account Executive", true],
+        ["Sr. Software Engineer", "Software Engineer", true],
+        ["Account Executive", "Senior Account Executive", true],
+        ["Interim CFO", "CFO", true],
+        ["Acting Head of Sales", "Head of Sales", true]
+      ]
+    },
+    {
+      "rule": "case, accents, punctuation, word order and extra words do not count",
+      "pairs": [
+        ["HEAD OF SALES", "head of sales", true],
+        ["Global Head of Sales", "Head of Sales", true],
+        ["Café Manager", "Cafe Manager", true],
+        ["Vice President, Sales & Marketing", "VP Marketing", true]
+      ]
+    },
+    {
+      "rule": "the tokens are a bag: every ICP token is there, so the assessment judges the role",
+      "pairs": [["Executive Assistant to the CEO", "CEO", true]]
+    },
+    {
+      "rule": "a title of noise only is no title: unknown, which passes to the assessment",
+      "pairs": [["Senior", "Head of Sales", true]]
+    },
+    {
+      "rule": "a missing token is a miss: functions and levels are never merged (RB-3.1.2)",
+      "pairs": [
+        ["Sales Development Representative", "Head of Sales", false],
+        ["Account Executive", "Head of Sales", false],
+        ["Account Manager", "Account Executive", false],
+        ["VP Marketing", "VP Sales", false],
+        ["VP Sales", "Head of Sales", false],
+        ["Sales Manager", "Head of Sales", false],
+        ["Vice President", "President", false],
+        ["CTO", "CEO", false],
+        ["Head of Marketing", "Head of Sales", false],
+        ["Software Engineer", "Sales Engineer", false],
+        ["Marketing Coordinator", "Marketing Manager", false],
+        ["Owner", "Founder", false],
+        ["Engineering Manager", "Head of Engineering", false],
+        ["Chief of Staff", "CEO", false],
+        ["Sales Associate", "Sales Representative", false],
+        ["HR Business Partner", "Head of HR", false]
+      ]
+    }
+  ]
+}

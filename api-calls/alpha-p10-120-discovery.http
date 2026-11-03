@@ -1,0 +1,35 @@
+# discovery's imports (core/modules/discovery/README.md "Routes"): a CSV of made-up LinkedIn profile
+# URLs uploaded and validated, the workspace's imports, one import, and its run in the worker. The
+# upload's answer has the job's id: put it in http-client.private.env.json as `importJobId` for the
+# last two requests. `pnpm http:run` sends a body as written and does not read a `< file` line: run
+# the upload from the REST Client or the HTTP Client. The run answers 202 with the job, running; a
+# second run answers 409 import_not_runnable, and GET …/imports/{job} gives the counts as it goes.
+
+### POST /v1/workspaces/{workspaceId}/discovery/imports: uploads a CSV and answers the job with its validation report
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/discovery/imports
+Content-Type: multipart/form-data; boundary=WhytideImportBoundary
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+--WhytideImportBoundary
+Content-Disposition: form-data; name="file"; filename="alpha-p5-030-sample.csv"
+Content-Type: text/csv
+
+< ./fixtures/alpha-p5-030-sample.csv
+--WhytideImportBoundary--
+
+### GET /v1/workspaces/{workspaceId}/discovery/imports: the workspace's imports, the newest first
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/discovery/imports
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/discovery/imports/{job}: one import, its report and its run's counts
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/discovery/imports/{{importJobId}}
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/discovery/imports/{job}/run: starts the validated job's run in the worker and answers the job, running
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/discovery/imports/{{importJobId}}/run
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}

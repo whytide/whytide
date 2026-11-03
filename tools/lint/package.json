@@ -1,0 +1,11 @@
+{
+  "name": "@whytide/lint",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The structural lint rules: module boundaries, frameworks, adapters, screens, egress, TODOs",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node tests/rules.test.ts"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "uid": "whytide-providers",
+  "title": "Whytide providers",
+  "description": "Calls through the ports' boundary: calls, errors and rate limits per adapter (deploy/docs/observability.md)",
+  "tags": ["whytide"],
+  "schemaVersion": 41,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Calls per second, by port and adapter",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (port, adapter) (rate(providers_calls_total[$__rate_interval]))",
+          "legendFormat": "{{port}} {{adapter}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors per second, by adapter and code",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (adapter, outcome) (rate(providers_calls_total{outcome!=\"ok\"}[$__rate_interval]))",
+          "legendFormat": "{{adapter}} {{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Rate limits per second, by adapter",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (port, adapter) (rate(providers_calls_total{outcome=~\".+_rate_limited\"}[$__rate_interval]))",
+          "legendFormat": "{{port}} {{adapter}}"
+        }
+      ]
+    }
+  ]
+}

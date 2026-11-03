@@ -1,0 +1,7 @@
+{
+  "core/packages/providers/app-mail/smtp": ["nodemailer"],
+  "core/packages/providers/auth/better-auth": ["better-auth"],
+  "core/packages/providers/files/s3": ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner"],
+  "core/packages/providers/linkedin/unipile": ["unipile-node-sdk"],
+  "core/packages/providers/llm/anthropic": ["@ai-sdk/anthropic", "@anthropic-ai/sdk"]
+}

@@ -1,0 +1,38 @@
+# linkedin's sender accounts (core/modules/linkedin/README.md "API"), under the workspace, and the
+# provider's webhook outside it. One variable besides the usual ones goes in
+# http-client.private.env.json: `accountId`, an id the list answers. Connect answers the hosted
+# link; the browser follows it. The webhook's body and signature are made up: the api answers them
+# 401 linkedin_webhook_invalid, as it does to anything the provider did not sign.
+
+### POST /v1/workspaces/{workspaceId}/linkedin/accounts/connect: the provider's hosted link for the signed-in user's own account, after the risk disclosure
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/connect
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "timeZone": "Europe/Paris", "acknowledged": true }
+
+### GET /v1/workspaces/{workspaceId}/linkedin/accounts: the workspace's sender accounts, the caller's marked `mine`
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PATCH /v1/workspaces/{workspaceId}/linkedin/accounts/{id}: the label, the time zone, the working hours or the daily read cap
+PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/{{accountId}}
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "label": "My LinkedIn", "timeZone": "Europe/Paris", "workingHours": { "start": "08:30", "end": "18:00", "days": [1, 2, 3, 4, 5] }, "dailyReadCap": 150 }
+
+### DELETE /v1/workspaces/{workspaceId}/linkedin/accounts/{id}: disconnects the account and forgets its reference; 204
+DELETE {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/{{accountId}}
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+### POST /v1/linkedin/webhooks/{provider}: the provider's signed account webhook, no session; 204, and this made-up one 401
+POST {{baseUrl}}/v1/linkedin/webhooks/fake
+Content-Type: application/json
+X-Linkedin-Fake-Signature: sha256=0000000000000000000000000000000000000000000000000000000000000000
+
+{ "type": "account.disconnected", "account": "fake-account-made-up" }

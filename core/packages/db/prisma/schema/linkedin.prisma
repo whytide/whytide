@@ -1,0 +1,122 @@
+// The table of core/modules/linkedin (its docs/data.md), alpha-p7-030; migration
+// 20261022182000_linkedin_sender_accounts. A tenant table: one row per user and workspace, the user's
+// own LinkedIn account through the provider's hosted authentication. The provider's account
+// reference is stored only envelope-encrypted (core/packages/platform "Secrets at rest"), with its
+// SHA-256 for the webhook's lookup across workspaces, which the index on the hash serves. No foreign
+// key to workspaces or users: Prisma would need the opposite relation fields in tenancy.prisma.
+
+/// tenant
+model SenderAccount {
+  id                       String              @id
+  workspaceId              String              @map("workspace_id")
+  ownerUserId              String              @map("owner_user_id")
+  label                    String
+  /// The adapter's name, PROVIDER_LINKEDIN at the connect: `fake` or `unipile`.
+  provider                 String
+  /// The envelope-encrypted account reference, null until connected and after a disconnect.
+  providerAccountRef       Bytes?              @map("provider_account_ref")
+  /// SHA-256 of `<provider>:<reference>`, hex: the webhook finds the row by it.
+  providerAccountRefHash   String?             @map("provider_account_ref_hash")
+  /// The pending hosted link's providerRef, which account.connected names; null once connected.
+  providerLinkRef          String?             @map("provider_link_ref")
+  status                   SenderAccountStatus @default(pending)
+  statusCheckedAt          DateTime?           @map("status_checked_at") @db.Timestamptz()
+  /// An IANA zone, the browser's at the connect.
+  timeZone                 String              @map("time_zone")
+  /// `{ start: "08:30", end: "18:00", days: [1, 2, 3, 4, 5] }`, local times, ISO days (1 is Monday).
+  workingHours             Json                @map("working_hours")
+  dailyReadCap             Int                 @default(100) @map("daily_read_cap")
+  disclosureAcknowledgedAt DateTime            @map("disclosure_acknowledged_at") @db.Timestamptz()
+  connectedAt              DateTime?           @map("connected_at") @db.Timestamptz()
+  disconnectedAt           DateTime?           @map("disconnected_at") @db.Timestamptz()
+
+  @@unique([workspaceId, ownerUserId])
+  @@unique([workspaceId, providerAccountRefHash])
+  @@index([providerAccountRefHash])
+  @@index([providerLinkRef])
+  @@map("sender_accounts")
+}
+
+enum SenderAccountStatus {
+  pending
+  connected
+  credentials_required
+  error
+  disconnected
+
+  @@map("sender_account_status")
+}
+
+// The read quota and the action log (core/modules/linkedin docs/data.md), alpha-p7-040; migration
+// 20261022191500_linkedin_quota_and_log, whose hand-written CHECKs hold the counts at zero or more.
+// The day's usage row is the lock reservations queue on (SELECT … FOR UPDATE); a reservation is a row
+// of its own, settled once, its hour swept lazily by the next reservation of the day.
+
+/// tenant
+model SenderQuotaUsage {
+  id              String @id
+  workspaceId     String @map("workspace_id")
+  senderAccountId String @map("sender_account_id")
+  /// The date in the account's time zone, `YYYY-MM-DD`: text, as the schema lint takes no @db.Date.
+  quotaDay        String @map("quota_day")
+  readsReserved   Int    @default(0) @map("reads_reserved")
+  readsCommitted  Int    @default(0) @map("reads_committed")
+
+  @@unique([workspaceId, senderAccountId, quotaDay])
+  @@map("sender_quota_usage")
+}
+
+/// tenant
+model SenderQuotaReservation {
+  id              String                       @id
+  workspaceId     String                       @map("workspace_id")
+  senderAccountId String                       @map("sender_account_id")
+  usageId         String                       @map("usage_id")
+  count           Int
+  /// The reads made, set by the commit.
+  committed       Int?
+  status          SenderQuotaReservationStatus @default(reserved)
+  expiresAt       DateTime                     @map("expires_at") @db.Timestamptz()
+  createdAt       DateTime                     @map("created_at") @db.Timestamptz()
+  settledAt       DateTime?                    @map("settled_at") @db.Timestamptz()
+
+  // The sweep: the day's open reservations past their hour.
+  @@index([workspaceId, usageId, status, expiresAt])
+  @@map("sender_quota_reservations")
+}
+
+enum SenderQuotaReservationStatus {
+  reserved
+  committed
+  released
+  expired
+
+  @@map("sender_quota_reservation_status")
+}
+
+/// tenant
+model SenderActionLog {
+  id              String           @id
+  workspaceId     String           @map("workspace_id")
+  senderAccountId String           @map("sender_account_id")
+  kind            SenderActionKind
+  /// A post's URL or a person's id, never the profile URL of an unknown person. A post URL names
+  /// its author.
+  /// pii
+  objectRef       String?          @map("object_ref")
+  count           Int
+  /// `reserved`, a refusal's code, `ok` or the read's error code.
+  outcome         String
+  at              DateTime         @db.Timestamptz()
+
+  @@index([workspaceId, senderAccountId, at])
+  @@map("sender_action_log")
+}
+
+enum SenderActionKind {
+  read_engagers
+  read_profile
+  status_check
+
+  @@map("sender_action_kind")
+}

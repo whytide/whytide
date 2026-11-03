@@ -1,0 +1,16 @@
+.a {
+  margin-left: 0;
+  padding-right: 1px;
+  border-top-width: 1px;
+  border-bottom-left-radius: 2px;
+  scroll-margin-top: 0;
+}
+
+@media (min-width: 40rem) {
+  .a > .b {
+    right: 0;
+    text-align: left;
+    float: right !important;
+    clear: left;
+  }
+}

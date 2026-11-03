@@ -1,0 +1,44 @@
+// The table of core/modules/discovery (its docs/data.md), alpha-p5-030; migration
+// 20261022170000_discovery_import_jobs. import_jobs is a tenant table: one row per uploaded CSV,
+// written once the file is read and stored, with the report of its validation. The file itself is
+// in the files port under w/<workspace_id>/imports/<id>.csv; no cell of it is copied here.
+
+/// tenant
+model ImportJob {
+  id          String          @id
+  workspaceId String          @map("workspace_id")
+  /// The whole key of the file in the files port: w/<workspace_id>/imports/<id>.csv.
+  fileKey     String          @map("file_key")
+  /// The file's name as uploaded, without its folders, 255 characters at most.
+  fileName    String          @map("file_name")
+  status      ImportJobStatus
+  /// Data rows, the header aside.
+  rowCount    Int             @map("row_count")
+  validCount  Int             @map("valid_count")
+  errorCount  Int             @map("error_count")
+  /// The first 100 row errors in row order, [{ row, code }]: line numbers and codes only.
+  report      Json
+  /// What the run did (alpha-p5-040); null until it runs.
+  counts      Json?
+  /// The user who uploaded the file.
+  createdBy   String          @map("created_by")
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz()
+  /// When the run ended (alpha-p5-040); null until then.
+  finishedAt  DateTime?       @map("finished_at") @db.Timestamptz()
+
+  @@index([workspaceId, createdAt])
+  @@map("import_jobs")
+}
+
+/// An import's state. The upload writes validated, with at least one valid row, or invalid, with
+/// none; the run (alpha-p5-040) running, done and failed; nothing writes uploaded yet.
+enum ImportJobStatus {
+  uploaded
+  validated
+  invalid
+  running
+  done
+  failed
+
+  @@map("import_job_status")
+}

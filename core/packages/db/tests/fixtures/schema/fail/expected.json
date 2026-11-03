@@ -1,0 +1,9 @@
+{
+  "unmapped-table.prisma": ["table-map"],
+  "camel-table.prisma": ["table-map"],
+  "unmapped-column.prisma": ["column-map", "column-map"],
+  "timestamp.prisma": ["timestamptz", "timestamptz"],
+  "uuid-id.prisma": ["id-string-no-default"],
+  "int-id.prisma": ["id-string-no-default"],
+  "vendor-id-column.prisma": ["provider-refs", "provider-refs"]
+}

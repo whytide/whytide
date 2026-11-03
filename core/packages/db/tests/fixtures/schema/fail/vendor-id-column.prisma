@@ -1,0 +1,9 @@
+/// tenant
+model SenderAccount {
+  id               String @id
+  workspaceId      String @map("workspace_id")
+  unipileAccountId String @map("unipile_account_id")
+  stripeCustomerId String @map("stripe_customer_id")
+
+  @@map("sender_accounts")
+}

@@ -1,0 +1,12 @@
+# contacts' person routes (core/modules/contacts/README.md "Routes"): a member's session, contacts.read.
+# `personId` is a person of your workspace: put it in http-client.private.env.json with your workspaceId.
+
+### GET /v1/workspaces/{workspaceId}/contacts/persons: the workspace's people, newest first, 2 a page; pass the answer's nextCursor as cursor for the next page
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/persons?limit=2
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/contacts/persons/{id}: one person, business fields and the provenance of each; 404 person_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/persons/{{personId}}
+Accept: application/json
+Cookie: {{sessionCookie}}

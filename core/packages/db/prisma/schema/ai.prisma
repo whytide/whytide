@@ -1,0 +1,78 @@
+// The tables of core/packages/ai (core/packages/ai/README.md).
+
+// alpha-p1-140 (core/packages/ai/call): the decision record of every agent call (docs/rules/security.md
+// §6): the task, the model, the prompt version, the input hash, the output and the checks, the tokens,
+// the cost, the time. callAgent reads it as the result cache (status ok) and writes it with the call's
+// cost event in one transaction; one row per key, an ai_failed row replaced by the next call of the key
+// (README "Decision records"). raw_prompt and raw_output are kept until raw_purge_after
+// (AI_RAW_RETENTION_DAYS), when purgeRawRecords() nulls them in every workspace, through the index on
+// raw_purge_after (alpha-p1-145). Migrations: 20261021222216_ai_decision_records,
+// 20261022100000_ai_raw_purge_index.
+/// tenant
+model DecisionRecord {
+  id            String         @id
+  workspaceId   String         @map("workspace_id")
+  /// The agent task, `<module>.<agent>`.
+  task          String
+  /// What the call was about, a person id or another id the caller names.
+  subjectRef    String         @map("subject_ref")
+  modelId       String         @map("model_id")
+  promptVersion Int            @map("prompt_version")
+  /// sha256, in hex, of the parsed input as canonical JSON.
+  inputHash     String         @map("input_hash")
+  status        DecisionStatus
+  /// The validated output; null when the call ended ai_failed.
+  output        Json?
+  /// Each failed check of each attempt, `{ attempt, reason, issues }`; alpha-p1-145 adds the task's gates.
+  gates         Json
+  /// The model time of the attempts, added up.
+  latencyMs     Int            @map("latency_ms")
+  inputTokens   Int            @map("input_tokens")
+  outputTokens  Int            @map("output_tokens")
+  /// The call's cost at the price list's prices, its cost event's unit_cost.
+  costCredits   Decimal        @map("cost_credits")
+  attempts      Int
+  /// The last attempt's user message as sent; the system prompt is the prompt file at prompt_version.
+  rawPrompt     String?        @map("raw_prompt")
+  /// The last attempt's answer as the model gave it.
+  rawOutput     String?        @map("raw_output")
+  rawPurgeAfter DateTime       @map("raw_purge_after") @db.Timestamptz()
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+
+  @@unique([workspaceId, task, subjectRef, inputHash, modelId, promptVersion])
+  @@index([rawPurgeAfter])
+  @@map("decision_records")
+}
+
+// alpha-p10-050 (core/packages/ai/grounding-sample): a person's reading of the weekly grounding
+// sample, one row per workspace and ISO week, a second reading replacing the first: the why bullets
+// and drafts the sample held, the invented facts found, and who read it. Migration:
+// 20261027150000_ai_grounding_samples.
+/// tenant
+model GroundingSample {
+  id            String   @id
+  workspaceId   String   @map("workspace_id")
+  /// The ISO week drawn, `2026-W43`.
+  week          String
+  whyCount      Int      @map("why_count")
+  draftCount    Int      @map("draft_count")
+  inventedFacts Int      @map("invented_facts")
+  /// The reviewer's user id.
+  reviewedBy    String   @map("reviewed_by")
+  reviewedAt    DateTime @default(now()) @map("reviewed_at") @db.Timestamptz()
+
+  @@unique([workspaceId, week])
+  @@map("grounding_samples")
+}
+
+enum DecisionStatus {
+  ok
+  ai_failed
+
+  @@map("decision_status")
+}
+
+// alpha-p1-135: Mastra's storage lives in the schema `mastra`, which Prisma does not manage: the
+// migration creates the schema and lets `app` create in it, and Mastra creates its own tables there
+// when the worker starts (core/packages/ai/README.md "The Mastra instance"):
+//   prisma/migrations/20261022093000_ai_mastra_schema/migration.sql

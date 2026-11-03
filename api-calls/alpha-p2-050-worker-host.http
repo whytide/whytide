@@ -1,0 +1,5 @@
+# The worker host's health server (core/apps/worker/README.md "Health"): on 127.0.0.1 only, no session.
+
+### GET /health: 200 with `ok` while Temporal answers and the worker runs, 503 with `failing` otherwise
+GET {{workerHealthUrl}}/health
+Accept: application/json

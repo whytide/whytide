@@ -1,0 +1,20 @@
+# The fixture module's routes (tests/fixtures/module), which the api mounts in its tests only:
+# tests/openapi.test.ts runs this file against its api with the dev environment of api-calls/.
+
+### GET /v1/workspaces/{workspaceId}/fixture: the tenant the handler runs in
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/fixture
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/fixture: counts the items of a valid body
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/fixture
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "name": "example", "items": [{ "qty": 2 }, { "qty": 3 }] }
+
+### GET /v1/workspaces/{workspaceId}/fixture/{name}: greets a fixture by its name
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/fixture/example?greeting=hi
+Accept: application/json
+Cookie: {{sessionCookie}}

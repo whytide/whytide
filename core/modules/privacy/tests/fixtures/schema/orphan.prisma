@@ -1,0 +1,11 @@
+// A fixture of tests/tenancy.test.ts, never migrated: a tenant table with a person_id in module
+// `orphan`, which registers no eraser, so the pipeline check fails naming the table.
+
+/// tenant
+model OrphanNote {
+  id          String @id
+  workspaceId String @map("workspace_id")
+  personId    String @map("person_id")
+
+  @@map("orphan_notes")
+}

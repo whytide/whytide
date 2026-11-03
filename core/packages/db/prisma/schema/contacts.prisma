@@ -1,0 +1,242 @@
+// The tables of core/modules/contacts (its docs/data.md), alpha-p5-010 and alpha-p5-020; migrations
+// 20261022150500_contacts_initial and 20261022180000_contacts_leads. Four tenant tables: a person
+// exists once per workspace, by its normalized LinkedIn URL; a company of the workspace; the salted
+// hashes that are all that is left of a rejected candidate or an erased person; and a person's one
+// lead. Business profile fields only: no column for an email, a phone, a photo, pronouns, gender, age
+// or a special category (contacts' tests/schema.test.ts). A `/// pii: <class>` line marks every
+// column that holds a person's data, with its class from the module's domain/fields.ts. Every
+// person-data value has its entry in field_provenance. Hand-written SQL in the migrations:
+// persons_linkedin_url_lowercase, and person_hashes_expiry, which keeps an erased hash from ever
+// expiring and a rejected candidate's from never expiring. A row links another table's by the pair
+// (workspace_id, id), so the database refuses a link across workspaces. alpha-p9-040 adds a fifth,
+// review_decisions (migration 20261022210000_contacts_review_decisions), the review decisions on a
+// lead, which its REVOKE UPDATE from app keeps append-only.
+
+/// tenant
+model Person {
+  id              String            @id
+  workspaceId     String            @map("workspace_id")
+  /// https://linkedin.com/in/<slug>, lowercased (contacts' domain/linkedin-url.ts).
+  /// pii: business_contact
+  linkedinUrl     String            @map("linkedin_url")
+  /// The provider's member id, keyed by adapter name: { "unipile": "…" }.
+  /// pii: business_contact
+  providerRefs    Json?             @map("provider_refs")
+  /// pii: business_contact
+  firstName       String?           @map("first_name")
+  /// pii: business_contact
+  lastName        String?           @map("last_name")
+  /// pii: business_contact
+  headline        String?
+  /// pii: business_contact
+  title           String?
+  /// The employer as the source names it; company_id links the workspace's company record.
+  /// pii: business_contact
+  companyName     String?           @map("company_name")
+  companyId       String?           @map("company_id")
+  /// pii: business_contact
+  locationText    String?           @map("location_text")
+  /// ISO 3166-1 alpha-2, derived from location_text when it names a country.
+  /// pii: business_contact
+  locationCountry String?           @map("location_country")
+  /// { field: { source, provider, at } } for every field that has a value.
+  fieldProvenance Json              @map("field_provenance")
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
+  // Restrict: SET NULL on a key with workspace_id would empty workspace_id too; nothing deletes a company.
+  company         WorkspaceCompany? @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+  lead            Lead?
+
+  @@unique([workspaceId, linkedinUrl])
+  @@unique([workspaceId, id])
+  @@index([workspaceId, companyId])
+  @@map("persons")
+}
+
+// A company of the workspace, unique by its normalized LinkedIn page or its domain.
+/// tenant
+model WorkspaceCompany {
+  id              String   @id
+  workspaceId     String   @map("workspace_id")
+  name            String
+  /// Lowercased, without the scheme, www. or a path.
+  domain          String?
+  /// https://linkedin.com/company/<slug>, lowercased.
+  linkedinUrl     String?  @map("linkedin_url")
+  industry        String?
+  sizeRange       String?  @map("size_range")
+  /// ISO 3166-1 alpha-2.
+  country         String?
+  providerRefs    Json?    @map("provider_refs")
+  fieldProvenance Json     @map("field_provenance")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  persons         Person[]
+
+  @@unique([workspaceId, linkedinUrl])
+  @@unique([workspaceId, domain])
+  @@unique([workspaceId, id])
+  @@map("workspace_companies")
+}
+
+// What is left of a rejected candidate (90 days) or an erased person (for good): the HMAC of a
+// normalized LinkedIn URL or provider id under HASH_SALT, never a row in persons.
+/// tenant
+model PersonHash {
+  id          String         @id
+  workspaceId String         @map("workspace_id")
+  /// Hex HMAC-SHA-256; pseudonymous.
+  /// pii: personal
+  hash        String
+  kind        PersonHashKind
+  /// Aggregate drop reasons, { code: count }; never a value about the person.
+  dropReasons Json           @default("{}") @map("drop_reasons")
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  /// created_at plus 90 days for a rejected candidate; null for an erased person.
+  expiresAt   DateTime?      @map("expires_at") @db.Timestamptz()
+
+  @@unique([workspaceId, hash])
+  @@index([workspaceId, expiresAt])
+  @@map("person_hashes")
+}
+
+enum PersonHashKind {
+  rejected_candidate
+  erased
+
+  @@map("person_hash_kind")
+}
+
+// A person's one lead in the workspace, keyed on the person, so that a second source can never make a
+// second lead (architecture §7.3): where it came from, and what qualification decided (F04 §4.2). The
+// person's fields are joined at read time, never copied here.
+/// tenant
+model Lead {
+  personId               String                  @id @map("person_id")
+  workspaceId            String                  @map("workspace_id")
+  qualificationStatus    LeadQualificationStatus @default(pending) @map("qualification_status")
+  /// The first source's kind.
+  sourceLabel            LeadSourceKind          @map("source_label")
+  /// [{ kind, ref, at }], one per source, in the order they came; ref is the id of what brought it.
+  sources                Json
+  firstSourceAt          DateTime                @map("first_source_at") @db.Timestamptz()
+  /// 0 to 100.
+  fitScore               Int?                    @map("fit_score")
+  fitConfidence          LeadFitConfidence?      @map("fit_confidence")
+  tier                   LeadTier?
+  currentScoreSnapshotId String?                 @map("current_score_snapshot_id")
+  /// Up to three bullets, [{ key, params }]; params may quote the profile.
+  /// pii: business_contact
+  why                    Json                    @default("[]")
+  /// A code: title_mismatch, country_mismatch, size_mismatch.
+  hardFilterReason       String?                 @map("hard_filter_reason")
+  /// A code: a disqualifier, insufficient_credits, the reason of ai_failed.
+  statusReason           String?                 @map("status_reason")
+  icpVersionScored       Int?                    @map("icp_version_scored")
+  /// Milliseconds, as JavaScript reads them, so that the newest-first cursor matches the row exactly.
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                @updatedAt @map("updated_at") @db.Timestamptz()
+  /// The latest review decision and its time (review_decisions); null until the first.
+  reviewStatus           ReviewDecisionKind?     @map("review_status")
+  reviewedAt             DateTime?               @map("reviewed_at") @db.Timestamptz(3)
+  person                 Person                  @relation(fields: [workspaceId, personId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict)
+  reviewDecisions        ReviewDecision[]
+
+  @@unique([workspaceId, personId])
+  @@index([workspaceId, qualificationStatus, fitScore])
+  @@index([workspaceId, createdAt])
+  @@map("leads")
+}
+
+enum LeadQualificationStatus {
+  pending
+  hard_filtered
+  qualified
+  not_qualified
+  needs_review
+  ai_failed
+
+  @@map("lead_qualification_status")
+}
+
+enum LeadSourceKind {
+  signal
+  imported
+
+  @@map("lead_source_kind")
+}
+
+enum LeadFitConfidence {
+  high
+  medium
+  low
+
+  @@map("lead_fit_confidence")
+}
+
+enum LeadTier {
+  hot
+  warm
+  cool
+
+  @@map("lead_tier")
+}
+
+// A tester's decision on a lead (alpha-p9-040): Good lead with a sentence, or Not a fit with one of
+// the fifteen reason codes, and the lead's snapshot, fit and tier at the time. Append-only: app may
+// not update a row (the migration's REVOKE), and a lead with decisions is not deleted (Restrict)
+// unless contacts' erasePerson deletes them first.
+/// tenant
+model ReviewDecision {
+  id             String             @id
+  workspaceId    String             @map("workspace_id")
+  personId       String             @map("person_id")
+  decision       ReviewDecisionKind
+  /// Not a fit's code; null for a good lead.
+  reasonCode     ReviewReasonCode?  @map("reason_code")
+  /// The tester's words; 500 at most, required for `other`.
+  /// pii: business_contact
+  reasonText     String?            @map("reason_text")
+  /// The tester's words on a good lead; 200 at most.
+  /// pii: business_contact
+  goodReasonText String?            @map("good_reason_text")
+  snapshotId     String?            @map("snapshot_id")
+  fitAtDecision  Int?               @map("fit_at_decision")
+  tierAtDecision LeadTier?          @map("tier_at_decision")
+  /// The principal's user id.
+  decidedBy      String             @map("decided_by")
+  decidedAt      DateTime           @default(now()) @map("decided_at") @db.Timestamptz(3)
+  lead           Lead               @relation(fields: [workspaceId, personId], references: [workspaceId, personId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([workspaceId, personId, decidedAt])
+  @@index([workspaceId, decidedAt])
+  @@map("review_decisions")
+}
+
+enum ReviewDecisionKind {
+  good_lead
+  not_a_fit
+
+  @@map("review_decision")
+}
+
+// RB-5.2.2: The ten common codes, then the five of F04 §9.
+enum ReviewReasonCode {
+  company_competitor
+  company_wrong_industry_or_type
+  company_wrong_size
+  company_wrong_location
+  contact_wrong_title_or_function
+  contact_wrong_seniority
+  contact_known_or_duplicate
+  data_incorrect_or_outdated
+  signal_not_relevant
+  other
+  company_existing_customer
+  company_in_open_deal
+  contact_not_decision_maker
+  contact_left_company
+  bad_timing
+
+  @@map("review_reason_code")
+}

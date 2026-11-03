@@ -1,0 +1,166 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "whytide",
+      "folder": "Whytide",
+      "interval": "10s",
+      "rules": [
+        {
+          "uid": "whytide-worker-health",
+          "title": "Worker health failing",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": { "from": 300, "to": 0 },
+              "datasourceUid": "prometheus",
+              "model": { "refId": "A", "instant": true, "expr": "min(worker_health)" }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [{ "evaluator": { "type": "lt", "params": [1] } }]
+              }
+            }
+          ],
+          "noDataState": "Alerting",
+          "execErrState": "Error",
+          "for": "1m",
+          "annotations": {
+            "summary": "A worker fails its health check, or no worker has reported for five minutes"
+          }
+        },
+        {
+          "uid": "whytide-dead-letters",
+          "title": "Dead letters above zero",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": { "from": 300, "to": 0 },
+              "datasourceUid": "prometheus",
+              "model": { "refId": "A", "instant": true, "expr": "max(outbox_dead_rows)" }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [{ "evaluator": { "type": "gt", "params": [0] } }]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "annotations": {
+            "summary": "Outbox rows are dead-lettered: find them by dead_at, fix the cause, replayDeadLetter"
+          }
+        },
+        {
+          "uid": "whytide-ai-failed",
+          "title": "ai_failed above ten percent over an hour",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": { "from": 3600, "to": 0 },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "instant": true,
+                "expr": "sum(increase(ai_calls_total{outcome=\"ai_failed\"}[1h])) / sum(increase(ai_calls_total{outcome!=\"cached\"}[1h]))"
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [{ "evaluator": { "type": "gt", "params": [0.1] } }]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "annotations": {
+            "summary": "More than one agent call in ten ended ai_failed in the last hour"
+          }
+        },
+        {
+          "uid": "whytide-provider-errors",
+          "title": "Provider error rate above ten percent over fifteen minutes",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": { "from": 900, "to": 0 },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "instant": true,
+                "expr": "sum by (port, adapter) (increase(providers_calls_total{outcome!=\"ok\"}[15m])) / sum by (port, adapter) (increase(providers_calls_total[15m]))"
+              }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [{ "evaluator": { "type": "gt", "params": [0.1] } }]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "annotations": {
+            "summary": "More than one call in ten to an adapter failed in the last fifteen minutes"
+          }
+        },
+        {
+          "uid": "whytide-outbox-lag",
+          "title": "Outbox lag above five minutes",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": { "from": 300, "to": 0 },
+              "datasourceUid": "prometheus",
+              "model": { "refId": "A", "instant": true, "expr": "max(outbox_lag_seconds)" }
+            },
+            {
+              "refId": "B",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [{ "evaluator": { "type": "gt", "params": [300] } }]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "annotations": {
+            "summary": "The oldest due outbox row has waited more than five minutes"
+          }
+        }
+      ]
+    }
+  ]
+}

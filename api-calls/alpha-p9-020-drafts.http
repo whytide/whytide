@@ -1,0 +1,41 @@
+# messaging's drafts (core/modules/messaging/README.md "Routes"): a member's session, drafts.read for
+# the reads, drafts.write for the rest. `personId`, a person of your workspace with a lead, and
+# `draftId`, the id the first request answers, go in http-client.private.env.json. The two POSTs are
+# @Idempotent(): their Idempotency-Key is an example UUID; another one asks again, the same one
+# answers the first answer again for a day. A write sends the cookie, so it sends Origin too.
+
+### POST /v1/workspaces/{workspaceId}/messaging/leads/{personId}/drafts: asks for a draft of the lead on the channel; 202 with the draft, drafting, which the worker writes, and its maxCharacters; 404 dossier_lead_not_found
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/leads/{{personId}}/drafts
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000921
+
+{ "channel": "linkedin_note" }
+
+### GET /v1/workspaces/{workspaceId}/messaging/drafts/{id}: a draft, its status, plan, text and edit, generation record and gate results, and the channel's limit now, maxCharacters; 404 draft_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/drafts/{{draftId}}
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/messaging/leads/{personId}/drafts: the lead's drafts, newest first, each with its maxCharacters
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/leads/{{personId}}/drafts
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PATCH /v1/workspaces/{workspaceId}/messaging/drafts/{id}: saves the member's own text, at most the channel's limit; 200 with the draft, edited, and its maxCharacters; 409 draft_not_editable while it is being written
+PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/drafts/{{draftId}}
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "editedText": "Hi, a short question about how your team follows up on warm leads." }
+
+### POST /v1/workspaces/{workspaceId}/messaging/drafts/{id}/regenerate: asks for a new draft of the same lead and channel, unlike this one, which is kept; 202 with the new draft, drafting, and its maxCharacters
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/drafts/{{draftId}}/regenerate
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000922

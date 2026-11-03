@@ -1,0 +1,34 @@
+// The models of the tenant model list (tests/tenant.test.ts): one marked tenant, one unmarked with a
+// workspace_id column mapped with the named argument, one marked without the column, one global,
+// one relation between the global model and the tenant one, and a model in sub/.
+/// tenant
+model Person {
+  id          String  @id
+  workspaceId String  @map("workspace_id")
+  planId      String? @map("plan_id")
+  plan        Plan?   @relation(fields: [planId], references: [id])
+
+  @@index([workspaceId])
+  @@map("persons")
+}
+
+model Draft {
+  id   String @id
+  wsId String @map(name: "workspace_id")
+
+  @@map("drafts")
+}
+
+/// tenant
+model Lead {
+  id String @id
+
+  @@map("leads")
+}
+
+model Plan {
+  id      String   @id
+  persons Person[]
+
+  @@map("plans")
+}

@@ -1,0 +1,43 @@
+# Secret scanning (docs/rules/security.md §4, §7): gitleaks' default rules plus the shapes of the
+# secrets this project handles. The pre-commit hook runs it on every commit, the step secrets:scan on
+# the branch's history (tools/ci/README.md "Supply chain"). The only allowlist is the fixtures the
+# tests plant; never widen it to make a commit pass.
+title = "whytide"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "whytide-anthropic-api-key"
+description = "An Anthropic API key, any key kind"
+regex = '''sk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_-]{80,}'''
+keywords = ["sk-ant-"]
+
+[[rules]]
+id = "whytide-unipile-key"
+description = "A Unipile API key or webhook secret, by its variable"
+regex = '''(?i)UNIPILE_(?:API_KEY|WEBHOOK_SECRET)\s*[=:]\s*['"]?([A-Za-z0-9._+/=-]{20,})'''
+secretGroup = 1
+keywords = ["unipile_"]
+
+[[rules]]
+id = "whytide-app-master-key"
+description = "The app master key, 32 bytes in base64, by its variable"
+regex = '''(?i)APP_MASTER_KEY(?:_PREVIOUS)?\s*[=:]\s*['"]?([A-Za-z0-9+/]{43}=)'''
+secretGroup = 1
+keywords = ["app_master_key"]
+
+[[rules]]
+id = "whytide-postgres-url-password"
+description = "A Postgres URL with a password in it"
+regex = '''postgres(?:ql)?://[^:/\s'"]+:([^@\s'"]+)@[^\s'"]+'''
+secretGroup = 1
+keywords = ["postgres"]
+[[rules.allowlists]]
+description = "The development stack's own password on a local address (deploy/.env.example)"
+regexTarget = "line"
+regexes = ['''postgres(?:ql)?://[^:/\s'"]+:whytide@(?:127\.0\.0\.1|localhost|postgres)[:/]''']
+
+[allowlist]
+description = "The fixture secrets the tests plant elsewhere to prove the scan (tools/ci/tests)"
+paths = ['''^tools/ci/fixtures/secrets/''']

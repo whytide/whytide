@@ -1,0 +1,17 @@
+/* margin-left: 0; in a comment is not a declaration */
+.a:hover {
+  margin-inline-start: var(--wt-space-2);
+  padding-block: 0;
+  border-inline-end: 1px solid;
+  inset-inline-start: 0;
+  text-align: start;
+  float: inline-end;
+  clear: both;
+  content: "left: 0; text-align: left";
+}
+
+@media (min-width: 40rem) {
+  .a {
+    margin: 0;
+  }
+}

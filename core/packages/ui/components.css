@@ -1,0 +1,56 @@
+/*
+ * The public classes of @whytide/ui (README "Theme"): the few a module may write in its own markup
+ * too, defined once on the theme with Tailwind's @apply, and used by the components themselves.
+ * Every other style is a Tailwind class in its component. Imported after theme.css, in the same
+ * stylesheet; logical properties only (tools/lint).
+ */
+@layer components {
+  .wt-link {
+    @apply rounded-xs font-medium text-accent-ink underline decoration-accent-ink/35 underline-offset-[3px] transition-colors hover:decoration-current;
+  }
+
+  .wt-spinner {
+    @apply inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-current border-e-transparent;
+  }
+
+  .wt-loading-state {
+    @apply inline-flex items-center gap-2 text-ink-muted;
+  }
+
+  .wt-visually-hidden {
+    @apply sr-only;
+  }
+
+  .wt-field {
+    @apply grid min-w-64 content-start gap-1.5;
+  }
+
+  .wt-field > label {
+    @apply text-sm font-medium text-ink;
+  }
+
+  .wt-field__control {
+    @apply h-9 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink shadow-xs transition-[border-color,box-shadow] placeholder:text-ink-subtle hover:border-ink-muted focus-visible:border-focus focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-focus/25 aria-invalid:border-danger-ink aria-invalid:focus-visible:ring-danger-ink/20 disabled:cursor-not-allowed disabled:bg-muted disabled:text-ink-muted;
+  }
+
+  textarea.wt-field__control {
+    @apply h-auto min-h-24 py-2 [resize:block];
+  }
+
+  input[type="file"].wt-field__control {
+    @apply h-auto py-1.5 ps-1.5 file:me-3 file:rounded-md file:bg-muted file:px-3 file:py-1 file:text-sm file:font-medium file:text-ink;
+  }
+
+  .wt-field__hint,
+  .wt-field__error {
+    @apply text-xs text-ink-muted;
+  }
+
+  .wt-field__error {
+    @apply font-medium text-danger-ink;
+  }
+
+  .wt-error-state {
+    @apply grid justify-items-start gap-1.5 rounded-xl border border-danger-line bg-danger-soft p-4 text-ink;
+  }
+}

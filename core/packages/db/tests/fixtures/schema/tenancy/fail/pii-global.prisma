@@ -1,0 +1,14 @@
+model Company {
+  id      String @id
+  /// pii
+  contact String?
+  /// pii:personal
+  owner   String?
+  /// PII
+  phone   String?
+  /// pii: business_contact
+  // the shared inbox, when known
+  inbox   String?
+
+  @@map("companies")
+}

@@ -1,0 +1,8 @@
+# linkedin's read quota (core/modules/linkedin/README.md "API"): an account's reads today over its
+# cap and its working-hours window. One variable besides the usual ones goes in
+# http-client.private.env.json: `accountId`, an id GET …/linkedin/accounts answers.
+
+### GET /v1/workspaces/{workspaceId}/linkedin/accounts/{id}/usage: the account's reads today, reserved and made, over its cap, and whether its window is open
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/linkedin/accounts/{{accountId}}/usage
+Accept: application/json
+Cookie: {{sessionCookie}}
