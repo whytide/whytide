@@ -1,8 +1,11 @@
 // The sender's settle (docs/flows.md "The sender", step 8), in one tenant run, on linkedin's answer.
 // A send that went out: the credits committed first (credits takes the organization's lock first),
 // then linkedin's slot; the step `succeeded` at `at`, its next step due by business days in the
-// sender's zone, the touch recorded, campaigns.step_sent published once, and after the last step the
-// enrollment completed and the lead finished. The person's rows are locked in the order every stop
+// sender's zone, by the delay of the enrollment's campaign version (gamma-p3-030), the touch
+// recorded, campaigns.step_sent published once, and after the last LinkedIn step the enrollment
+// completed and the lead finished, unless a fallback email is still open (gamma-p3-060); a
+// connection request makes the fallback's first email due FALLBACK_AFTER_DAYS after it went out
+// (../fallback/). The person's rows are locked in the order every stop
 // takes: the lead (only when the enrollment ends here), the enrollment, then the steps. A refusal
 // before the call (its slot freed by linkedin) frees the credits and puts the step back to be placed
 // again. beta-p4-040 (recover.ts): a check's answer, sent as a send that went out (linkedin
@@ -15,8 +18,13 @@ import { outboxWriter, tenantClient } from "@whytide/db";
 import { commitSend, findSendReservation } from "@whytide/linkedin";
 import { credits, creditsCodes, currentTenant, isAppError, publish } from "@whytide/platform";
 import { events } from "../../events.ts";
+import { versionSteps } from "../campaigns/reads.ts";
+import type { VersionStep } from "../campaigns/sequence.ts";
+import type { LinkedInAction } from "../constants.ts";
+import { dueFallback, fallbackKeys } from "../fallback/fallback.ts";
+import { linkedinActionType, linkedinSenderAccount } from "../steps/actions.ts";
 import { isSendRefusal } from "../steps/codes.ts";
-import { finishLead, lockEnrollment, timeZoneOf } from "../steps/skip.ts";
+import { endIfDone, lockEnrollment, timeZoneOf } from "../steps/skip.ts";
 import { nextDueAt } from "../template/due.ts";
 import { settleGone, settleWithdrawn } from "../withdraw/settle.ts";
 import { ACTION_REFUSALS, RUN_ENDING_REFUSALS } from "./constants.ts";
@@ -27,7 +35,8 @@ import { type Holds, releaseHolds, waitAgain } from "./release.ts";
 export type SendAnswer =
   | { readonly sent: true; readonly stepExecutionId: string }
   | { readonly refused: string; readonly retryAt: string | null }
-  | { readonly refused: string; readonly retryAfterSec?: number }
+  /** A port's error after the call; `reason` beside its code when linkedin's map keys a row by one. */
+  | { readonly refused: string; readonly reason?: string; readonly retryAfterSec?: number }
   /** linkedin_check_sent's (beta-p4-040): whether a step left `executing` went out. */
   | { readonly outcome: "sent" | "not_sent"; readonly stepExecutionId: string };
 export type Settled = {
@@ -45,6 +54,7 @@ const STEP = {
   personId: true,
   senderAccountId: true,
   templateId: true,
+  templateVersion: true,
   position: true,
   actionType: true,
 } as const;
@@ -110,7 +120,16 @@ async function settleSent(id: string, holds: Holds, at: Date) {
   // A step erased meanwhile: the holds settled, nothing else to write. A withdrawal ends its
   // enrollment rather than making a next step due (../withdraw/settle.ts, beta-p4-060).
   if (step?.actionType === "withdraw") await settleWithdrawn(step, at);
-  else if (step !== null) await succeed(step, at);
+  else if (step !== null) {
+    await succeed(
+      {
+        ...step,
+        senderAccountId: linkedinSenderAccount(step),
+        actionType: linkedinActionType(step),
+      },
+      at,
+    );
+  }
   return { uncharged };
 }
 
@@ -132,14 +151,18 @@ type SentStep = {
   readonly personId: string;
   readonly senderAccountId: string;
   readonly templateId: string;
+  readonly templateVersion: number;
   readonly position: number;
-  readonly actionType: "invite" | "message" | "withdraw";
+  readonly actionType: LinkedInAction;
 };
 
 /** The step `succeeded` and what follows it, under the locks the stops take (the file's header). */
 async function succeed(step: SentStep, at: Date): Promise<void> {
+  const steps = (await versionSteps(step.templateId, step.templateVersion)) ?? [];
+  // The next LinkedIn step: the fallback's emails are a chain of their own (../fallback/).
+  const linkedin = { notIn: fallbackKeys(steps) };
   const next = await tenantClient.stepExecution.findFirst({
-    where: { enrollmentId: step.enrollmentId, position: { gt: step.position } },
+    where: { enrollmentId: step.enrollmentId, position: { gt: step.position }, stepKey: linkedin },
     orderBy: { position: "asc" },
     select: { id: true, stepKey: true },
   });
@@ -150,7 +173,8 @@ async function succeed(step: SentStep, at: Date): Promise<void> {
     data: { status: "succeeded", executedAt: at, errorCode: null },
   });
   if (count === 0) return;
-  if (next !== null) await makeDue(step, next, at);
+  if (next !== null) await makeDue(step, next, at, steps);
+  if (step.actionType === "invite") await dueFallback(tenantClient, step.enrollmentId, steps, at);
   await touch(step.personId, at);
   const { workspaceId } = currentTenant();
   const { id: stepExecutionId, personId, actionType } = step;
@@ -160,17 +184,24 @@ async function succeed(step: SentStep, at: Date): Promise<void> {
     personId,
     actionType,
   });
-  if (next === null) await complete(step, at);
+  if (next === null) await endIfDone(tenantClient, step, at, SYSTEM);
 }
 
 /**
- * The next step due its delay after the send, in business days in the sender's zone (follow_up_1
- * three after message_1, follow_up_2 five after follow_up_1), if still `planned`; message_1 waits for
- * the acceptance, and an account linkedin no longer holds gives none.
+ * The next step due its delay in the enrollment's version after the send, in business days in the
+ * sender's zone (beta's follow_up_1 three after message_1, follow_up_2 five after follow_up_1), if
+ * still `planned`; message_1 waits for the acceptance, and an account linkedin no longer holds, or a
+ * version the workspace does not have, gives none.
  */
-async function makeDue(step: SentStep, next: { id: string; stepKey: string }, at: Date) {
+async function makeDue(
+  step: SentStep,
+  next: { id: string; stepKey: string },
+  at: Date,
+  steps: readonly VersionStep[],
+) {
   const timeZone = await timeZoneOf(step.senderAccountId);
-  const dueAt = timeZone === null ? null : nextDueAt(next.stepKey, at, timeZone);
+  if (timeZone === null) return;
+  const dueAt = nextDueAt(next.stepKey, at, timeZone, steps);
   if (dueAt === null) return;
   await tenantClient.stepExecution.updateMany({
     where: { id: next.id, status: "planned" },
@@ -185,12 +216,4 @@ async function touch(personId: string, at: Date): Promise<void> {
   } catch (error) {
     if (!(isAppError(error) && error.code === contactsErrors.person_not_found)) throw error;
   }
-}
-
-/** After the last step: the enrollment completed, if still active, and the lead finished. */
-async function complete(step: SentStep, at: Date): Promise<void> {
-  const where = { id: step.enrollmentId, status: "active" } as const;
-  const data = { status: "completed", endedAt: at } as const;
-  const { count } = await tenantClient.enrollment.updateMany({ where, data });
-  if (count === 1) await finishLead(step, SYSTEM);
 }

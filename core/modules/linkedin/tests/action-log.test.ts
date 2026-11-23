@@ -30,6 +30,8 @@ useSecretKeys(loadMasterKeys({ APP_MASTER_KEY: newMasterKey() }));
 const principal = servicePrincipal("linkedin_test");
 const PERSON = "per_01JABCDEFGHJKMNPQRSTVWXYZ0";
 const STEP = "sx_01JABCDEFGHJKMNPQRSTVWXYZ0";
+/** An inbox reply's message, which its send names in place of a step (gamma-p4-060). */
+const REPLY = "msg_01JABCDEFGHJKMNPQRSTVWXYZ0";
 type Tx = Parameters<Parameters<typeof withTenant>[1]>[0];
 
 /** A connected account of a new workspace, a run in it, and its log calls. */
@@ -82,9 +84,10 @@ test("the outcome CHECK holds exactly ACTION_OUTCOMES, and the database refuses 
   );
 });
 
-test("a send's row names its step execution, with its note on an invite; a profile URL, a person's id on a send and a note off an invite are refused", async () => {
+test("a send's row names its step execution, with its note on an invite, or an inbox reply's message; a profile URL, a person's id on a send and a note off an invite are refused", async () => {
   const { id, log } = await account();
   await log({ kind: "invite", objectRef: STEP, count: 1, outcome: "ok", withNote: true });
+  await log({ kind: "message", objectRef: REPLY, count: 1, outcome: "ok" });
   const refused = (fields: string[]) => ({ code: "read_input_invalid", details: { fields } });
   const profile = "https://www.linkedin.com/in/someone";
   const send = { kind: "invite", count: 1, outcome: "ok" } as const;
@@ -95,10 +98,14 @@ test("a send's row names its step execution, with its note on an invite; a profi
   );
   const read = { kind: "read_profile", count: 1, outcome: "ok", withNote: true } as const;
   await assert.rejects(log(read), refused(["withNote"]));
-  const rows = await app.senderActionLog.findMany({ where: { senderAccountId: id } });
+  const where = { senderAccountId: id };
+  const rows = await app.senderActionLog.findMany({ where, orderBy: { kind: "asc" } });
   assert.deepEqual(
     rows.map(({ kind, objectRef, withNote }) => [kind, objectRef, withNote]),
-    [["invite", STEP, true]],
+    [
+      ["invite", STEP, true],
+      ["message", REPLY, false],
+    ],
   );
 });
 

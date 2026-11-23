@@ -1,0 +1,9 @@
+# email: security
+
+- **Tokens:** the callback seals `{ refreshToken, accessToken, expiresAt }` as one JSON (`encryptSecret`, the workspace's organization, purpose `email.mailbox_tokens`) right after the exchange and holds none past the request. Only `workflows/decrypt.ts` imports `@whytide/platform/secrets/worker` (the lint's `decrypt-in-worker-only`). No log line, event, answer, workflow input or history holds a token; the worker's tests check the histories and the logs.
+- **The verifier:** computed, never stored: `deriveSecret(state, { purpose: "email.pkce_verifier" })`, 43 base64url characters. The callback derives it again from the state it gets; another state gives another verifier, which the provider refuses.
+- **The state:** `<workspaceId>.<nonce>`, 32 random bytes; the row keeps the nonce's SHA-256. A state unknown, used, expired, another workspace's or another member's is refused before any exchange.
+- **The account:** the one the exchange proves; the browser never names the address. A consent short of `send` and `read`, or with no address, is revoked at once and stores nothing. An address connected elsewhere is refused and its tokens discarded unrevoked, since Google's revoke drops the whole grant.
+- **The callback page:** `referrer-policy: no-referrer` (`core/apps/web/proxy.ts`), and it takes the code off its address before it posts, so the code leaves in no Referer and stays in no history.
+- **Who sees which mailbox:** the routes declare `email.read` or `email.connect`, which every role holds, and only the owner disconnects a mailbox (`not_mailbox_owner`). The list holds every mailbox for a holder of `email.manage` (Owner, Admin), else the member's own. Until gamma-p6-010 evaluates roles, `can()` allows every member, so every member sees every mailbox here, never a token.
+- **Tenancy:** three workspace tables; the address index spans workspaces, so one mailbox is never connected twice.

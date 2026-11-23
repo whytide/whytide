@@ -2,12 +2,14 @@
 // tenant table in the isolation test"): a draft made by the module's command and read in a run of
 // one workspace, scoped by the tenant client alone, is that workspace's only; the drafts' commands
 // and queries go through the tenant client, a sequence step's request and the sweep included
-// (beta-p3-010); erasePerson deletes a person's drafts and no one else's.
+// (beta-p3-010), the campaign's mode's approval too (gamma-p4-080); erasePerson deletes a person's
+// drafts and no one else's.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { withTenant } from "@whytide/db";
 import { asRole, assertScoped, isolationTest, withTestDb } from "@whytide/db/testing";
 import { servicePrincipal } from "@whytide/platform";
+import { approveStepDraftByMode } from "../domain/drafts/approve.ts";
 import { requestStepDraft } from "../domain/drafts/step.ts";
 import {
   createDraft,
@@ -64,4 +66,5 @@ test("erasePerson deletes the person's drafts, and no one else's; the commands a
   const step = { personId: "per_none", stepExecutionId: "sx_none", senderUserId: "usr_none" };
   await assertScoped(() => requestStepDraft({ ...step, stepKey: "connect" }));
   await assertScoped(() => sweepStuckDrafts());
+  await assertScoped(() => approveStepDraftByMode("mdr_none", { stepExecutionId: "sx_none" }));
 });

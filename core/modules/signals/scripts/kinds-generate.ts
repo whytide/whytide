@@ -2,7 +2,8 @@
 // sources/registry.generated.ts, which imports every sources/<kind>/index.ts, so that a kind joins the
 // registry by existing, with no edit to this module (docs/rules/coding.md §3). `_` and `.` folders are
 // not kinds. build, typecheck and test run this first; git ignores the file. A test passes its own
-// output file and more folders.
+// output file and more folders. It writes domain/research/places/places.generated.ts too (gamma-wr-040),
+// the list of the research plan's source types: every places/<id>.ts but the registry's own files.
 //   node scripts/kinds-generate.ts [output file] [folder...]
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -39,9 +40,34 @@ export function generateKindList(dirs: readonly string[], out: string): string[]
   return files;
 }
 
+/** The files of a places folder: every `<id>.ts` but `_`-files, the registry and the generated list. */
+export function listPlaces(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /^[a-z][a-z0-9_]*\.ts$/.test(entry.name))
+    .filter((entry) => !["registry.ts", "places.generated.ts"].includes(entry.name))
+    .map((entry) => join(dir, entry.name))
+    .sort();
+}
+
+/** Writes the list of the source types under `dir` to `out`, as kinds' list is written. */
+export function generatePlaceList(dir: string, out: string): string[] {
+  const files = listPlaces(resolve(dir));
+  const text = kindListSource(resolve(out), files).replace(
+    "from sources/*/index.ts",
+    "from domain/research/places/*.ts",
+  );
+  if (!existsSync(out) || readFileSync(out, "utf8") !== text) writeFileSync(out, text);
+  return files;
+}
+
 if (import.meta.main) {
   const [out = join(signals, "sources", "registry.generated.ts"), ...dirs] = process.argv.slice(2);
   const files = generateKindList(dirs.length ? dirs : [join(signals, "sources")], out);
   const names = files.map((file) => relative(signals, dirname(file)));
   process.stdout.write(`source kinds: ${names.length ? names.join(", ") : "none"}\n`);
+  const places = join(signals, "domain", "research", "places");
+  const placed = generatePlaceList(places, join(places, "places.generated.ts"));
+  const ids = placed.map((file) => relative(places, file).replace(/\.ts$/, ""));
+  process.stdout.write(`source types: ${ids.length ? ids.join(", ") : "none"}\n`);
 }

@@ -1,16 +1,18 @@
 // The requests and answers of contacts' person routes (README.md "Routes"), from which the api builds
 // its OpenAPI document: business fields and the provenance of each, never a provider's id.
 import { z } from "zod";
-import { PROVIDERS, SOURCES } from "../domain/provenance.ts";
+import { PROVENANCE_SOURCES, PROVIDER_NAME } from "../domain/provenance.ts";
 
+/** Where a field's value came from: a source, or `member` for a value a member typed. */
 const provenance = z.strictObject({
-  source: z.enum(SOURCES),
-  provider: z.enum(PROVIDERS).nullable(),
+  source: z.enum(PROVENANCE_SOURCES),
+  provider: z.string().regex(PROVIDER_NAME).nullable(),
   at: z.string(),
 });
 export const personResponse = z.strictObject({
   id: z.string(),
-  linkedinUrl: z.string(),
+  /** Null for a person known by an email address alone, whose address no route answers (gamma-rf-050). */
+  linkedinUrl: z.string().nullable(),
   firstName: z.string().nullable(),
   lastName: z.string().nullable(),
   headline: z.string().nullable(),
@@ -19,7 +21,7 @@ export const personResponse = z.strictObject({
   companyId: z.string().nullable(),
   locationText: z.string().nullable(),
   locationCountry: z.string().nullable(),
-  /** Each field that has a value: where it came from and when. */
+  /** Each field that has a value, or that a member cleared: where it came from and when. */
   provenance: z.record(z.string(), provenance),
   createdAt: z.string(),
   updatedAt: z.string(),

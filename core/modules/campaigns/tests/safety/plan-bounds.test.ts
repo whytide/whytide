@@ -4,13 +4,17 @@
 // planAccount with linkedin's remainingToday and contacts' touches. Over seeded random accounts in
 // three zones (working hours with Saturday or Sunday among the days at times; the day's limits drawn,
 // partly used, and reads made past their allowance at times, so the three types together pass the
-// actions left), persons touched today or not, and steps due or not, placed earlier or not, in flight
-// or sent: two runs, with the sender's sends between them. No run places more of a type, or of all
-// three, than remainingToday leaves; no time leaves the window or falls on a Saturday or Sunday; a
-// person gets one step a day at most and none on a day already touched; no two times, across the runs
-// and the sends, are closer than the gap, nor a new one to the last send; nothing but a scheduled
-// step's time is ever written. Then an account that may not send, remainingToday answering windowEnd
-// null, gets nothing (decisions.md, Finding 56). Each zone's clock is read here with Intl alone.
+// actions left), persons touched today or not, with a random priority or none (gamma-p5-070,
+// qualification's setLeadPriority), and steps due or not, placed earlier or not, kept from an
+// earlier run of the day, in flight or sent: two runs, with the sender's sends between them. No
+// run places more of a type, or of all three, than remainingToday leaves; no time leaves the
+// window or falls on a Saturday or Sunday; a person gets one step a day at most and none on a day
+// already touched; no two times, across the runs and the sends, are closer than the gap, nor a new
+// one to the last send; nothing but a scheduled step's time is ever written; a kept step keeps its
+// time, and loses it only past the room the kept steps alone take, the latest first, never for a
+// candidate, whatever the priorities. Then an account that may not send, remainingToday answering
+// windowEnd null, gets nothing, its lead Hot (decisions.md, Finding 56). Each zone's clock is read
+// here with Intl alone.
 import assert from "node:assert/strict";
 import test, { beforeEach } from "node:test";
 import { lastTouchAt, recordTouch, upsertPersonFromSource } from "@whytide/contacts";
@@ -26,8 +30,10 @@ import {
   useRandom as useLinkedinRandom,
 } from "@whytide/linkedin/testing";
 import { instantAt, newId, quotaDay, servicePrincipal, synthetic } from "@whytide/platform";
+import { setLeadPriority } from "@whytide/qualification/testing";
 import { planAccount } from "../../domain/plan/account.ts";
 import { MIN_ACTION_GAP_MS } from "../../domain/plan/constants.ts";
+import { linkedinActionType } from "../../domain/steps/actions.ts";
 import { ids } from "../../ids.ts";
 import { useClock, useRandom } from "../../testing/index.ts";
 
@@ -61,6 +67,11 @@ const COMMITTED = {
 } as const;
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 const TEMPLATE = { templateId: "linkedin_default", templateVersion: 1 };
+/** A lead's priority, 0 to 100 (qualification's), one in NO_PRIORITY_ONE_IN persons with none. */
+const PRIORITY_MAX = 100;
+const NO_PRIORITY_ONE_IN = 4;
+/** One in KEPT_ONE_IN persons' first step placed earlier today, ahead of the first run. */
+const KEPT_ONE_IN = 4;
 
 type Hours = { start: string; end: string; days: number[] };
 type Row = Awaited<ReturnType<typeof stepsOf>>[number];
@@ -85,6 +96,9 @@ const hhmm = (minute: number) =>
 const stepsOf = (workspaceId: string) =>
   app().stepExecution.findMany({ where: { workspaceId }, orderBy: { id: "asc" } });
 const time = (date: Date | null | undefined) => date?.getTime() ?? null;
+/** How far the step's time is behind `at`; negative ahead of it. */
+const behindOf = (row: Row, at: Date) => at.getTime() - (time(row.scheduledFor) ?? 0);
+const byId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Both modules' clocks at `at`: the plan's, and the one remainingToday reads. */
 function setClocks(at: Date): void {
@@ -127,6 +141,7 @@ function checkRun(run: {
     assert.deepEqual(run.after, run.before, `${what}: a run with the window closed wrote`);
     return placed;
   }
+  checkKept(run);
   const before = new Map(run.before.map((row) => [row.id, row]));
   for (const row of run.after) {
     const was = before.get(row.id);
@@ -177,6 +192,42 @@ function checkRun(run: {
   return placed;
 }
 
+/**
+ * The steps kept at the run's start, placed on its quota day ahead of it or less than a gap
+ * behind: each keeps its time while the kept steps before it, earliest first, leave its type and
+ * the actions room, else loses it (null), whatever the candidates and their persons' priorities. A
+ * candidate never takes a kept step's time or its room.
+ */
+function checkKept(run: {
+  readonly zone: string;
+  readonly at: Date;
+  readonly left: RemainingToday;
+  readonly before: readonly Row[];
+  readonly after: readonly Row[];
+  readonly what: string;
+}): void {
+  const { at, left, what } = run;
+  const today = quotaDay(at, run.zone);
+  const after = new Map(run.after.map((row) => [row.id, row]));
+  const kept = run.before
+    .filter((row) => row.status === "scheduled" && row.scheduledFor !== null)
+    .filter((row) => row.quotaDay === today && behindOf(row, at) < MIN_ACTION_GAP_MS)
+    .sort((a, b) => (time(a.scheduledFor) ?? 0) - (time(b.scheduledFor) ?? 0) || byId(a.id, b.id));
+  const used = { invites: 0, messages: 0, withdrawals: 0, actions: 0 };
+  for (const row of kept) {
+    const type = CAPACITY_OF[linkedinActionType(row)];
+    const now = after.get(row.id)?.scheduledFor ?? null;
+    const where = `${what}: the kept ${row.id} at ${row.scheduledFor?.toISOString()}`;
+    if (used[type] < left[type] && used.actions < left.actions) {
+      used[type] += 1;
+      used.actions += 1;
+      assert.equal(time(now), time(row.scheduledFor), `${where} lost or moved within the room`);
+    } else {
+      assert.equal(now, null, `${where} kept past the room`);
+    }
+  }
+}
+
 /** Every two times of the account, placed and kept across the runs and sent, at least a gap apart. */
 function checkGaps(times: readonly Date[], what: string): void {
   const sorted = times.map((at) => at.getTime()).sort((a, b) => a - b);
@@ -188,6 +239,9 @@ function checkGaps(times: readonly Date[], what: string): void {
 
 async function scenario(zone: string, seed: number): Promise<void> {
   const s = synthetic(`campaigns-plan-bounds:${zone}:${seed}`);
+  // gamma-p5-070's draws, the priorities and the kept steps, apart: beta's setup draws stay as
+  // they were.
+  const p = synthetic(`campaigns-plan-bounds:priorities:${zone}:${seed}`);
   const source = () => s.int(RANGE) / RANGE;
   useRandom(source);
   useLinkedinRandom(source);
@@ -252,6 +306,12 @@ async function scenario(zone: string, seed: number): Promise<void> {
     }
     return made;
   });
+  // Their priorities, Hot, Warm or Cool, or none: one in NO_PRIORITY_ONE_IN has no intent row.
+  await run(async () => {
+    for (const personId of personIds) {
+      if (p.int(NO_PRIORITY_ONE_IN) !== 0) await setLeadPriority(personId, p.int(PRIORITY_MAX + 1));
+    }
+  });
   const enrollmentIds = personIds.map(() => newId(ids.enrollment));
   await app().enrollment.createMany({
     data: personIds.map((personId, index) => ({
@@ -261,16 +321,21 @@ async function scenario(zone: string, seed: number): Promise<void> {
     })),
   });
 
-  // Their steps: due or not, placed earlier today or yesterday or not; in flight; the last send.
+  // Their steps: due or not, placed earlier today or yesterday or not, or kept from an earlier run
+  // of today (two gaps apart, ahead of the run, a person's first step only); in flight; the last
+  // send.
   const rows: Prisma.StepExecutionCreateManyInput[] = [];
+  const kept = new Map<string, Date>();
   const step = (index: number, key: string, fields: StepFields) => {
     const personId = personIds[index] as string;
+    const id = newId(ids.step_execution);
     rows.push({
-      ...{ id: newId(ids.step_execution), workspaceId, personId, ...TEMPLATE },
+      ...{ id, workspaceId, personId, ...TEMPLATE },
       ...{ enrollmentId: enrollmentIds[index] as string, senderAccountId: accountId },
       ...{ stepKey: key, position: 1 + s.int(4), actionType: s.pick(ACTIONS) },
       ...{ stepTemplateHash: key, idempotencyKey: `${personId}:${key}`, ...fields },
     });
+    return id;
   };
   for (let index = 0; index < count; index += 1) {
     if (s.int(10) === 0) {
@@ -292,7 +357,11 @@ async function scenario(zone: string, seed: number): Promise<void> {
         const at = new Date(first.getTime() - back);
         Object.assign(fields, { scheduledFor: at, quotaDay: quotaDay(at, zone) });
       }
-      step(index, `s${key}`, fields);
+      const keep = !ahead && key === 0 && p.int(KEPT_ONE_IN) === 0;
+      const keptAt = new Date(first.getTime() + (1 + 2 * kept.size) * MIN_ACTION_GAP_MS);
+      if (keep) Object.assign(fields, { scheduledFor: keptAt, quotaDay: quotaDay(keptAt, zone) });
+      const id = step(index, `s${key}`, fields);
+      if (keep) kept.set(id, keptAt);
     }
   }
   if (lastSent) {
@@ -317,7 +386,7 @@ async function scenario(zone: string, seed: number): Promise<void> {
       }
       return touched;
     });
-  const planned = new Map<string, Date>();
+  const planned = new Map<string, Date>(kept);
   const planOnce = async (at: Date, what: string) => {
     setClocks(at);
     const left = await run(() => remainingToday(accountId));
@@ -352,20 +421,20 @@ async function scenario(zone: string, seed: number): Promise<void> {
     });
     planned.delete(row.id);
     const day = { senderAccountId: accountId, quotaDay: quotaDay(at, zone) };
-    const committed = { [COMMITTED[row.actionType]]: { increment: 1 } };
+    const committed = { [COMMITTED[linkedinActionType(row)]]: { increment: 1 } };
     await app().senderQuotaUsage.updateMany({ where: day, data: committed });
     await run(() => recordTouch(row.personId, at));
   }
   await planOnce(second, `${what}, second run at ${second.toISOString()}`);
 }
 
-test("over seeded accounts, persons and steps in three zones, two runs of the plan and the sends between them: no run passes remainingToday's limits or the actions left, leaves the window or the weekdays, gives a person two steps a day or one on a day touched, nor yields two times closer than the gap", async () => {
+test("over seeded accounts, persons with random priorities or none, and steps in three zones, two runs of the plan and the sends between them: no run passes remainingToday's limits or the actions left, leaves the window or the weekdays, gives a person two steps a day or one on a day touched, yields two times closer than the gap, nor moves or releases a kept step for a candidate", async () => {
   for (const zone of ZONES) {
     for (let seed = 1; seed <= SEEDS; seed += 1) await scenario(zone, seed);
   }
 });
 
-test("an account that may not send, remainingToday answering windowEnd null, gets nothing: no time placed or released, and no row of linkedin's log", async () => {
+test("an account that may not send, remainingToday answering windowEnd null, gets nothing, its lead Hot: no time placed or released, and no row of linkedin's log", async () => {
   const workspaceId = "wsp_bounds_closed";
   const zone = "Asia/Kolkata";
   const hours = { start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5] };
@@ -377,6 +446,7 @@ test("an account that may not send, remainingToday answering windowEnd null, get
     withTenant({ workspaceId, principal: servicePrincipal("plan_bounds") }, fn, { client: app() });
   const at = new Date("2026-10-28T05:30:00Z"); // Wednesday 11:00 in Kolkata, the window open
   const personId = await run(() => personOf("https://linkedin.com/in/plan-bounds-closed"));
+  await run(() => setLeadPriority(personId, PRIORITY_MAX)); // Hot, the highest there is
   const enrollmentId = newId(ids.enrollment);
   await app().enrollment.create({
     data: {

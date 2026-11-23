@@ -15,5 +15,9 @@
   },
   "include": ["**/*.ts"],
   "exclude": ["dist", "node_modules"],
-  "references": [{ "path": "../../packages/platform" }, { "path": "../../packages/db" }]
+  "references": [
+    { "path": "../../packages/platform" },
+    { "path": "../../packages/db" },
+    { "path": "../tenancy" }
+  ]
 }

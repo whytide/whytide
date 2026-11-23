@@ -13,8 +13,11 @@ const HOUR_MS = 60 * MINUTE_MS;
  */
 export const SEND_RESERVATION_MS = 2 * HOUR_MS;
 
-/** Invitations with a note an account sends at most in INVITE_NOTE_WINDOW_DAYS (LinkedIn's free limit). */
-export const INVITE_NOTES_PER_MONTH = 3;
+/**
+ * LINKEDIN_INVITE_NOTES_PER_MONTH's default (settings.ts, README.md "Settings"): the invitations with
+ * a note an account sends at most in INVITE_NOTE_WINDOW_DAYS, LinkedIn's limit for a free account.
+ */
+export const INVITE_NOTES_PER_MONTH = { default: 3 } as const;
 
 /** The days, back from now, the note budget counts. */
 export const INVITE_NOTE_WINDOW_DAYS = 30;
@@ -44,3 +47,11 @@ export const SECOND_MS = 1000;
  * side: a message counted as sent is never sent twice.
  */
 export const SEND_CHECK_SKEW_MS = 5 * MINUTE_MS;
+
+/**
+ * The refusal reasons a send's answer names beside its code (SendFailed's `reason`): those the error
+ * map keys a row of its own by, which campaigns settles otherwise than the code's. One: an invitation
+ * to a person who is a connection already (connect-already-connected).
+ */
+export const SEND_REFUSED_REASONS = ["already_connected"] as const;
+export type SendRefusedReason = (typeof SEND_REFUSED_REASONS)[number];

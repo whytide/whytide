@@ -2,16 +2,33 @@
 // assessment"), one test per criterion of alpha-p6-020: what the model receives; a valid answer
 // stored and an invalid one retried once, then ai_failed; evidence that quotes nothing stored as
 // unknown; an injection in the ICP's text passed as data; the decision record, the erasure and a
-// stale ICP version; two activities on one decision record.
+// stale ICP version; two activities on one decision record; then the batch's evidence from the
+// signal reader and another audience (gamma-p5-050).
+// First: the batch's step calls the model with the environment's price table.
+import "./fixtures/prices-env.ts";
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import { type AgentTask, DATA_SENTENCE, registeredAgentTasks } from "@whytide/ai";
 import type { TenantClient } from "@whytide/db";
-import { withTestDb } from "@whytide/db/testing";
+import { asRole, withTestDb } from "@whytide/db/testing";
+import { readIcpForScoring } from "@whytide/icp";
 import { z } from "zod";
 import { type AssessContext, assessPerson, erasePerson } from "../domain/assess/assess-person.ts";
+import { useClient } from "../domain/client.ts";
+import { setLeadPriority } from "../domain/intent/store.ts";
+import { type SignalReader, useSignalReader } from "../domain/signal-reader.ts";
 import { ASSESS_FIT, CRITERIA, type CriterionVerdict } from "../schemas/assess-fit.ts";
-import { answer, contextOf, fake, ICP, run, seed } from "./fixtures/assess.ts";
+import { assessLead } from "../workflows/batch.ts";
+import {
+  addAudience,
+  answer,
+  contextOf,
+  fake,
+  ICP,
+  run,
+  seed,
+  seedPerson,
+} from "./fixtures/assess.ts";
 
 withTestDb();
 const WS = "wsp_qualification_assess";
@@ -150,7 +167,7 @@ test("2. a valid answer is a snapshot with six verdicts and the summary; an inva
       personId,
       icpVersion: 1,
       modelId: "fake-model",
-      promptVersion: 1,
+      promptVersion: 2,
       status: "assessed",
       fitScore: null,
       disqualifiers: [],
@@ -253,11 +270,14 @@ test("5. the snapshot links its decision record; erasePerson removes its rows; a
   assert.deepEqual(again, result);
   assert.equal((await snapshots()).length, 1);
 
+  await run(WS, () => setLeadPriority(personId, 70));
   assert.deepEqual(await run(WS, () => erasePerson(personId)), {
     score_snapshots: 1,
     criterion_verdicts: 6,
     assessment_attempts: 0,
+    intent_scores: 1,
   });
+  assert.deepEqual(await run(WS, (tx) => tx.intentScore.findMany()), []);
   assert.deepEqual(await snapshots(), []);
   assert.deepEqual(await run(WS, (tx) => tx.criterionVerdict.findMany()), []);
 
@@ -298,3 +318,93 @@ function blind(tx: TenantClient, misses: { count: number }): TenantClient {
     get: (client, name) => (name === "scoreSnapshot" ? snapshot : Reflect.get(client, name)),
   });
 }
+
+/** The batch's activity context in WS, as the worker gives it. */
+const step = { ...context, workflowId: "qualification.batch:test:current", attempt: 1 };
+
+/** assessLead with the reader in place, or none, on the app role; the reader puts back after. */
+async function assessedBy(reader: SignalReader | undefined, personId: string) {
+  const restore = reader === undefined ? () => {} : useSignalReader(reader);
+  useClient(asRole("app"));
+  try {
+    return await assessLead({ workspaceId: WS, personId, icpVersion: 1 }, step);
+  } finally {
+    useClient(undefined);
+    restore();
+  }
+}
+
+test("7. the batch's assessment reads at most five of the person's own words from the signal reader, anonymized, in <evidence> and its decision record; none without a reader or an excerpt", async () => {
+  const personId = await seed(WS);
+  const words = [1, 2, 3, 4, 5, 6, 7].map(
+    (n) => `Adaeze hires SDR number ${n}; her post: https://quill.example/posts/${n}`,
+  );
+  const asked: unknown[] = [];
+  const excerpts: SignalReader["excerpts"] = async (input) => {
+    asked.push(input);
+    return words;
+  };
+  fake.script(answer());
+  const result = await assessedBy({ intentInputs: async () => [], excerpts }, personId);
+  assert.equal(result.status, "assessed");
+  assert.deepEqual(asked, [{ personId, max: 5 }]);
+  const call = recorded(0);
+  for (const value of FORBIDDEN) assert.doesNotMatch(JSON.stringify(call), word(value), value);
+  const evidence: string[] = JSON.parse(blocksOf(userText(call)).evidence ?? "");
+  assert.deepEqual(
+    evidence,
+    [1, 2, 3, 4, 5].map((n) => `[name] hires SDR number ${n}; their post: [link]`),
+  );
+  const [snapshot] = await snapshots();
+  const record = await run(WS, (tx) =>
+    tx.decisionRecord.findFirstOrThrow({ where: { id: snapshot?.decisionRecordId ?? "" } }),
+  );
+  for (const excerpt of evidence) assert.ok(record.rawPrompt?.includes(excerpt), excerpt);
+
+  // No excerpt, and no reader at all as for an imported person, is an empty block.
+  const imported = await seedPerson(WS, "imported-person");
+  const empty = { intentInputs: async () => [], excerpts: async () => [] };
+  for (const [reader, person] of [
+    [empty, personId],
+    [undefined, imported],
+  ] as const) {
+    await run(WS, () => erasePerson(person));
+    fake.reset();
+    fake.script(answer());
+    assert.equal((await assessedBy(reader, person)).status, "assessed");
+    assert.equal(blocksOf(userText(recorded(0))).evidence, "[]");
+  }
+});
+
+test("8. another audience: its ICP in the blocks and on the snapshot, stale when it moved; two alike audiences share the decision record, each with its snapshot; a row of the release before takes the default", async () => {
+  const personId = await seed(WS);
+  const fallback = await run(WS, async () => (await readIcpForScoring(WS)).icp.id);
+  const twin = await addAudience(WS, "Twin");
+  const mustHaves = "Sells to French retailers";
+  const france = await addAudience(WS, "France", { countries: ["FR"], mustHaves });
+  fake.script(answer(), answer());
+  for (const icpId of [undefined, twin, france]) {
+    const result = await assessPerson({ personId, icpId, icpVersion: 1 }, context);
+    assert.equal(result.status, "assessed");
+  }
+  // The twin's input is the default's: the decision record's cache answers it.
+  assert.equal(fake.recordedCalls.length, 2);
+  assert.equal(blocksOf(userText(recorded(1))).must_haves, mustHaves);
+  const rows = await snapshots();
+  const byAudience = new Map(rows.map((row) => [row.icpId, row.decisionRecordId]));
+  assert.deepEqual([...byAudience.keys()].sort(), [fallback, twin, france].sort());
+  assert.equal(byAudience.get(twin), byAudience.get(fallback));
+  assert.notEqual(byAudience.get(france), byAudience.get(fallback));
+  await assert.rejects(assessPerson({ personId, icpId: france, icpVersion: 2 }, context), {
+    code: "icp_version_stale",
+  });
+
+  // The release before writes no audience: the trigger gives the row the workspace's default.
+  const before = {
+    ...{ id: "ssn_before", workspaceId: WS, personId, status: "qualified" as const },
+    ...{ modelId: "fake-model", promptVersion: 1, scorerVersion: "fit-v1", icpVersion: 1 },
+    ...{ fitScore: 80, summary: "", decisionRecordId: "dr_before" },
+  };
+  const stored = await run(WS, (tx) => tx.scoreSnapshot.create({ data: before }));
+  assert.equal(stored.icpId, fallback);
+});

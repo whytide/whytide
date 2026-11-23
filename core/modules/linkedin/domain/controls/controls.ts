@@ -8,11 +8,14 @@
 // run in a run of their own in any workspace as the service principal; the platform's switch runs in
 // a transaction of its own on the global client outside any run, so that its change and its event
 // commit together, and the status reads the platform there too. The fleet breaker pauses the
-// invites in the warning's run (health/breaker.ts); only the operator's reopen lifts the pause.
+// invites in the warning's run (health/breaker.ts); only the operator's reopen lifts the pause. Who
+// may press the tester's switches is ../access.ts's (gamma-p6-070); a member's removal pauses their
+// accounts with its own source (../removed.ts), which only the account's owner lifts.
 import { type TenantClient, tenantClient } from "@whytide/db";
-import { AppError, currentTenant, newId } from "@whytide/platform";
+import { AppError, currentTenant, newId, type Principal } from "@whytide/platform";
 import { errors } from "../../errors.ts";
 import { ids } from "../../ids.ts";
+import { assertManager, mayUnpause, sees } from "../access.ts";
 import { findAccount, listAccounts, type SenderAccount, type SwitchSource } from "../accounts.ts";
 import { now } from "../clock.ts";
 import { inGlobal, inWorkspace } from "../store.ts";
@@ -21,6 +24,7 @@ import {
   NO_PLATFORM_ROW,
   NO_WORKSPACE_ROW,
   PLATFORM_STATES,
+  REMOVAL_ACTOR,
   type StopState,
   WORKSPACE_STOP,
 } from "./constants.ts";
@@ -37,9 +41,16 @@ export type Controls = {
 export type PlatformStatus = Controls["platform"] & { readonly invitesPausedReason: string | null };
 /** A kill switch's refusal: it stops every action through the account, reads included. */
 export type StopCode = "platform_stopped" | "workspace_stopped" | "account_stopped";
-/** An operator's change: `paused_by_tester`, a tester's stop, is the tester's to lift. */
-export type OperatorChange = "changed" | "unchanged" | "paused_by_tester";
-type Actor = { readonly type: "user" | "operator"; readonly id: string };
+/**
+ * An operator's change: `paused_by_tester`, a tester's stop, is the tester's to lift;
+ * `paused_by_member_removed`, a removed member's pause, the account's owner's.
+ */
+export type OperatorChange =
+  | "changed"
+  | "unchanged"
+  | "paused_by_tester"
+  | "paused_by_member_removed";
+type Actor = { readonly type: "user" | "operator" | "system"; readonly id: string };
 type Change = {
   readonly scope: "platform" | "workspace" | "account";
   readonly control: "sending" | "stop" | "invites";
@@ -103,27 +114,38 @@ export function stopOf(
 }
 
 /**
- * The tester's pause of the account, for any member with linkedin.manage (the route's permission): no
- * action through it from the next reservation, reads included. A paused account stays as it is, the
- * operator's pause the operator's. The account as it stands.
+ * The tester's pause of the account, by its owner or a holder of linkedin.manage (../access.ts;
+ * not_account_owner otherwise): no action through it from the next reservation, reads included. A
+ * paused account stays as it is, the operator's pause the operator's. The account as it stands.
  */
-export async function pauseAccount(accountId: string, userId: string): Promise<SenderAccount> {
+export async function pauseAccount(
+  accountId: string,
+  principal: Principal,
+): Promise<SenderAccount> {
   const account = await findAccount(accountId);
+  if (!sees(principal, account)) throw new AppError(errors.not_account_owner);
   if (stateOf(account.killSwitch, account.killSwitchSource) === "off") {
-    await moveAccount(account.id, "off", "tester", user(userId));
+    await moveAccount(account.id, "off", "tester", user(principal.userId));
   }
   return findAccount(account.id);
 }
 
 /**
- * The tester's pause lifted, by the account's owner alone (not_account_owner), never the operator's
- * (stopped_by_operator); an account not paused stays as it is. The account as it stands.
+ * A pause lifted by ../access.ts's rules: a tester's by its owner or a holder of linkedin.manage, a
+ * removed member's by its owner alone (not_account_owner otherwise, a member who neither owns nor
+ * manages it first), never the operator's (stopped_by_operator); an account not paused stays as it
+ * is. The account as it stands.
  */
-export async function unpauseAccount(accountId: string, userId: string): Promise<SenderAccount> {
+export async function unpauseAccount(
+  accountId: string,
+  principal: Principal,
+): Promise<SenderAccount> {
   const account = await findAccount(accountId);
-  if (account.ownerUserId !== userId) throw new AppError(errors.not_account_owner);
-  if (stateOf(account.killSwitch, account.killSwitchSource) === "tester") {
-    await moveAccount(account.id, "tester", "off", user(userId));
+  if (!sees(principal, account)) throw new AppError(errors.not_account_owner);
+  const from = stateOf(account.killSwitch, account.killSwitchSource);
+  if (from === "tester" || from === "member_removed") {
+    if (!mayUnpause(principal, account)) throw new AppError(errors.not_account_owner);
+    await moveAccount(account.id, from, "off", user(principal.userId));
   }
   const after = await findAccount(account.id);
   if (stateOf(after.killSwitch, after.killSwitchSource) === "operator") {
@@ -133,15 +155,18 @@ export async function unpauseAccount(accountId: string, userId: string): Promise
 }
 
 /**
- * The workspace's "Stop everything", both ways, for any member with linkedin.manage: on, the tester's
- * stop unless one is on already, the operator's staying the operator's; off, the tester's lifted,
- * never the operator's (stopped_by_operator). The controls as they stand.
+ * The workspace's "Stop everything", both ways, for a holder of linkedin.manage alone (forbidden, as
+ * the route's permission, gamma-p6-070): on, the tester's stop unless one is on already, the
+ * operator's staying the operator's; off, the tester's lifted, never the operator's
+ * (stopped_by_operator). The controls as they stand.
  */
-export async function setWorkspaceStop(stopped: boolean, userId: string): Promise<Controls> {
+export async function setWorkspaceStop(stopped: boolean, principal: Principal): Promise<Controls> {
+  assertManager(principal);
+  const by = user(principal.userId);
   const before = (await readControls()).workspace;
   const from = stateOf(before.stopped, before.stopSource);
-  if (stopped && from === "off") await moveWorkspace("off", "tester", user(userId));
-  if (!stopped && from === "tester") await moveWorkspace("tester", "off", user(userId));
+  if (stopped && from === "off") await moveWorkspace("off", "tester", by);
+  if (!stopped && from === "tester") await moveWorkspace("tester", "off", by);
   const after = await readControls();
   if (!stopped && stateOf(after.workspace.stopped, after.workspace.stopSource) === "operator") {
     throw new AppError(errors.stopped_by_operator);
@@ -149,7 +174,7 @@ export async function setWorkspaceStop(stopped: boolean, userId: string): Promis
   return after;
 }
 
-/** The operator's pause of an account of any workspace; it takes a tester's pause over. */
+/** The operator's pause of an account of any workspace; it takes a tester's or a removal's over. */
 export function pauseAccountAsOperator(
   workspaceId: string,
   accountId: string,
@@ -163,7 +188,7 @@ export function pauseAccountAsOperator(
   });
 }
 
-/** The operator's pause of an account lifted; a tester's pause stays, `paused_by_tester`. */
+/** The operator's pause of an account lifted; a tester's or a removal's stays, with its code. */
 export function unpauseAccountAsOperator(
   workspaceId: string,
   accountId: string,
@@ -172,7 +197,9 @@ export function unpauseAccountAsOperator(
   return inWorkspace(workspaceId, async () => {
     const account = await findAccount(accountId);
     const from = stateOf(account.killSwitch, account.killSwitchSource);
-    if (from !== "operator") return from === "tester" ? "paused_by_tester" : "unchanged";
+    if (from === "tester") return "paused_by_tester";
+    if (from === "member_removed") return "paused_by_member_removed";
+    if (from === "off") return "unchanged";
     return changed(await moveAccount(account.id, "operator", "off", operator(name)));
   });
 }
@@ -260,6 +287,18 @@ export function reopenInvites(name: string): Promise<"changed" | "unchanged"> {
     });
     return "changed";
   });
+}
+
+/**
+ * A removed member's pause of the account (../removed.ts), in the event's run: from off, or from a
+ * tester's, which it takes over, with the system's event; the operator's stays the operator's and a
+ * removal's as it is, so a redelivery writes nothing. Whether it moved.
+ */
+export async function pauseAsRemoved(accountId: string): Promise<boolean> {
+  const account = await findAccount(accountId);
+  const from = stateOf(account.killSwitch, account.killSwitchSource);
+  if (from !== "off" && from !== "tester") return false;
+  return moveAccount(account.id, from, "member_removed", REMOVAL_ACTOR);
 }
 
 /** A stop's state as the events name it: on without a source reads as the operator's, fail closed. */

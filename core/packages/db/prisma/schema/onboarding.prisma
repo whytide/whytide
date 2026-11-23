@@ -2,9 +2,10 @@
 // 20261022181000_onboarding_company_knowledge; website_pages and draft_run_id, alpha-p4-020, migration
 // 20261022192000_onboarding_website_pages; pending_draft, alpha-p4-030, migration
 // 20261022194000_onboarding_pending_draft; company_documents, knowledge-draft, migration
-// 20261029014500_onboarding_company_documents. Tenant tables: one Company Knowledge record per
+// 20261029014500_onboarding_company_documents; draft_auto_accept, onboarding-setup, migration
+// 20261106065533_onboarding_draft_auto_accept. Tenant tables: one Company Knowledge record per
 // workspace, the pages its last website fetch read and the documents its latest Draft was given (the
-// script pnpm knowledge:draft). No foreign key to workspaces: Prisma would need the
+// script pnpm knowledge:draft or the Company screen). No foreign key to workspaces: Prisma would need the
 // opposite relation field in tenancy.prisma. The limits, the statuses and the shape of the two JSON
 // columns are the module's (domain/fields.ts), checked by its commands, the only writer.
 
@@ -17,10 +18,12 @@ model CompanyKnowledge {
   /// none, fetching, fetched, drafted or failed.
   fetchStatus      String    @default("none") @map("fetch_status")
   fetchedAt        DateTime? @map("fetched_at") @db.Timestamptz()
-  /// The machine code of the last failed run: the fetch's, or the drafter's ai_failed or draft_failed.
+  /// The machine code of the last failed run: the fetch's, the drafter's ai_failed or draft_failed, or draft_empty.
   fetchError       String?   @map("fetch_error")
   /// The latest Draft's run (`drun_…`): only that run writes the pages, the draft and the status.
   draftRunId       String?   @map("draft_run_id")
+  /// Whether that run accepts its own draft as it lands (the prompt at sign-in), else it waits for review.
+  draftAutoAccept  Boolean   @default(false) @map("draft_auto_accept")
   oneLiner         String    @default("") @map("one_liner")
   longDescription  String    @default("") @map("long_description")
   products         String[]  @default([])

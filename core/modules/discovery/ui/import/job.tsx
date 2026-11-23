@@ -1,7 +1,8 @@
 // The parts of the import screen (import-screen.tsx) that show a job: the report of its upload, a
 // card with its figures, a bar of its valid rows and those with an error, and its error rows to
-// download, the run under them; the counts of its run with the link to the lead list; and the past
-// imports, each status a badge in its colour, with their loading, error and empty states. Numbers
+// download, the run under them; the counts of its run with View leads, the lead list of the job; and
+// the past imports, each status a badge in its colour, each with leads its View leads, with their
+// loading, error and empty states. Numbers
 // and dates go through next-intl's formatter, each code in words. A job running for more than ten
 // minutes may be stuck: it says so, and where an administrator finds what to do (docs/runbook.md
 // "A job left running").
@@ -34,7 +35,7 @@ import {
 import { useFormatter, useTranslations } from "next-intl";
 import { type ReactNode, useId } from "react";
 import type { ImportJobResponse } from "../../schemas/imports.ts";
-import { HISTORY_LINES } from "./constants.ts";
+import { HISTORY_LINES, leadsOf } from "./constants.ts";
 import { errorRows } from "./downloads.ts";
 
 export type Job = ImportJobResponse;
@@ -161,7 +162,7 @@ export function Report({ job, children }: { job: Job; children?: ReactNode }) {
   );
 }
 
-/** The run's counts, every data row in one, with the link to the lead list; a failed run's code. */
+/** The run's counts, every data row in one, with View leads, the job's leads; a failed run's code. */
 export function Result(props: { job: Job; counts: Counts; workspace: string }) {
   const { job, counts, workspace } = props;
   const t = useTranslations("discovery.import");
@@ -184,7 +185,7 @@ export function Result(props: { job: Job; counts: Counts; workspace: string }) {
       {job.failure ? <ErrorState module="discovery" code={job.failure.code} /> : null}
       <Figures items={figures} wide />
       <div>
-        <ButtonLink href={`/w/${workspace}/leads`} variant="primary">
+        <ButtonLink href={leadsOf(workspace, job.id)} variant="primary">
           {t("view_leads")}
           <ArrowRight aria-hidden="true" className="rtl:-scale-x-100" />
         </ButtonLink>
@@ -201,6 +202,8 @@ type HistoryProps = {
   onRetry: () => void;
   /** The signed-in user's id, once read: their own jobs say "You". */
   viewer: string | undefined;
+  /** The workspace, whose lead list View leads opens. */
+  workspace: string;
 };
 
 /** Each status's badge: its colour and its icon. */
@@ -214,7 +217,7 @@ const LOOKS: Record<Job["status"], [tone: BadgeTone, Icon: LucideIcon]> = {
 };
 
 /** The past imports, the newest first, as the api lists them, who uploaded each when it is the viewer. */
-export function History({ jobs, problem, onRetry, viewer }: HistoryProps) {
+export function History({ jobs, problem, onRetry, viewer, workspace }: HistoryProps) {
   const t = useTranslations("discovery.import");
   const format = useFormatter();
   const id = useId();
@@ -287,6 +290,20 @@ export function History({ jobs, problem, onRetry, viewer }: HistoryProps) {
       cell: ({ counts }) => counts && format.number(counts.skippedDuplicate + counts.skippedErased),
     },
     { id: "errors", header: t("result.errors"), cell: (job) => count(job.counts?.errors) },
+    {
+      id: "leads",
+      header: t("history.leads"),
+      // A job that brought leads, created or updated: the lead list of them.
+      cell: ({ id, fileName, counts }) =>
+        counts && counts.created + counts.updated > 0 ? (
+          <Link
+            href={leadsOf(workspace, id)}
+            aria-label={t("history.view_leads_of", { file: fileName })}
+          >
+            {t("view_leads")}
+          </Link>
+        ) : null,
+    },
   ];
   return (
     <section className="grid gap-4" aria-labelledby={`${id}-title`}>

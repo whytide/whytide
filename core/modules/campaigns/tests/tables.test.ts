@@ -1,12 +1,15 @@
 // The tables' own CHECKs, the migration's hand-written SQL (docs/data.md), on a schema of the
 // worktree's database, written straight to the tables as `app`: an exit reason exactly on an exited
 // enrollment, an end exactly on one no longer active, and a step's quota day a YYYY-MM-DD text, as
-// linkedin's. The partial unique keys are the safety cases' (tests/safety/enrollment.test.ts).
+// linkedin's; a reply label one of REPLY_ACTION_LABELS with its instant, and a reminder's instant
+// and user together, marked sent only when set (gamma-p4-050). The partial unique keys are the
+// safety cases' (tests/safety/enrollment.test.ts).
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Prisma } from "@whytide/db";
 import { asRole, sqlstate, withTestDb } from "@whytide/db/testing";
 import { newId } from "@whytide/platform";
+import { REPLY_ACTION_LABELS } from "../domain/replies/constants.ts";
 import { ids } from "../ids.ts";
 
 withTestDb();
@@ -51,4 +54,22 @@ test("a step's quota day is a YYYY-MM-DD text, as linkedin's, or null", async ()
   assert.equal(await sqlstate(step("b", "2026-10-29T10:00")), CHECK);
   assert.equal(await sqlstate(step("c", "2026-10-29")), undefined);
   assert.equal(await sqlstate(step("d", null)), undefined);
+});
+
+test("a reply label is one of the labels, with its instant; a reminder names its instant and user together, and is sent only once set", async () => {
+  const at = new Date();
+  const ended = { status: "replied", endedAt: at } as const;
+  const labelled = { ...ended, replyLabelAt: at };
+  assert.equal(await sqlstate(enrollment({ ...labelled, replyLabel: "maybe" })), CHECK, "off");
+  assert.equal(await sqlstate(enrollment({ ...ended, replyLabel: "other" })), CHECK, "no instant");
+  assert.equal(await sqlstate(enrollment(labelled)), CHECK, "an instant without a label");
+  for (const replyLabel of REPLY_ACTION_LABELS) {
+    assert.equal(await sqlstate(enrollment({ ...labelled, replyLabel })), undefined, replyLabel);
+  }
+  const reminder = { remindAt: at, remindUserId: "usr_tables" };
+  assert.equal(await sqlstate(enrollment({ ...ended, remindAt: at })), CHECK, "no user");
+  assert.equal(await sqlstate(enrollment({ ...ended, remindUserId: "usr_tables" })), CHECK);
+  assert.equal(await sqlstate(enrollment({ ...ended, remindedAt: at })), CHECK, "never set");
+  assert.equal(await sqlstate(enrollment({ ...ended, ...reminder })), undefined);
+  assert.equal(await sqlstate(enrollment({ ...ended, ...reminder, remindedAt: at })), undefined);
 });

@@ -1,12 +1,14 @@
 // The id prefixes of contacts' tables (core/packages/platform/README.md "Ids"); a lead's key is its
-// person's.
+// person's; a shared company's is `com` (gamma-rf-010), a group's row is keyed by its group and company.
 import { defineIds } from "@whytide/platform";
 
 export const ids = defineIds({
   per: "person",
   wco: "workspace_company",
+  com: "company",
   phash: "person_hash",
   rvd: "review_decision",
   sup: "suppression_entry",
   lsc: "lead_status_change",
+  exl: "exclusion_list",
 });

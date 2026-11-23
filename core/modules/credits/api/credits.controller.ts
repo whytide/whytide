@@ -1,7 +1,8 @@
-// GET …/credits/balance, GET …/credits/usage and the cost counter's GET …/credits/costs and GET
-// …/credits/leads/{personId}/cost (README "Public interface"), mounted by the api host under
-// /v1/workspaces/:workspaceId/credits. Each runs in the request's tenant run, for the run's
-// workspace, currentTenant(), never the id as the URL writes it; credits.read is required.
+// GET …/credits/balance, GET …/credits/usage, GET …/credits/prices and the cost counter's GET
+// …/credits/costs and GET …/credits/leads/{personId}/cost (README "Public interface"), mounted by the
+// api host under /v1/workspaces/:workspaceId/credits. Each runs in the request's tenant run, for the
+// run's workspace, currentTenant(), never the id as the URL writes it; credits.read is required. The
+// prices are the global list, read in the run as priceOf reads them.
 import {
   Controller,
   Get,
@@ -18,6 +19,7 @@ import { walletOf } from "../domain/balance.ts";
 import { leadCost } from "../domain/costs/lead.ts";
 import { weekOf } from "../domain/costs/week.ts";
 import { weeklyCosts } from "../domain/costs/weekly.ts";
+import { listPrices } from "../domain/prices.ts";
 import { disconnectClient } from "../domain/store.ts";
 import { listUsage } from "../domain/usage.ts";
 import { errors } from "../errors.ts";
@@ -34,6 +36,8 @@ import {
 import {
   type BalanceResponse,
   balanceResponse,
+  type PricesResponse,
+  pricesResponse,
   type UsageQuery,
   type UsageResponse,
   usageQuery,
@@ -62,6 +66,17 @@ export class CreditsController {
   })
   usage(@Query() query: UsageQuery): Promise<UsageResponse> {
     return listUsage(tenantClient, query);
+  }
+
+  @Get("prices")
+  @SetMetadata("whytide:permission", permissions["credits.read"])
+  @SetMetadata("whytide:api-route", {
+    summary:
+      "Every priced action's credits per unit in the price list in effect, with a rise announced for a later date",
+    response: pricesResponse,
+  })
+  prices(): Promise<PricesResponse> {
+    return listPrices(tenantClient, new Date());
   }
 
   @Get("costs")

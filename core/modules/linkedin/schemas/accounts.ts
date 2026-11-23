@@ -12,8 +12,11 @@ const workingHours = z.strictObject({
   days: z.array(z.int()).max(7),
 });
 const status = z.enum(["pending", "connected", "credentials_required", "error", "disconnected"]);
-/** Who holds a stop: the tester, through the screen, or the operator, through the command. */
-export const switchSource = z.enum(["tester", "operator"]);
+/**
+ * Who holds a stop: the tester, through the screen, or the operator, through the command; an
+ * account's alone, a member's removal, which only the account's owner lifts.
+ */
+export const switchSource = z.enum(["tester", "operator", "member_removed"]);
 
 export const connectBody = z.strictObject({
   /** The browser's IANA zone, `Intl.DateTimeFormat().resolvedOptions().timeZone`. */
@@ -60,8 +63,16 @@ export const accountResponse = z.strictObject({
   dailyReadCap: z.int(),
   /** The account is the signed-in user's own. */
   mine: z.boolean(),
-  /** The signed-in user holds linkedin.manage: may change, refresh, pause and disconnect the account. */
+  /** Its owner's name, else their email, among the workspace's members; null once they were removed. */
+  ownerName: z.string().nullable(),
+  /** The signed-in user holds linkedin.manage (an Owner): sees and pauses every member's account. */
   canManage: z.boolean(),
+  /** The signed-in user may relabel, refresh and disconnect it, and accept its disclosure: its owner. */
+  canEdit: z.boolean(),
+  /** Not paused, and the signed-in user may pause it: its owner or a holder of linkedin.manage. */
+  canPause: z.boolean(),
+  /** Paused, and the signed-in user may lift that pause: a tester's, its owner or a holder of linkedin.manage; a removed member's, its owner; the operator's, no one. */
+  canUnpause: z.boolean(),
   /** Paused (its kill switch): no LinkedIn action through it, reads included. */
   paused: z.boolean(),
   /** Who paused it, null while it is not paused: only the operator lifts the operator's pause. */

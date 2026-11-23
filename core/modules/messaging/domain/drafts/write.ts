@@ -9,7 +9,10 @@
 // id, and sends their texts in the <step> block of both calls; its last run publishes
 // messaging.step_draft_ready. That run writes only a draft still `drafting`: one the sweep failed
 // meanwhile stays failed, and the late answer is dropped. The person's colleagues' names, read once
-// in a run of their own after the dossier, feed the colleague-signal gate (beta-p3-020).
+// in a run of their own after the dossier, feed the colleague-signal gate (beta-p3-020). An email
+// draft (gamma-p3-070) is written by the email writer, a subject and a body, against the email
+// gates, a step's against its mailbox's other drafts of the last day, read with the draft; and every
+// draft is held back, with no model call, when the lead's profile is in another language.
 import {
   type AgentTask,
   agentModel,
@@ -23,16 +26,24 @@ import { type ActivityContext, AppError, isAppError, type Principal } from "@why
 import { resolveMembership } from "@whytide/tenancy";
 import { z } from "zod";
 import type { planMessageTask } from "../../agents/plan-message/task.ts";
+import type { writeEmailTask } from "../../agents/write-email/task.ts";
 import type { writeMessageTask } from "../../agents/write-message/task.ts";
 import { errors } from "../../errors.ts";
 import {
+  type Channel,
+  type EmailChannelBlock,
   type GateIssue,
+  type LinkedinChannelBlock,
   PLAN_MESSAGE,
   planOutput,
   type StepBlock,
+  WRITE_EMAIL,
   WRITE_MESSAGE,
+  type writeInput,
 } from "../../schemas/writer.ts";
 import { buildDossier } from "../dossier/build.ts";
+import { mailboxBodies } from "../gates/check-text.ts";
+import { EMAIL_SUBJECT_MAX_CHARACTERS, EMAIL_SUBJECT_MAX_WORDS } from "../gates/constants.ts";
 import {
   type Colleague,
   checkPlan,
@@ -43,7 +54,14 @@ import {
   limitsOf,
 } from "../gates/index.ts";
 import { type EarlierDraft, stepBlock, writerBlocks } from "./blocks.ts";
-import { EARLIER_DRAFTS_MAX, STEP_KEYS, STEP_KINDS, type StepDraftEnd } from "./constants.ts";
+import {
+  EARLIER_DRAFTS_MAX,
+  STEP_KEYS,
+  type StepDraftEnd,
+  type WrittenStepKind,
+} from "./constants.ts";
+import { kindFits, writtenKindOf } from "./kinds.ts";
+import { profileLanguage } from "./language.ts";
 import { parse, publishStepDraftEnds } from "./store.ts";
 
 /** Where writeDraft runs: the activity's workspace and runs; callAgent's options in a test. */
@@ -58,7 +76,8 @@ export type FailureCode =
   | "dossier_lead_not_found"
   | "write_failed"
   | "earlier_draft_invalid"
-  | "draft_stuck";
+  | "draft_stuck"
+  | "profile_not_english";
 
 /** A draft's regenerations, its plan's and its text's together (docs/security.md "The gates"). */
 export const MAX_REGENERATIONS = 2;
@@ -84,6 +103,8 @@ type Written = {
   readonly status: StepDraftEnd;
   readonly plan?: StoredPlan;
   readonly text?: string;
+  /** An email's subject as its writer answered it; null for none. */
+  readonly subject?: string | null;
   /** The last call's: the write's, or else the plan's. */
   readonly call?: Call;
   readonly dossierHash?: string;
@@ -103,11 +124,17 @@ export async function writeDraft(
 ): Promise<{ status: DraftStatus }> {
   const { draftId, userId, replacesId, earlierDraftIds = [] } = parse(writeDraftInput, input);
   const plan = registeredTask<typeof planMessageTask>(PLAN_MESSAGE);
-  const write = registeredTask<typeof writeMessageTask>(WRITE_MESSAGE);
-  const { draft, earlier } = await context.tenant(async (tx) => {
+  const { draft, earlier, others } = await context.tenant(async (tx) => {
     const draft = await tx.messageDraft.findFirst({ where: { id: draftId } });
-    const step = draft?.status === "drafting" && draft.kind === "outbound_step";
-    return { draft, earlier: step ? await readEarlier(tx, draft.personId, earlierDraftIds) : [] };
+    const drafting = draft?.status === "drafting";
+    const step = drafting && draft.kind === "outbound_step";
+    const mailbox = drafting ? draft.mailboxId : null;
+    return {
+      draft,
+      earlier: step ? await readEarlier(tx, draft.personId, earlierDraftIds) : [],
+      // Other persons' texts, for the near-duplicate gate in code only: never in a prompt or a log.
+      others: mailbox === null ? undefined : await mailboxBodies(tx, mailbox, draftId),
+    };
   });
   if (draft === null) throw new AppError(errors.draft_not_found);
   if (draft.status !== "drafting") return { status: draft.status };
@@ -133,6 +160,7 @@ export async function writeDraft(
     throw error;
   });
   if (dossier === null) return failed("dossier_lead_not_found");
+  if (profileLanguage(dossier) === "other") return failed("profile_not_english");
   const colleagues = await readColleagues(context, draft.personId);
   if (colleagues === null) return failed("dossier_lead_not_found");
 
@@ -141,11 +169,14 @@ export async function writeDraft(
   const limits = limitsOf(draft.channel);
   const blocks = writerBlocks(dossier);
   const known = factIdsOf(blocks);
-  const channel = { channel: draft.channel, minCharacters: limits.min, maxCharacters: limits.max };
   const step = stepOf(draft, earlier);
-  const shared = { channel, ...blocks, ...(step && { step }), replaced };
+  const writer = writerOf(draft.channel, step?.kind);
+  const shared = { ...blocks, ...(step && { step }), replaced };
   const ask = { workspaceId, subjectRef: draft.personId };
-  const models = { plan: await modelOf(plan), write: await modelOf(write) };
+  const models = { plan: await modelOf(plan), write: await modelOf(writer.task) };
+  const email = writer.email
+    ? { first: step?.kind === "email_first", ...(others && { others }) }
+    : null;
   const { dossierHash } = dossier;
   let regenerations = 0;
   const end = (written: Omit<Written, "dossierHash" | "regenerations">) =>
@@ -157,7 +188,7 @@ export async function writeDraft(
   let planGates: GateResult[] = [];
   for (;;) {
     if (planned === undefined) {
-      const input = { ...shared, failures: planFailures };
+      const input = { ...shared, channel: writer.channel, failures: planFailures };
       const result = await callAgent(plan, { ...ask, input }, context.call);
       const call = { decisionRecordId: result.decisionRecordId, ...models.plan };
       if (result.status === "ai_failed") return end({ status: "failed", call, flagReasons: ai });
@@ -177,15 +208,16 @@ export async function writeDraft(
     }
     const { angle, factIds, cta } = planned;
     const input = { ...shared, plan: { angle, factIds, cta }, failures: textFailures };
-    const result = await callAgent(write, { ...ask, input }, context.call);
+    const result = await writeOnce(writer, { ...ask, input }, context.call);
     const call = { decisionRecordId: result.decisionRecordId, ...models.write };
-    if (result.status === "ai_failed") {
+    if (result.written === null) {
       return end({ status: "failed", plan: planned, call, flagReasons: ai });
     }
-    const text = result.output.text.trim();
-    const gates = [...planGates, ...checkWrittenText(text, dossier, limits, colleagues)];
+    const { text, subject } = result.written;
+    const check = email ? { ...email, subject } : undefined;
+    const gates = [...planGates, ...checkWrittenText(text, dossier, limits, colleagues, check)];
     const issues = issuesOf(gates);
-    const done = { plan: planned, text, call, gates };
+    const done = { plan: planned, text, subject, call, gates };
     if (issues.length === 0) return end({ ...done, status: "ready", flagReasons: [] });
     if (regenerations === MAX_REGENERATIONS) {
       return end({ ...done, status: "flagged", flagReasons: issues });
@@ -209,6 +241,7 @@ async function store(
     status,
     plan: plan ?? Prisma.DbNull,
     text: text ?? null,
+    subject: written.subject ?? null,
     modelId: call?.modelId ?? null,
     promptVersion: call?.promptVersion ?? null,
     decisionRecordId: call?.decisionRecordId ?? null,
@@ -237,7 +270,9 @@ const stepKeys = z.enum(STEP_KEYS);
 
 /**
  * The drafts a step's draft builds on, oldest first; null when any id is not an `approved` step's
- * draft of the same person in this workspace.
+ * draft of the same person in this workspace. A draft the campaign's mode approved is read as the
+ * writer wrote it, without the AI disclosure line its frozen text ends with (gamma-p4-090): the
+ * mode approves no edited draft, so its `text` is what went out, less the line.
  */
 async function readEarlier(
   tx: TenantClient,
@@ -252,42 +287,101 @@ async function readEarlier(
     kind: "outbound_step",
     status: "approved",
   } as const;
-  const select = { stepKey: true, text: true, editedText: true } as const;
+  const select = { stepKey: true, text: true, editedText: true, disclosureApplied: true } as const;
   const orderBy = [{ createdAt: "asc" as const }, { id: "asc" as const }];
   const rows = await tx.messageDraft.findMany({ where, select, orderBy });
   if (rows.length !== unique.length) return null;
   const earlier: EarlierDraft[] = [];
-  for (const { stepKey, text, editedText } of rows) {
+  for (const { stepKey, text, editedText, disclosureApplied } of rows) {
     const key = stepKeys.safeParse(stepKey);
     if (!key.success) return null;
-    earlier.push({ stepKey: key.data, text, editedText });
+    earlier.push({ stepKey: key.data, text, editedText: disclosureApplied ? null : editedText });
   }
   return earlier;
 }
 
 /**
- * The <step> block of a step's draft, its kind from its stored step key; none for a lead's draft.
- * A note never reaches here (requestStepDraft makes it `ready`, with no writer): a note's key, or
- * no step's, is refused.
+ * The <step> block of a step's draft, its kind from its stored step key; a lead's draft's from the
+ * kind it was asked as, with no earlier text, none for a LinkedIn one asked without one, a first
+ * email for an email (kinds.ts). A note never reaches here (requestStepDraft makes it `ready`, with
+ * no writer): a note's key, no step's, or a kind off the channel, is refused.
  */
 function stepOf(
-  draft: { readonly kind: string; readonly stepKey: string | null },
+  draft: Parameters<typeof writtenKindOf>[0],
   earlier: readonly EarlierDraft[],
 ): StepBlock | undefined {
-  if (draft.kind !== "outbound_step") return undefined;
-  const key = stepKeys.safeParse(draft.stepKey);
-  const kind = key.success ? STEP_KINDS[key.data] : "note";
-  if (kind === "note") {
-    throw new AppError(errors.messaging_input_invalid, { details: { fields: ["stepKey"] } });
+  const kind = writtenKindOf(draft);
+  const step = draft.kind === "outbound_step";
+  if (kind === null && !step) return undefined;
+  if (kind === null || !kindFits(kind, draft.channel)) {
+    const fields = [step ? "stepKey" : "stepKind"];
+    throw new AppError(errors.messaging_input_invalid, { details: { fields } });
   }
-  return stepBlock(kind, earlier);
+  return stepBlock(kind, step ? earlier : []);
 }
+
+/** The channel's writer and its <channel> block: a LinkedIn text's characters, an email's words. */
+type Writer =
+  | {
+      readonly email: false;
+      readonly task: typeof writeMessageTask;
+      readonly channel: LinkedinChannelBlock;
+    }
+  | {
+      readonly email: true;
+      readonly task: typeof writeEmailTask;
+      readonly channel: EmailChannelBlock;
+    };
+
+function writerOf(channel: Channel, kind: WrittenStepKind | undefined): Writer {
+  const { min, max } = limitsOf(channel);
+  if (channel !== "email") {
+    const task = registeredTask<typeof writeMessageTask>(WRITE_MESSAGE);
+    return { email: false, task, channel: { channel, minCharacters: min, maxCharacters: max } };
+  }
+  const limits = { maxWords: EMAIL_SUBJECT_MAX_WORDS, maxCharacters: EMAIL_SUBJECT_MAX_CHARACTERS };
+  const subject = kind === "email_first" ? limits : null;
+  const task = registeredTask<typeof writeEmailTask>(WRITE_EMAIL);
+  return { email: true, task, channel: { channel, minWords: min, maxWords: max, subject } };
+}
+
+/**
+ * One call of the writer, with its <channel> block: the text, an email's body, trimmed, and an
+ * email's subject, trimmed, null for none; `written` null when the call failed (ai_failed).
+ */
+async function writeOnce(
+  writer: Writer,
+  request: { workspaceId: string; subjectRef: string; input: Omit<WriteInputs, "channel"> },
+  options: CallOptions | undefined,
+) {
+  const { workspaceId, subjectRef } = request;
+  const result = writer.email
+    ? await callAgent(
+        writer.task,
+        { workspaceId, subjectRef, input: { ...request.input, channel: writer.channel } },
+        options,
+      )
+    : await callAgent(
+        writer.task,
+        { workspaceId, subjectRef, input: { ...request.input, channel: writer.channel } },
+        options,
+      );
+  const { decisionRecordId } = result;
+  if (result.status === "ai_failed") return { decisionRecordId, written: null };
+  const { output } = result;
+  const written =
+    "body" in output
+      ? { text: output.body.trim(), subject: output.subject?.trim() || null }
+      : { text: output.text.trim(), subject: null };
+  return { decisionRecordId, written };
+}
+type WriteInputs = z.input<typeof writeInput>;
 
 /**
  * The names of the person's colleagues, for the colleague-signal gate, once per draft in a run of its
  * own, as the dossier is read; null when the person is gone meanwhile.
  */
-async function readColleagues(context: DraftContext, personId: string) {
+export async function readColleagues(context: DraftContext, personId: string) {
   return context
     .tenant((): Promise<Colleague[] | null> => colleaguesOf(personId))
     .catch((error: unknown) => {
@@ -309,13 +403,13 @@ async function readReplaced(context: DraftContext, replacesId: string, personId:
 }
 
 /** A task the host registered at start (loadAgentTasks); never imported here (agents/). */
-function registeredTask<T>(name: string): T {
+export function registeredTask<T>(name: string): T {
   const task = registeredAgentTasks().get(name);
   if (task === undefined) throw new AppError(errors.writer_agent_not_loaded);
   return task as unknown as T;
 }
 
 /** The model and the prompt version a task's calls record, as the draft keeps them. */
-async function modelOf(task: AgentTask) {
+export async function modelOf(task: AgentTask) {
   return { modelId: (await agentModel(task)).modelId, promptVersion: task.promptVersion };
 }

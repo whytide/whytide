@@ -1,10 +1,13 @@
-// start() (README "Start"): the modules and their onWorkerStart, the agents, the Temporal connection
-// and one worker on one task queue, the schedules, the starter of startWorkflow (starter.ts), the
-// canceller of cancelWorkflow (canceller.ts) and the scheduler of a row's schedule (scheduler.ts),
-// the outbox loop, GET /health and the gauges (metrics.ts), set at start and every 15 seconds.
+// start() (README "Start"): the modules and their onWorkerStart, the agents, the Temporal connection,
+// the starter of startWorkflow (starter.ts), the canceller of cancelWorkflow (canceller.ts) and the
+// scheduler of a row's schedule (scheduler.ts), bound before the worker polls, then one worker on one
+// task queue, the schedules, the outbox loop, GET /health and the gauges (metrics.ts), set at start
+// and every 15 seconds. The alert queue (alerts.ts) binds right after the modules, with their alert
+// events, so that it takes the activities', the workflows' and the outbox's alerts from the first.
 // close() undoes them in reverse: the gauges, the health server and the outbox loop first, then the
-// scheduler, the canceller, the starter and the worker once its activities settled, then Mastra and
-// the database clients. A failed start is logged with its code, undone and thrown.
+// worker once its activities settled, then the scheduler, the canceller and the starter, which an
+// activity still finishing may call until then, then Mastra, the database clients and the alert
+// queue. A failed start is logged with its code, undone and thrown.
 import { setTimeout as sleep } from "node:timers/promises";
 import { Client } from "@temporalio/client";
 import { NativeConnection, Worker } from "@temporalio/worker";
@@ -19,6 +22,7 @@ import {
 } from "@whytide/platform";
 import { hostActivity } from "./activities.ts";
 import { startAgents } from "./agents.ts";
+import { startAlerts, subscribeAlerts } from "./alerts.ts";
 import { workflowCanceller } from "./canceller.ts";
 import { workerConfig } from "./config.ts";
 import { type HealthReport, startHealth } from "./health.ts";
@@ -52,6 +56,8 @@ export type StartOptions = {
   readonly healthPort?: number;
   /** WORKER_SCHEDULES by default. */
   readonly schedules?: "on" | "off";
+  /** The alerts adapter, PROVIDER_ALERTS by default; empty for no team channel. */
+  readonly alerts?: string;
   /** The `app` client of the tenant runs, kept open by the caller; the host's own by default. */
   readonly client?: PrismaClient;
   readonly log?: Logger;
@@ -80,6 +86,9 @@ export async function start(options: StartOptions = {}): Promise<WorkerHost> {
     installRuntime();
     const modules = await loadModules(options.modules ?? moduleLoaders);
     await startModules(modules, log);
+    const alerts = await startAlerts({ log, selector: options.alerts });
+    undo.push(() => alerts.stop());
+    subscribeAlerts(modules.alerts);
     const client = options.client ?? createDbClient("app");
     undo.push(() => (options.client ? Promise.resolve() : client.$disconnect()));
     undo.push(disconnectTenantClient);
@@ -93,24 +102,10 @@ export async function start(options: StartOptions = {}): Promise<WorkerHost> {
         return [name, hostActivity(name, definition, { client, log })];
       }),
     );
-    const worker = await Worker.create({
-      connection,
-      namespace,
-      taskQueue,
-      identity: IDENTITY,
-      workflowBundle: await workflowBundle(options.workflowsPath ?? generatedWorkflows),
-      activities,
-      sinks: metricSinks(),
-    });
-    const done = worker.run();
-    done.catch((error: unknown) => log.fatal({ err: error }, "worker: the worker failed"));
-    undo.push(async () => {
-      if (worker.getState() === "RUNNING") worker.shutdown();
-      await done.catch(() => undefined);
-    });
+    // Bound before the worker polls: a run that waited on the queue while the host was down is
+    // taken at once, and its activity may call startWorkflow, cancelWorkflow or the scheduler. Their
+    // undo is pushed before the worker's, so that close() runs it after the worker has stopped.
     const temporal = new Client({ connection, namespace, identity: IDENTITY });
-    const paused = (options.schedules ?? workerConfig.WORKER_SCHEDULES) === "off";
-    await upsertSchedules(temporal, modules.schedules, { taskQueue, paused });
     const unbind = bindWorkflowStarter(workflowStarter(temporal, modules.workflows, taskQueue));
     undo.push(async () => unbind());
     const unbindCanceller = bindWorkflowCanceller(workflowCanceller(temporal));
@@ -118,6 +113,23 @@ export async function start(options: StartOptions = {}): Promise<WorkerHost> {
     const scheduler = workflowScheduler(temporal, modules.workflows, taskQueue);
     const unbindScheduler = bindWorkflowScheduler(scheduler);
     undo.push(async () => unbindScheduler());
+    const worker = await Worker.create({
+      connection,
+      namespace,
+      taskQueue,
+      identity: IDENTITY,
+      workflowBundle: await workflowBundle(options.workflowsPath ?? generatedWorkflows),
+      activities,
+      sinks: metricSinks(log),
+    });
+    const done = worker.run();
+    done.catch((error: unknown) => log.fatal({ err: error }, "worker: the worker failed"));
+    undo.push(async () => {
+      if (worker.getState() === "RUNNING") worker.shutdown();
+      await done.catch(() => undefined);
+    });
+    const paused = (options.schedules ?? workerConfig.WORKER_SCHEDULES) === "off";
+    await upsertSchedules(temporal, modules.schedules, { taskQueue, paused });
     const outbox = startOutboxLoop(client, log);
     undo.push(() => outbox.stop());
     const report = async (): Promise<HealthReport> => {

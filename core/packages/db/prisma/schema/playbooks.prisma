@@ -1,0 +1,71 @@
+// The tables of core/modules/playbooks (its docs/data.md), gamma-p3-040; migration
+// 20261105085424_playbooks_initial. Two tenant tables: a workspace's agents, each with an audience of
+// icp's and an owner, the member who created it; and the signal sources each agent holds. icp_id,
+// owner_user_id and source_id are plain ids: no foreign key crosses modules, and the commands check
+// the audience through icp's findAudience and each source through the source checker signals
+// registers (gamma-p5-045). A source links its agent by the pair (workspace_id, playbook_id), so the
+// database refuses a link across workspaces. Hand-written SQL in the migration, which the schema
+// cannot say: the partial unique key playbooks_live_icp, (workspace_id, icp_id) WHERE status <>
+// 'archived', one live agent per audience; and the CHECK playbooks_archived_at, archived_at set
+// exactly when the status is archived. Migration 20261113024829_playbooks_paused_reason
+// (gamma-p6-075) adds paused_reason and, hand-written, the CHECK playbooks_paused_reason,
+// paused_reason set exactly while the status is paused. No person data: no eraser.
+
+/// tenant
+model Playbook {
+  id           String                @id
+  workspaceId  String                @map("workspace_id")
+  /// 1 to 80 characters, trimmed (domain/constants.ts PLAYBOOK_NAME_MAX).
+  name         String
+  /// icp's audience, a plain id; one live agent per audience (playbooks_live_icp).
+  icpId        String                @map("icp_id")
+  /// The member who created it, whose own accounts its sources read through.
+  ownerUserId  String                @map("owner_user_id")
+  status       PlaybookStatus        @default(active)
+  /// Why it is paused: set exactly while the status is paused (the CHECK playbooks_paused_reason).
+  pausedReason PlaybookPausedReason? @map("paused_reason")
+  /// A user's id.
+  createdBy    String                @map("created_by")
+  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt    DateTime              @updatedAt @map("updated_at") @db.Timestamptz()
+  /// Set exactly when the status is archived (the CHECK playbooks_archived_at).
+  archivedAt   DateTime?             @map("archived_at") @db.Timestamptz()
+  sources      PlaybookSource[]
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, status])
+  @@map("playbooks")
+}
+
+// active and paused go back and forth; archived is final.
+enum PlaybookStatus {
+  active
+  paused
+  archived
+
+  @@map("playbook_status")
+}
+
+// Who paused an agent: a member through the PATCH, or its owner's removal from the workspace
+// (tenancy.member_removed, gamma-p6-075), which only the owner, a member again, resumes.
+enum PlaybookPausedReason {
+  user
+  member_removed
+
+  @@map("playbook_paused_reason")
+}
+
+/// tenant
+model PlaybookSource {
+  id          String   @id
+  workspaceId String   @map("workspace_id")
+  playbookId  String   @map("playbook_id")
+  /// signals' source (`src_`), a plain id: a source belongs to one agent (the unique key).
+  sourceId    String   @map("source_id")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  playbook    Playbook @relation(fields: [workspaceId, playbookId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([workspaceId, sourceId])
+  @@index([workspaceId, playbookId])
+  @@map("playbook_sources")
+}

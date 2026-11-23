@@ -5,9 +5,12 @@
 // menu, its toast and the badge with its reason; the lead list's row menu, which opens no lead, a
 // double click sending one request; the screen's rows and who added each, Remove after its
 // confirmation, an opt-out without one; the form by a profile, a domain, and an opt-out after its
-// confirmation, an invalid value's error under the field; the screen's loading, failed and empty
-// states, through the e2e api's hold and fail cookies (tests/e2e-hold.ts). Every text from its key;
-// axe on each state.
+// confirmation, an invalid value's error under the field; per channel (gamma-p2-040), the form's
+// channel and relationship, the list's channel, relationship and opt-out reasons in words, and a
+// Member's view without Remove; by an email address (gamma-rf-040), the address listed with the
+// name of the lead who holds it, or alone, and the lead page's badge; the screen's loading, failed
+// and empty states, through the e2e api's hold and fail cookies (tests/e2e-hold.ts). Every text
+// from its key; axe on each state.
 import { randomUUID } from "node:crypto";
 import { AxeBuilder } from "@axe-core/playwright";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
@@ -18,6 +21,8 @@ import { expect, test } from "./sign-in.ts";
 
 const WORKSPACE = "wsp_e2e_never_contact";
 const TEAMMATE = "e2e-usage@example.com";
+/** A Member of this workspace alone, no Owner (core/apps/api/tests/e2e-server.ts). */
+const MEMBER = "e2e-member@example.com";
 const messages: Record<string, string> = { ...contacts, ...platform, ...ui };
 
 /** The text of a key, its `{name}` placeholders filled; a key missing from the messages fails. */
@@ -176,12 +181,14 @@ test("the screen lists the entries newest first with who added them; Remove afte
   await expect(heading(page)).toHaveText(say("contacts.never_contact.title"));
   const you = say("contacts.never_contact.added_by.you");
   const never = say("contacts.never_contact.list.blocklist");
+  const every = say("contacts.never_contact.channel.all");
   const removeText = say("contacts.never_contact.remove.action");
   await expect(rows(page)).toHaveCount(3);
   await expect(rows(page).nth(0).locator("th, td")).toHaveText([
     `${COMPANY.name} ${COMPANY.domain}`,
     say("contacts.never_contact.kind.company"),
     never,
+    every,
     you,
     /\d/,
     removeText,
@@ -190,6 +197,7 @@ test("the screen lists the entries newest first with who added them; Remove afte
     `Ada Harbor ${profile("ada")}`,
     say("contacts.never_contact.kind.person"),
     never,
+    every,
     you,
     /\d/,
     removeText,
@@ -197,7 +205,8 @@ test("the screen lists the entries newest first with who added them; Remove afte
   await expect(rows(page).nth(2).locator("th, td")).toHaveText([
     `Cleo Stop ${profile("cleo")}`,
     say("contacts.never_contact.kind.person"),
-    say("contacts.never_contact.list.opt_out"),
+    `${say("contacts.never_contact.list.opt_out")} ${say("contacts.never_contact.reason.reply_opt_out")}`,
+    every,
     say("contacts.never_contact.added_by.system"),
     /\d/,
     "",
@@ -286,7 +295,7 @@ test("the screen adds a person by a profile and a company by a domain, an invali
 
   await page.goto(`/w/${WORKSPACE}/never-contact`);
   await expect(rows(page)).toHaveCount(2);
-  const addedBy = (text: string) => row(page, text).locator("td").nth(2);
+  const addedBy = (text: string) => row(page, text).locator("td").nth(3);
   await expect(addedBy("teammate-nc.example")).toHaveText(
     say("contacts.never_contact.added_by.teammate"),
   );
@@ -347,12 +356,162 @@ test("the screen adds a person by a profile and a company by a domain, an invali
     profile("optout"),
     say("contacts.never_contact.kind.person"),
     say("contacts.never_contact.list.opt_out"),
+    say("contacts.never_contact.channel.all"),
     say("contacts.never_contact.added_by.you"),
     /\d/,
     "",
   ]);
   await expect(optedOut.getByRole("button")).toHaveCount(0);
   await expect(rows(page)).toHaveCount(5);
+});
+
+test("the form adds a person on LinkedIn only and a company as a competitor by its domain; the list shows each channel, the relationship and an opt-out's reason in words; a relationship on a company page is refused under the field; axe", async ({
+  page,
+  signInAs,
+  baseURL,
+}) => {
+  await signInAs();
+  await seed(page, baseURL, [
+    { ...at("cleo", "Cleo", "Stop", 70), optedOut: true },
+    { ...at("dina", "Dina", "Spam", 60), optedOut: "complaint" },
+    { ...at("eli", "Eli", "Gone", 50), optedOut: "legal_hold" },
+  ]);
+  await page.goto(`/w/${WORKSPACE}/never-contact`);
+  await expect(rows(page)).toHaveCount(3);
+  const listOf = (text: string) => row(page, text).locator("td").nth(1);
+  const channelOf = (text: string) => row(page, text).locator("td").nth(2);
+  const optedOut = say("contacts.never_contact.list.opt_out");
+  const reasons = [
+    ["cleo", "contacts.never_contact.reason.reply_opt_out"],
+    ["dina", "contacts.never_contact.reason.complaint"],
+    ["eli", "contacts.never_contact.reason.other"],
+  ] as const;
+  for (const [slug, reason] of reasons) {
+    await expect(listOf(profile(slug))).toHaveText(`${optedOut} ${say(reason)}`);
+    await expect(channelOf(profile(slug))).toHaveText(say("contacts.never_contact.channel.all"));
+  }
+
+  const form = page.getByRole("region", { name: say("contacts.never_contact.form.title") });
+  const field = (key: string) => form.getByLabel(say(key), { exact: true });
+  const kind = field("contacts.never_contact.form.kind");
+  const layer = field("contacts.never_contact.form.list");
+  const channel = field("contacts.never_contact.form.channel");
+  const relationship = field("contacts.never_contact.form.relationship");
+  const add = button(form, say("contacts.never_contact.form.add"));
+
+  // A person on LinkedIn only: a person has no relationship, and an opt-out no channel.
+  await expect(relationship).toHaveCount(0);
+  await channel.selectOption("linkedin");
+  await field("contacts.never_contact.form.value_person").fill("linkedin.com/in/e2e-nc-li-only");
+  await add.click();
+  await expect(toast(page, "contacts.never_contact.toast.added")).toBeVisible();
+  await expect(channelOf(profile("li-only"))).toHaveText(
+    say("contacts.never_contact.channel.linkedin"),
+  );
+  await layer.selectOption("opt_out");
+  await expect(channel).toHaveCount(0);
+  await layer.selectOption("blocklist");
+
+  // A competitor by its domain, on every channel, with its Remove.
+  await kind.selectOption("company");
+  await channel.selectOption("all");
+  await relationship.selectOption("competitor");
+  const companyValue = field("contacts.never_contact.form.value_company");
+  await companyValue.fill("rival-nc.example");
+  await add.click();
+  await expect(listOf("rival-nc.example")).toHaveText(
+    say("contacts.never_contact.relationship.competitor"),
+  );
+  await expect(channelOf("rival-nc.example")).toHaveText(say("contacts.never_contact.channel.all"));
+  await expect(row(page, "rival-nc.example").getByRole("button")).toHaveCount(1);
+  // A relationship is on a domain: a company page is refused, in words under the field.
+  await relationship.selectOption("customer");
+  await companyValue.fill("linkedin.com/company/e2e-nc-page");
+  await add.click();
+  const invalid = say("contacts.errors.contacts_input_invalid");
+  await expect(form.getByText(invalid, { exact: true })).toBeVisible();
+  await axe(page);
+  await expect(rows(page)).toHaveCount(5);
+});
+
+test("the form adds a person by an email address: the list shows the address with the name of the lead who holds it, or the address alone, and the lead page's badge; a text that is neither a profile nor an address is refused under the field; axe", async ({
+  page,
+  signInAs,
+  baseURL,
+}) => {
+  await signInAs();
+  const [ada] = await seed(page, baseURL, [
+    { ...at("ada", "Ada", "Harbor", 90), email: "ada@blueharbor.example" },
+  ]);
+  await page.goto(`/w/${WORKSPACE}/never-contact`);
+  await expect(heading(page)).toHaveText(say("contacts.never_contact.title"));
+  const form = page.getByRole("region", { name: say("contacts.never_contact.form.title") });
+  const value = form.getByLabel(say("contacts.never_contact.form.value_person"), { exact: true });
+  const add = button(form, say("contacts.never_contact.form.add"));
+
+  // Ada's address as a member pastes it: kept trimmed and in lower case, under her name.
+  await value.fill(" Ada@BlueHarbor.example ");
+  await add.click();
+  await expect(toast(page, "contacts.never_contact.toast.added")).toBeVisible();
+  await expect(value).toHaveValue("");
+  await expect(row(page, "ada@blueharbor.example").locator("th, td")).toHaveText([
+    "Ada Harbor ada@blueharbor.example",
+    say("contacts.never_contact.kind.email"),
+    say("contacts.never_contact.list.blocklist"),
+    say("contacts.never_contact.channel.all"),
+    say("contacts.never_contact.added_by.you"),
+    /\d/,
+    say("contacts.never_contact.remove.action"),
+  ]);
+  // An address no lead holds: the address alone.
+  await value.fill("nobody-nc@blueharbor.example");
+  await add.click();
+  await expect(row(page, "nobody-nc@blueharbor.example").locator("th, td").first()).toHaveText(
+    "nobody-nc@blueharbor.example",
+  );
+  // Neither a profile nor an address: the api's error under the field.
+  await value.fill("ada at blueharbor.example");
+  await add.click();
+  const invalid = say("contacts.errors.suppression_target_invalid");
+  await expect(form.getByText(invalid, { exact: true })).toBeVisible();
+  await expect(value).toHaveAttribute("aria-invalid", "true");
+  await axe(page);
+  await expect(rows(page)).toHaveCount(2);
+
+  // A block on every channel on her address stops Ada herself.
+  await page.goto(`/w/${WORKSPACE}/leads/${ada}`);
+  await expect(heading(page)).toHaveText("Ada Harbor");
+  await expect(badgeOf(page, "never_contact_person")).toBeVisible();
+});
+
+test("a Member sees the add form and the list without Remove, and adds an entry: lifting an exclusion is an Owner's or an Admin's; axe", async ({
+  page,
+  signInAs,
+  baseURL,
+}) => {
+  await signInAs();
+  const [ada] = await seed(page, baseURL);
+  await block(page, baseURL, { kind: "person", personId: ada });
+  await signInAs(MEMBER);
+  await page.goto(`/w/${WORKSPACE}/never-contact`);
+  await expect(rows(page)).toHaveCount(2);
+  // The viewer is known once "added by" names the Owner's entry a teammate's.
+  const teammate = say("contacts.never_contact.added_by.teammate");
+  await expect(row(page, profile("ada")).locator("td").nth(3)).toHaveText(teammate);
+  const removeHeader = say("contacts.never_contact.columns.remove");
+  await expect(page.getByRole("columnheader", { name: removeHeader })).toHaveCount(0);
+  await expect(rows(page).getByRole("button")).toHaveCount(0);
+  await axe(page);
+
+  const form = page.getByRole("region", { name: say("contacts.never_contact.form.title") });
+  const value = form.getByLabel(say("contacts.never_contact.form.value_person"), { exact: true });
+  await value.fill("linkedin.com/in/e2e-nc-by-member");
+  await button(form, say("contacts.never_contact.form.add")).click();
+  await expect(toast(page, "contacts.never_contact.toast.added")).toBeVisible();
+  await expect(row(page, profile("by-member")).locator("td").nth(3)).toHaveText(
+    say("contacts.never_contact.added_by.you"),
+  );
+  await expect(rows(page).getByRole("button")).toHaveCount(0);
 });
 
 test("the screen's states: loading while its read is held, a failed read in words with a retry, the empty list pointing to the leads; axe on each", async ({

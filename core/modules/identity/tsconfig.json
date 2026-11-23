@@ -7,8 +7,13 @@
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
     "erasableSyntaxOnly": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    // The NestJS controllers of api/ need both (core/apps/api/README.md "Modules"); Node cannot run
+    // decorated sources, so the api host loads this module's dist/, and the tests import no controller.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
   },
+  // The screens (ui/**/*.tsx) are the web host's to compile and check (core/apps/web/docs/screens.md).
   "include": ["**/*.ts"],
   "exclude": ["dist", "node_modules"],
   "references": [

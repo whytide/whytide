@@ -23,7 +23,7 @@
 - Start from the acceptance criteria: the task's end-to-end test proves them from the outside, and a unit test covers only the business logic that deserves isolation ([coding §11](coding.md#11-tests)). Write the test before the code that satisfies it where you can; what cannot be tested is a recorded manual check in the pull request.
 - **Run the task's own tests, never the whole app's:** the task's end-to-end spec by name, the module's tests with `pnpm -F <module> test`, lint and typecheck on the module. Watch mode while coding, one full run of those before the pull request.
 - Keep `domain/` pure, the fake adapters in the tests, the strings in the message file, the docs in the module. The lint rules say when you forget; do not silence them.
-- Commit small and often. Subject in the imperative, under 70 characters; the task ID in the body. The squash merge removes the branch's history, so a rough commit on the branch is fine.
+- Commit small and often: commit each finished piece before you start the next, never all at the end. Subject in the imperative, under 70 characters; the task ID in the body. The merge keeps every commit of the branch (a merge commit, never a squash), so the history shows the work step by step.
 
 ## 4. Before the pull request
 
@@ -70,7 +70,7 @@ Also: the migration is named `<module>_<change>`; the `.env.example` block is up
 - One module or package, under about 700 changed lines. Split otherwise.
 - The template's questions, answered: which module; which task and briefs; migration yes or no; new provider yes or no; new permission, price, event, setting or message keys yes or no; docs updated or `docs-not-needed`; changeset present; made by a coding agent yes or no (the `ai-generated` label).
 - Call out, in the description, every new dependency, network call, permission, table with personal data, or way for data to leave the system ([security §8](security.md#8-conduct)).
-- One review by a module owner; two on the security-sensitive paths. Squash merge, linear history, no force-push to `main`.
+- One review by a module owner; two on the security-sensitive paths. Merge with a merge commit, never a squash, so `main` keeps the branch's full commit history. No force-push to `main`.
 - Never edit the pipeline definition, `CODEOWNERS`, a security-sensitive path or a generated file to make a check pass. Review treats that as a defect.
 - Branches live days, not weeks. Unfinished work ships behind a flag.
 

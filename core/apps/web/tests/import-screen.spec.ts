@@ -4,8 +4,9 @@
 // through the file input, reached by keyboard: its report, the run, which the api answers running,
 // and the counts once the poll's answer is the api's with what the worker writes (the worker's own
 // test, core/apps/worker/tests/discovery-import.test.ts, imports the file). The 46 leads the worker
-// writes are put in by the e2e api's test-only route, through contacts' commands, and the run's link
-// opens the lead list that counts them; axe, and the job in the past imports of a new load. Then a
+// writes, their source the job named by its file, are put in by the e2e api's test-only route,
+// through contacts' commands, and the run's View leads opens the lead list of the job that counts
+// them; axe, and the job in the past imports of a new load, which links to its leads. Then a
 // 6 MB file, refused without a request, and a file without linkedin_url. It lives here as
 // discovery's route tests live in the api's: a module's test never imports a host.
 import { readFileSync } from "node:fs";
@@ -26,7 +27,7 @@ function validSlugs(): string[] {
   return [...new Set(slugs.flatMap((slug) => (slug?.[1] ? [slug[1]] : [])))];
 }
 
-test("the 50-row file by keyboard: 46 valid and four errors by row, the run in the worker and its counts, the 46 leads on the lead list, axe, the job in the past imports", async ({
+test("the 50-row file by keyboard: 46 valid and four errors by row, the run in the worker and its counts, the job's 46 leads on the lead list, axe, the job in the past imports with its leads", async ({
   page,
   signInAs,
   baseURL,
@@ -34,14 +35,8 @@ test("the 50-row file by keyboard: 46 valid and four errors by row, the run in t
   // Three screens and 46 leads written: past Playwright's 30 seconds on a loaded laptop.
   test.slow();
   await signInAs();
-  // The worker's leads, the file's 46 profiles imported and pending qualification, put in through
-  // contacts' commands by the e2e api's test-only route while the screen uploads and runs.
   const slugs = validSlugs();
   expect(slugs).toHaveLength(46);
-  const seeding = page.request.post(`/api/v1/workspaces/${WORKSPACE}/e2e/leads`, {
-    data: { leads: slugs.map((slug) => ({ slug, source: "imported" })) },
-    headers: { origin: baseURL ?? "" },
-  });
   await page.goto(`/w/${WORKSPACE}/import`);
   await expect(page).toHaveTitle(say("discovery.import.title"));
   const input = picker(page);
@@ -77,6 +72,13 @@ test("the 50-row file by keyboard: 46 valid and four errors by row, the run in t
   const started = await run;
   expect(started.status()).toBe(202);
   const { id } = (await started.json()) as { id: string };
+  // The worker's leads, the file's 46 profiles imported and pending qualification, their source the
+  // job named by its file, put in through contacts' commands by the e2e api's test-only route.
+  const source = { kind: "imported", ref: id, label: "fifty-rows.csv" };
+  const seeding = page.request.post(`/api/v1/workspaces/${WORKSPACE}/e2e/leads`, {
+    data: { leads: slugs.map((slug) => ({ slug, source: "imported", sources: [source] })) },
+    headers: { origin: baseURL ?? "" },
+  });
   await expect(page.getByText(say("discovery.import.running"), { exact: true })).toBeVisible();
   const counts = { created: 46, updated: 0, skippedDuplicate: 1, skippedErased: 0, errors: 3 };
   await workerWrites(page, id, { status: "done", counts, finishedAt: new Date().toISOString() });
@@ -88,8 +90,8 @@ test("the 50-row file by keyboard: 46 valid and four errors by row, the run in t
   await expect(figure(page, "discovery.import.result.skipped_duplicate")).toHaveText("1");
   await expect(figure(page, "discovery.import.result.skipped_erased")).toHaveText("0");
   await expect(figure(page, "discovery.import.result.errors")).toHaveText("3");
-  const leads = page.getByRole("link", { name: say("discovery.import.view_leads") });
-  await expect(leads).toHaveAttribute("href", `/w/${WORKSPACE}/leads`);
+  const leads = page.getByRole("link", { name: say("discovery.import.view_leads"), exact: true });
+  await expect(leads).toHaveAttribute("href", `/w/${WORKSPACE}/leads?source=${id}`);
   const seeded = await seeding;
   expect(seeded.status(), await seeded.text()).toBe(200);
 
@@ -98,7 +100,7 @@ test("the 50-row file by keyboard: 46 valid and four errors by row, the run in t
   const blocking = violations.filter((v) => v.impact === "serious" || v.impact === "critical");
   expect(blocking.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(", ")}`)).toEqual([]);
 
-  // The run's link opens the lead list, which counts the 46 leads, pending qualification.
+  // View leads opens the lead list of the job, which counts its 46 leads, pending qualification.
   await leads.click();
   const pending = say("contacts.leads.status.pending");
   const pills = page.getByRole("list", { name: say("contacts.leads.counts_label") });
@@ -125,7 +127,13 @@ test("the 50-row file by keyboard: 46 valid and four errors by row, the run in t
     "0",
     "1",
     "3",
+    say("discovery.import.view_leads"),
   ]);
+  const view = say("discovery.import.history.view_leads_of", fifty);
+  await expect(done.first().getByRole("link", { name: view })).toHaveAttribute(
+    "href",
+    `/w/${WORKSPACE}/leads?source=${id}`,
+  );
 });
 
 test("a 6 MB file shows import_too_large without a request; a file without linkedin_url shows import_missing_column", async ({

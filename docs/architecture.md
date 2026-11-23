@@ -394,6 +394,7 @@ flowchart TB
     O1["organizations, subscriptions"]
     O2["credit_balances, credit_grants, credit_usage"]
     O3["provider keys, the agent-sending setting, the deny list"]
+    O4["group_companies: a sharing group's company facts"]
   end
   subgraph W["Workspace: everything else, RLS fails closed"]
     W1["persons, leads, lists, suppression_entries"]
@@ -408,6 +409,7 @@ flowchart TB
 - **The `app` role** is neither table owner nor superuser. CI checks that every tenant table has `workspace_id` and a policy, and runs two-workspace isolation tests.
 - **Cross-tenant jobs** (DNC matching, ledger reconciliation, erasure lookups, fleet telemetry, the company-index refresh) use narrow roles with grants on the named tables only.
 - **Organization-level data** (the wallet, provider keys, settings) matches on `organization_id`. Organization-level suppression (Cloud 2) applies to every workspace in the organization.
+- **Sharing groups** (gamma-rf-010): a company's facts that an organization's own accounts, imports and vendors found sit in `group_companies`, keyed by `sharing_group_id`, today the organization's id (tenancy's `sharingGroupOf()`); the global `companies` holds only what a shared class found (open data and websites by default, contacts' `CONTACTS_SHARED_FACT_SOURCES`), and a CHECK refuses any other class. Neither table has `workspace_id`: contacts alone queries them, in the caller's run, with the run's group, never one a caller names, and `app` holds no DELETE on them.
 - **Growth:** `workspace_id` on every row is what allows sharding by workspace later. Nothing in Core needs it.
 
 | Role | Used by | Can | Cannot |
@@ -520,7 +522,8 @@ erDiagram
   persons ||--o{ contact_points : "has"
   persons ||--o| leads : "becomes"
   persons }o--o| workspace_companies : "works at"
-  workspace_companies }o--|| companies : "global index"
+  workspace_companies }o--o| companies : "global index"
+  companies ||--o{ group_companies : "a sharing group's facts"
   leads ||--o{ score_snapshots : "scored"
   score_snapshots ||--o{ criterion_verdicts : "per criterion"
   leads ||--o{ review_decisions : "labeled"
@@ -1357,7 +1360,7 @@ flowchart LR
     S10["CodeQL, Semgrep, gitleaks,<br/>dependency review, license check"]
   end
   CI --> REV["review: one module owner,<br/>two on security-sensitive paths,<br/>the ai-generated label"]
-  REV --> MERGE["squash merge, linear history"]
+  REV --> MERGE["merge commit, never a squash:<br/>the full commit history"]
   MERGE --> RELEASE["release: changesets, semantic version,<br/>images, SBOM, signatures"]
 ```
 

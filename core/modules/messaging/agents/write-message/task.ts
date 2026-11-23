@@ -13,7 +13,7 @@ export const writeMessageTask = defineAgentTask(
     module: "messaging",
     kind: "generation",
     model: settings.AI_MODEL_MESSAGING_WRITE_MESSAGE,
-    promptVersion: 2,
+    promptVersion: 3,
     inputSchema: writeInput,
     outputSchema: writeOutput,
     // Not priced in credits in alpha: the cost event alone records it.

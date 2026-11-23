@@ -1,6 +1,7 @@
 // The root of every page: the one stylesheet (globals.css), the theme the person chose, from its
-// cookie, so the server renders it with no flash (@whytide/ui/theme), and the bundle's messages for
-// next-intl and for the components. Each page renders per request, so that Next.js marks its scripts
+// cookie, so the server renders it with no flash (@whytide/ui/theme), the bundle's messages for
+// next-intl and for the components, and the viewer's time zone written for the next render
+// (src/shell/time-zone.tsx). Each page renders per request, so that Next.js marks its scripts
 // with the nonce of the request's content security policy (proxy.ts).
 import "./globals.css";
 import { THEME_COOKIE, themeAttribute, themeOf } from "@whytide/ui/theme";
@@ -9,6 +10,7 @@ import { connection } from "next/server";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
 import type { ReactNode } from "react";
+import { TimeZone } from "../src/shell/time-zone.tsx";
 import { Translations } from "../src/shell/translations.tsx";
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
@@ -20,6 +22,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html lang={await getLocale()} data-theme={themeAttribute(theme)} className="scroll-pb-24">
       <body>
         <NextIntlClientProvider>
+          <TimeZone />
           <Translations>{children}</Translations>
         </NextIntlClientProvider>
       </body>

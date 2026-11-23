@@ -4,12 +4,16 @@
 // slot, and logged as read_profile under the step; refused, the credits are freed and the step waits
 // unplaced, until the refusal's time, with its code. Settled on linkedin's answer: a profile commits
 // the read and stores the member id on the person through contacts, at the person's stored URL, so a
-// changed profile URL never makes a second person; no profile (linkedin_not_found) commits the read,
-// frees the credits, fails the step (profile_unreadable) and ends the enrollment (send_refused);
-// another refusal commits the read too, and no answer releases it, the credits freed and the step
-// waiting either way. workflows/profile.ts writes and reads the two files, outside the runs. A stored
-// URL off the port's schema reserves no read and fails the step (linkedin_input_invalid), and a settle
-// retried after its files are gone answers from the person (beta-p4-040).
+// changed profile URL never makes a second person; a 1st-degree connection's profile frees the
+// credits first, does the same, then skips the connection request as already connected, its first
+// message due next, with no slot and no invite (connected.ts, connect-already-connected); no profile
+// (linkedin_not_found) commits the read, frees the credits, fails the step (profile_unreadable) and
+// ends the enrollment (send_refused); another refusal commits the read too, and no answer releases
+// it, the credits freed and the step waiting either way. workflows/profile.ts writes and reads the
+// two files, outside the runs. A stored URL off the port's schema reserves no read and fails the
+// step (linkedin_input_invalid), and a settle retried after its files are gone answers from the
+// person (beta-p4-040). A person known by an email address alone, with no profile, reserves no read:
+// the step fails with no_linkedin_profile and its enrollment ends, the credits freed (gamma-rf-050).
 import { cancelItems } from "@whytide/approvals";
 import {
   errors as contactsErrors,
@@ -27,14 +31,19 @@ import {
   reserveReads,
 } from "@whytide/linkedin";
 import { isAppError } from "@whytide/platform";
+import { LIVE_ENROLLMENT_STATUSES, NO_PAUSE } from "../constants.ts";
 import { PENDING_STEP_STATUSES, STEP_NOT_READY } from "../gate/constants.ts";
 import type { GateReason } from "../gate/gate.ts";
+import { linkedinSenderAccount } from "../steps/actions.ts";
 import { checkedCode } from "../steps/codes.ts";
 import { STEP_REASON_CODES, type StepReasonCode } from "../steps/constants.ts";
 import { finishLead, lockEnrollment } from "../steps/skip.ts";
+import { skipConnected } from "./connected.ts";
 import {
+  ALREADY_CONNECTED,
   INPUT_INVALID,
   MEMBER_REF_KEY,
+  NO_LINKEDIN_PROFILE,
   PROFILE_FILE,
   PROFILE_READ_KIND,
   PROFILE_REQUEST_FILE,
@@ -86,7 +95,8 @@ export async function needsProfileRead(personId: string): Promise<boolean> {
  * The read of the claimed, charged step reserved under its sender account, logged under the step;
  * refused, the credits freed and the step back to `scheduled`, unplaced, waiting until the refusal's
  * time with its code. A step no longer claimed, or a person erased meanwhile, frees the credits too;
- * a stored URL off the port's schema, a defect, fails the step at `at` before any read (beta-p4-040).
+ * a person without a profile (no_linkedin_profile, gamma-rf-050) and a stored URL off the port's
+ * schema, a defect, fail the step at `at` before any read (beta-p4-040), the credits freed.
  */
 export async function reserveProfileRead(
   id: string,
@@ -100,19 +110,26 @@ export async function reserveProfileRead(
   const person = await personOf(step.personId);
   if (person === null)
     return { blocked: (await blockClaimed(id, holds, "person_not_found")).reason };
-  if (!profileRequestFile.safeParse({ profileUrl: person.linkedinUrl }).success) {
+  const profileUrl = person.linkedinUrl;
+  if (profileUrl === null) {
+    // A person known by an email address alone (gamma-rf-050): no read, the code the exit detail.
+    await releaseHolds(holds);
+    await failStep(id, NO_LINKEDIN_PROFILE, true, at);
+    return { blocked: NO_LINKEDIN_PROFILE };
+  }
+  if (!profileRequestFile.safeParse({ profileUrl }).success) {
     await releaseHolds(holds);
     await failStep(id, INPUT_INVALID, true, at);
     return { blocked: INPUT_INVALID };
   }
-  const accountId = step.senderAccountId;
+  const accountId = linkedinSenderAccount({ id, senderAccountId: step.senderAccountId });
   const read = await reserveReads({ accountId, count: 1, kind: PROFILE_READ_KIND, objectRef: id });
   if ("refused" in read) {
     await releaseHolds(holds);
     await waitAgain(where, waitCode(read.refused), read.retryAt);
     return { refused: read.refused, retryAt: read.retryAt?.toISOString() ?? null };
   }
-  return { reservationId: read.reservationId, profileUrl: person.linkedinUrl };
+  return { reservationId: read.reservationId, profileUrl };
 }
 
 /** The step's read settled at `at` on linkedin's answer (the file's header). */
@@ -126,6 +143,9 @@ export async function settleProfileRead(
   at: Date,
 ): Promise<ProfileSettled> {
   const { stepExecutionId: id, holds, reservationId, answer } = input;
+  if (answer !== null && "profile" in answer && answer.profile.connected === true) {
+    return settleConnected(id, holds, reservationId, answer.profile, at);
+  }
   if (answer !== null && "profile" in answer) {
     await commitReads(reservationId, 1);
     const stored = await storeMemberRef(id, answer.profile);
@@ -145,6 +165,28 @@ export async function settleProfileRead(
   }
   await waitAgain({ id, status: "executing" }, waitCode(code));
   return { refused: code, retryAt: null };
+}
+
+/**
+ * The read of a 1st-degree connection, settled at `at` (the file's header): the credits freed first,
+ * then the read committed; the lead locked before the member id is stored on the person, the order
+ * the skip's locks take; then the connection request skipped (connected.ts), with no slot taken.
+ */
+async function settleConnected(
+  id: string,
+  holds: Holds,
+  reservationId: string,
+  profile: ProfileFile,
+  at: Date,
+): Promise<ProfileSettled> {
+  await releaseHolds(holds);
+  await commitReads(reservationId, 1);
+  const where = { id, status: "executing" } as const;
+  const step = await tenantClient.stepExecution.findFirst({ where, select: { personId: true } });
+  if (step !== null) await lockLeadStatus(step.personId);
+  await storeMemberRef(id, profile);
+  await skipConnected(id, at);
+  return { blocked: ALREADY_CONNECTED };
 }
 
 /**
@@ -170,7 +212,8 @@ async function storeMemberRef(id: string, profile: ProfileFile): Promise<boolean
   const where = { id, status: "executing" } as const;
   const step = await tenantClient.stepExecution.findFirst({ where, select: { personId: true } });
   const person = step === null ? null : await personOf(step.personId);
-  if (person === null) return false;
+  // No read is reserved for a person without a profile (reserveProfileRead): none to store.
+  if (person === null || person.linkedinUrl === null) return false;
   const { providerMemberRef, firstName, lastName, headline, title, companyName } = profile;
   const fields = { firstName, lastName, headline, title, companyName };
   try {
@@ -213,8 +256,8 @@ async function failUnreadable(id: string, at: Date): Promise<void> {
   });
   await cancelItems([id, ...cancelled.map((row) => row.id)]);
   const { count } = await tenantClient.enrollment.updateMany({
-    where: { id: step.enrollmentId, status: "active" },
-    data: { status: "exited", exitReason: "send_refused", endedAt: at },
+    where: { id: step.enrollmentId, status: { in: [...LIVE_ENROLLMENT_STATUSES] } },
+    data: { status: "exited", exitReason: "send_refused", endedAt: at, ...NO_PAUSE },
   });
   if (count === 1) await finishLead(step, SYSTEM);
 }

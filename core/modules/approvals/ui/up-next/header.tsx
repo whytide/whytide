@@ -1,7 +1,8 @@
 // The top of "Up next" (README.md "Screen"): the title, what the screen is for, the counters "to
-// approve" and "decided today" once the queue is read, and the line that nothing here sends. The
-// page renders it while the queue loads, and queue.tsx with the counters of its last read, so that a
-// decision updates them without reading the page again.
+// approve" and "decided today" once the queue is read, the member's totals over their senders
+// (gamma-p6-050), and the line that nothing here sends. The page renders it while the queue loads,
+// and queue.tsx with the counters of its last read, so that a decision updates them without reading
+// the page again.
 import { Badge, PageHeader } from "@whytide/ui";
 import { CircleCheck, Info, ListChecks } from "@whytide/ui/icons";
 import { useTranslations } from "next-intl";

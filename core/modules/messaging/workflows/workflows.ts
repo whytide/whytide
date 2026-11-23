@@ -3,12 +3,13 @@
 // minutes; its gates' and the model's failures are results; a writer that failed past its attempts
 // (a fault) marks the draft failed, write_failed, and fails the workflow. The sweep's, global and
 // hourly: every workspace one after the other; one whose sweep failed past its attempts is counted
-// and the others go on.
-import { isCancellation, proxyActivities } from "@temporalio/workflow";
+// and the others go on; behind SWEEP_PAGES_PATCH, a run takes one page of workspaces and continues
+// as new with its cursor and counts until the last page (gamma-p0-085).
+import { continueAsNew, isCancellation, patched, proxyActivities } from "@temporalio/workflow";
 import type { ActivityFunctions } from "@whytide/platform";
 import type { z } from "zod";
 import type { DraftStatus } from "../domain/drafts/write.ts";
-import { DRAFT_TIMEOUTS, SWEEP } from "./constants.ts";
+import { DRAFT_TIMEOUTS, SWEEP, SWEEP_PAGES_PATCH } from "./constants.ts";
 import type { activities, draftInput } from "./index.ts";
 
 type Activities = ActivityFunctions<typeof activities>;
@@ -35,12 +36,19 @@ export async function messaging_draft_message(
 }
 
 /** The drafts it failed, and the workspaces whose sweep failed past its attempts. */
-export async function messaging_sweep(
-  input: Record<string, never>,
-): Promise<{ stuck: number; unswept: number }> {
-  const { workspaceIds } = await messaging_list_workspaces(input);
-  let stuck = 0;
-  let unswept = 0;
+export type SweepCounts = { readonly stuck: number; readonly unswept: number };
+
+/** Continued as new, a run's cursor, the last workspace swept, and its counts so far. */
+export type SweepInput = { readonly afterId?: string; readonly counts?: SweepCounts };
+
+export async function messaging_sweep(input: SweepInput): Promise<SweepCounts> {
+  // Asked once, at the run's start, as linkedin_status_refresh asks its patches: a run started
+  // before the patch replays without its marker, lists its workspaces once, as before, and never
+  // continues as new.
+  const paged = patched(SWEEP_PAGES_PATCH);
+  const page = paged ? { afterId: input.afterId } : input;
+  const { workspaceIds, next } = await messaging_list_workspaces(page);
+  let { stuck, unswept } = input.counts ?? { stuck: 0, unswept: 0 };
   for (const workspaceId of workspaceIds) {
     try {
       stuck += (await messaging_sweep_workspace({ workspaceId })).stuck;
@@ -48,6 +56,11 @@ export async function messaging_sweep(
       if (isCancellation(error)) throw error;
       unswept += 1;
     }
+  }
+  // After a page that is not the last, the next run of the same id goes on after its last
+  // workspace, so that no run's history grows with the number of workspaces.
+  if (paged && typeof next === "string") {
+    return continueAsNew<typeof messaging_sweep>({ afterId: next, counts: { stuck, unswept } });
   }
   return { stuck, unswept };
 }

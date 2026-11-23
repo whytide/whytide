@@ -11,8 +11,9 @@ import { type LatestReview, latestOf } from "../review/reviews.ts";
 import type { ReviewFilter } from "../review/rules.ts";
 import { csvLine } from "./csv.ts";
 
-/** The view the lead list shows: its filters; the order is the list's by fit. */
+/** The view the lead list shows: its filters, `source` a source's ref; the order is the list's by fit. */
 export type LeadsView = {
+  source?: string;
   status?: QualificationStatus;
   tier?: Tier;
   review?: ReviewFilter;

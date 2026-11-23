@@ -36,6 +36,42 @@ export const fields = {
     industry: "none",
     size_range: "none",
     country: "none",
+    // The company's own facts a source gives (gamma-en-040), never a person's.
+    employee_count: "none",
+    description: "none",
+    provider_refs: "none",
+    field_provenance: "none",
+    created_at: "none",
+    updated_at: "none",
+    // The row's shared company (gamma-rf-010).
+    company_id: "none",
+  },
+  // The company index's two layers (gamma-rf-010): a company's keys and facts, never a person's; a
+  // one-person company's facts stay on the group's row (domain/companies/layers.ts).
+  companies: {
+    id: "none",
+    linkedin_url: "none",
+    domain: "none",
+    industry: "none",
+    size_range: "none",
+    country: "none",
+    employee_count: "none",
+    description: "none",
+    provider_refs: "none",
+    field_provenance: "none",
+    created_at: "none",
+    updated_at: "none",
+  },
+  group_companies: {
+    sharing_group_id: "none",
+    company_id: "none",
+    linkedin_url: "none",
+    domain: "none",
+    industry: "none",
+    size_range: "none",
+    country: "none",
+    employee_count: "none",
+    description: "none",
     provider_refs: "none",
     field_provenance: "none",
     created_at: "none",
@@ -50,6 +86,14 @@ export const fields = {
     drop_reasons: "none",
     created_at: "none",
     expires_at: "none",
+  },
+  // A person's email address as its hash (gamma-rf-040), pseudonymous as person_hashes.hash; no
+  // address is stored.
+  person_email_hashes: {
+    workspace_id: "none",
+    person_id: "none",
+    hash: "personal",
+    created_at: "none",
   },
   // A lead copies none of the person's fields, which the list joins at read time; its why bullets
   // may quote the profile (alpha-p6-030's evidence), so they are classed as the profile is.
@@ -67,6 +111,8 @@ export const fields = {
     why: "business_contact",
     hard_filter_reason: "none",
     status_reason: "none",
+    // The audience the decision was judged against (gamma-p5-055): icp's id, as its version is.
+    icp_id_scored: "none",
     icp_version_scored: "none",
     created_at: "none",
     updated_at: "none",
@@ -74,6 +120,8 @@ export const fields = {
     reviewed_at: "none",
     outreach_status: "none",
     outreach_reason: "none",
+    // A time (gamma-en-040): how long a new lead waits for enrichment.
+    enrichment_hold_until: "none",
   },
   // A decision's texts are the tester's words about the lead, which may quote the profile.
   review_decisions: {
@@ -92,7 +140,7 @@ export const fields = {
   },
   // A never-contact entry (beta-p2-010): its hash is pseudonymous, as person_hashes.hash; the profile
   // or company page it was typed with is a LinkedIn URL; a domain is a firmographic, as
-  // workspace_companies.domain.
+  // workspace_companies.domain; an address (gamma-rf-040) is a person's own data.
   suppression_entries: {
     id: "none",
     workspace_id: "none",
@@ -101,13 +149,38 @@ export const fields = {
     hash: "personal",
     linkedin_url: "business_contact",
     domain: "none",
+    email: "personal",
     channel: "none",
+    relationship: "none",
     source: "none",
     reason: "none",
     created_by: "none",
     created_at: "none",
     removed_at: "none",
     removed_by: "none",
+    exclusion_list_id: "none",
+  },
+  // An exclusion list (gamma-p2-045): the uploaded file's name, a kind, counts and user ids; its
+  // domains are its entries'.
+  exclusion_lists: {
+    id: "none",
+    workspace_id: "none",
+    name: "none",
+    relationship: "none",
+    entry_count: "none",
+    duplicate_count: "none",
+    invalid_count: "none",
+    created_by: "none",
+    created_at: "none",
+    removed_at: "none",
+    removed_by: "none",
+  },
+  // Every domain an exclusion list names (review-gaps): a list id and a company domain's hash, as
+  // suppression_entries.domain is a firmographic.
+  exclusion_list_domains: {
+    workspace_id: "none",
+    exclusion_list_id: "none",
+    hash: "none",
   },
   // A lead's outreach status change (beta-p2-030): statuses, codes and ids, nothing about the person.
   lead_status_changes: {

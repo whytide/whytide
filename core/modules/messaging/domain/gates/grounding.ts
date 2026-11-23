@@ -123,16 +123,32 @@ function names(text: string): string[] {
   return runs.map(({ start, end }) => text.slice(start, end).replace(/['’]s?$/u, ""));
 }
 
+/**
+ * What a reply grounds on besides the dossier (inbox-reply-draft): texts that hold names, numbers and
+ * dates as a claim does, the member's brief and the conversation; and `skipNames` for a text in
+ * another language than English, whose capitals the name patterns do not read: its names go
+ * unchecked, its numbers and dates are checked as in English.
+ */
+export type GroundingOptions = {
+  readonly also?: readonly string[];
+  readonly skipNames?: boolean;
+};
+
 /** Every extracted entity the dossier does not hold, named as the text wrote it, each once. */
-export function groundingIssues(text: string, dossier: Dossier): GateIssue[] {
+export function groundingIssues(
+  text: string,
+  dossier: Dossier,
+  options: GroundingOptions = {},
+): GateIssue[] {
   const { entities, facts } = dossier;
+  const { also = [], skipNames = false } = options;
   const valuesOf = (kinds: readonly string[]) =>
     facts.filter(({ kind }) => kinds.includes(kind)).map(({ value }) => value);
   // A date is matched by its day, below; a link's words and digits ground nothing.
   const named = entities.filter(({ kind, value }) => kind !== "date" && !/^\w+:\/\//u.test(value));
-  const held = [...named.map(({ value }) => value), ...valuesOf(["claim", "quote"])];
+  const held = [...named.map(({ value }) => value), ...valuesOf(["claim", "quote"]), ...also];
   // A number only as the dossier gives numbers: a date's month or a post's id is no figure.
-  const numbers = [...valuesOf(["number"]), ...valuesOf(["claim"])];
+  const numbers = [...valuesOf(["number"]), ...valuesOf(["claim"]), ...also];
   const days = entities
     .filter((entity) => entity.kind === "date")
     .map((entity) => new Date(`${entity.value}T00:00:00Z`));
@@ -145,7 +161,8 @@ export function groundingIssues(text: string, dossier: Dossier): GateIssue[] {
   };
   const found = within(held);
   const figure = within(numbers);
-  const ungrounded = extractEntities(text).filter((entity) => {
+  const extracted = extractEntities(text).filter(({ kind }) => !skipNames || kind !== "name");
+  const ungrounded = extracted.filter((entity) => {
     if (entity.kind === "number") return !figure(entity.text);
     if (found(entity.text)) return false;
     // A name of several words is grounded whole, or each of its capitalized words ("Ines and Sam").

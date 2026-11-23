@@ -1,0 +1,76 @@
+{
+  "type": "search",
+  "query": {
+    "original": "Copper Harbor Labs official website",
+    "more_results_available": true
+  },
+  "mixed": {
+    "type": "mixed",
+    "main": [
+      {
+        "type": "web",
+        "index": 0,
+        "all": false
+      }
+    ]
+  },
+  "web": {
+    "type": "search",
+    "family_friendly": true,
+    "results": [
+      {
+        "title": "Copper Harbor Labs &#x27;<strong>Official</strong>&#x27; Site",
+        "url": "https://copper-harbor.example/",
+        "is_source_local": false,
+        "is_source_both": false,
+        "description": "<strong>Copper Harbor Labs</strong> builds   synthetic tools &amp; fixtures &amp;lt;for tests&amp;gt;.",
+        "page_age": "2026-10-01T00:00:00",
+        "language": "en",
+        "family_friendly": true,
+        "type": "search_result",
+        "profile": {
+          "name": "Copper Harbor Labs",
+          "url": "https://copper-harbor.example/",
+          "long_name": "copper-harbor.example",
+          "img": "https://imgs.search.brave.com/fixture.png"
+        },
+        "meta_url": {
+          "scheme": "https",
+          "netloc": "copper-harbor.example",
+          "hostname": "copper-harbor.example",
+          "path": ""
+        },
+        "thumbnail": {
+          "src": "https://imgs.search.brave.com/fixture-thumb.png",
+          "original": "https://copper-harbor.example/logo.png"
+        }
+      },
+      {
+        "title": "Copper Harbor Labs (old site)",
+        "url": "http://old.copper-harbor.example/",
+        "description": "The old site, over http.",
+        "language": "en"
+      },
+      {
+        "title": "Copper Harbor Labs | LinkedIn",
+        "url": "https://www.linkedin.com/company/copper-harbor-labs",
+        "description": "Copper Harbor Labs is a synthetic company of the Brave adapter's mapping test. Its description runs past the port's three hundred characters on purpose, so that the adapter cuts it to the port's length and no further; nothing in it is real, and no person is named anywhere in it, as every fixture of this folder stays synthetic. The rest of this sentence is cut away.",
+        "language": "en",
+        "age": "2 days ago"
+      },
+      {
+        "title": "Not a link",
+        "url": "copper-harbor.example/about",
+        "description": "No scheme."
+      },
+      {
+        "title": "About <em>us</em>",
+        "url": "https://news.copper-harbor.example/about"
+      },
+      {
+        "title": "No link at all",
+        "description": "A result without a url."
+      }
+    ]
+  }
+}

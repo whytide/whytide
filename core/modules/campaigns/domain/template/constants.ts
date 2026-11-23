@@ -1,7 +1,7 @@
-// The one fixed sequence of beta (README.md "The template"; F08 §4.2 "LinkedIn only", reduced to a
-// connection request and messages, RB-9.1.2), beside the code that reads it: keys.ts, the enrollment
-// and the later tasks' timing. The hash covers each step's key, action, delay and channel, so a
-// changed delay or action makes new keys: a new TEMPLATE_VERSION.
+// The one fixed sequence of beta (README.md "Campaigns and versions"; F08 §4.2 "LinkedIn only",
+// reduced to a connection request and messages, RB-9.1.2), the seeded campaign's version 1 since
+// gamma-p3-030, beside the code that reads it: keys.ts, the enrollment and the timing. The hash
+// covers each step's key, action, delay and channel, so a changed delay or action makes new keys.
 
 /** The template's id stands where a campaign's will (RB-9.3.3). */
 export const TEMPLATE_ID = "linkedin_default";
@@ -18,6 +18,17 @@ export const MIN_MINUTES_AFTER_ACCEPTANCE = 10;
  */
 export const FOLLOW_UP_1_BUSINESS_DAYS = 3;
 export const FOLLOW_UP_2_BUSINESS_DAYS = 5;
+
+/**
+ * The warm-signal template's (warm-signal.ts; F08 §4.2): its last LinkedIn message four business
+ * days after the one before (F08's "+4 d final"); the email fallback's first email this many
+ * calendar days after the connection request went out, while it is not accepted, then its second
+ * and third emails three and five business days after the email before.
+ */
+export const WARM_FOLLOW_UP_2_BUSINESS_DAYS = 4;
+export const FALLBACK_AFTER_DAYS = 7;
+export const FALLBACK_EMAIL_2_BUSINESS_DAYS = 3;
+export const FALLBACK_EMAIL_3_BUSINESS_DAYS = 5;
 
 /** The template's one channel. */
 export const CHANNEL = "linkedin";
@@ -38,7 +49,9 @@ export type StepDelay =
       readonly minMinutes: number;
     }
   /** `value` business days after the previous step was sent. */
-  | { readonly anchor: "prev_step"; readonly unit: "business_days"; readonly value: number };
+  | { readonly anchor: "prev_step"; readonly unit: "business_days"; readonly value: number }
+  /** `value` calendar days after the connection request went out: the fallback's first email. */
+  | { readonly anchor: "invite_sent"; readonly unit: "days"; readonly value: number };
 
 /** A step of the template; `action` is the step's action_type. */
 export type TemplateStep = {

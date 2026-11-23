@@ -1,11 +1,11 @@
-// assessPerson, the command the batch (alpha-p6-040) calls in its activity, and erasePerson (README.md
-// "Public interface", docs/flows.md). One tenant run reads the person, the company and the ICP and
-// builds the anonymized input; callAgent asks the model outside any run, since it opens its own for
-// the result cache and the decision record; a second run writes the snapshot and its six verdicts,
-// once per decision record and ICP version: a retried activity, which the cache answers, finds them,
-// and one that loses the insert to a concurrent activity reads them.
-// The hard filters ran before: the caller passes only persons who passed them. Nothing here logs, so
-// the profile, the evidence, the prompt and the output stay out of every log line.
+// assessPerson, the command the batch (alpha-p6-040) calls in its activity, and erasePerson
+// (README.md "Public interface", docs/flows.md). One tenant run reads the person, the company and
+// the ICP and builds the anonymized input; callAgent asks the model outside any run, since it opens
+// its own for the result cache and the decision record; a second run writes the snapshot and its
+// six verdicts, once per decision record and ICP version: a retried activity, which the cache
+// answers, finds them, and one that loses the insert to a concurrent activity reads them. The hard
+// filters ran before: the caller passes only persons who passed them. Nothing here logs, so the
+// profile, the evidence, the prompt and the output stay out of every log line.
 import { agentModel, type CallOptions, callAgent, registeredAgentTasks } from "@whytide/ai";
 import { getCompany, getPerson } from "@whytide/contacts";
 import { type TenantClient, tenantClient } from "@whytide/db";
@@ -44,32 +44,36 @@ export type AssessResult =
 const personId = z.string().min(1).max(64);
 const assessInput = z.object({
   personId,
+  /** The audience, icp's id (gamma-p5-050); the default when none is given. */
+  icpId: z.string().min(1).max(64).optional(),
   icpVersion: z.number().int().positive(),
-  /** Signals' excerpts (alpha-p8-030); none for an imported person. */
+  /** The person's own words from the signal reader (gamma-p5-050); none for an imported person. */
   evidence: z.array(z.string()).optional(),
 });
 
 /**
- * The person assessed against the workspace's ICP at `icpVersion`: the snapshot and its verdicts as
- * stored, each grounded in the person's data or unknown; or ai_failed, with nothing stored but the
- * wrapper's decision record. icp_version_stale when the ICP moved; contacts' person_not_found.
+ * The person assessed against the audience `icpId` (the default without one) at `icpVersion`: the
+ * snapshot, which holds the audience, and its verdicts as stored, each grounded in the person's
+ * data or unknown; or ai_failed, with nothing stored but the wrapper's decision record.
+ * icp_version_stale when the audience moved; icp's icp_not_found; contacts' person_not_found.
  */
 export async function assessPerson(
   input: z.input<typeof assessInput>,
   context: AssessContext,
 ): Promise<AssessResult> {
-  const { personId, icpVersion, evidence } = parse(assessInput, input);
+  const { personId, icpId: given, icpVersion, evidence } = parse(assessInput, input);
   const task = registeredTask();
   const { workspaceId } = context;
-  const blocks = await context.tenant(async (): Promise<AssessFitInput> => {
+  const { icpId, blocks } = await context.tenant(async () => {
     const person = await getPerson(personId);
     const company = person.companyId === null ? null : await getCompany(person.companyId);
-    const { icp } = await readIcpForScoring(workspaceId);
+    const { icp } = await readIcpForScoring(workspaceId, given);
     if (icp.version !== icpVersion) {
       const details = { icp_version: icpVersion, current_version: icp.version };
       throw new AppError(errors.icp_version_stale, { details });
     }
-    return assessmentInput(person, company, icp, evidence);
+    const blocks: AssessFitInput = assessmentInput(person, company, icp, evidence);
+    return { icpId: icp.id, blocks };
   });
   const call = { workspaceId, subjectRef: personId, input: blocks };
   const result = await callAgent(task, call, context.call);
@@ -82,7 +86,8 @@ export async function assessPerson(
   const disqualifiers = [...new Set(output.disqualifiers)];
   const { modelId } = await agentModel(task);
   // The assessment's own snapshot; a re-score's copies carry their criteria's hash (rescore.ts).
-  const where = { decisionRecordId, icpVersion, criteriaHash: "" };
+  // Two audiences alike may share a decision record, never a snapshot.
+  const where = { decisionRecordId, icpId, icpVersion, criteriaHash: "" };
   const select = { id: true } as const;
   const snapshotId = await context
     .tenant(async (tx) => {
@@ -91,7 +96,15 @@ export async function assessPerson(
       const id = newId(ids.score_snapshot);
       const { promptVersion } = task;
       const { summary } = output;
-      const snapshot = { workspaceId, personId, icpVersion, modelId, promptVersion, summary };
+      const snapshot = {
+        workspaceId,
+        personId,
+        icpId,
+        icpVersion,
+        modelId,
+        promptVersion,
+        summary,
+      };
       await tx.scoreSnapshot.create({ data: { ...snapshot, id, disqualifiers, decisionRecordId } });
       const rows = verdicts.map((verdict) => ({
         ...verdict,
@@ -149,16 +162,16 @@ export function assessmentInput(
   };
 }
 
+type Erased = "score_snapshots" | "criterion_verdicts" | "assessment_attempts" | "intent_scores";
+
 /**
- * Deletes the person's snapshots in the caller's tenant run, their verdicts first (the key's ON DELETE
- * CASCADE would take them too, uncounted), and the batch's attempts at them: this module's step of
- * the deletion script (alpha-p10-030). The rows deleted, by table.
+ * Deletes the person's snapshots in the caller's tenant run, their verdicts first (the key's ON
+ * DELETE CASCADE would take them too, uncounted), the batch's attempts at them and the person's
+ * intent row: this module's step of the deletion script (alpha-p10-030), which holds the lead's
+ * lock already, so an intent update under way, which writes the lead before its row, ends first or
+ * finds no lead. The rows deleted, by table.
  */
-export async function erasePerson(
-  id: string,
-): Promise<
-  Readonly<Record<"score_snapshots" | "criterion_verdicts" | "assessment_attempts", number>>
-> {
+export async function erasePerson(id: string): Promise<Readonly<Record<Erased, number>>> {
   const { personId: person } = parse(z.object({ personId }), { personId: id });
   const where = { personId: person };
   const snapshots = await tenantClient.scoreSnapshot.findMany({ where, select: { id: true } });
@@ -166,10 +179,12 @@ export async function erasePerson(
   const verdicts = await tenantClient.criterionVerdict.deleteMany({ where: { snapshotId } });
   const deleted = await tenantClient.scoreSnapshot.deleteMany({ where });
   const attempts = await tenantClient.assessmentAttempt.deleteMany({ where });
+  const intents = await tenantClient.intentScore.deleteMany({ where });
   return {
     score_snapshots: deleted.count,
     criterion_verdicts: verdicts.count,
     assessment_attempts: attempts.count,
+    intent_scores: intents.count,
   };
 }
 

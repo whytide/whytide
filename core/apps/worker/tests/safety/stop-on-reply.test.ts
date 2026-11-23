@@ -68,13 +68,17 @@ async function until<T>(probe: () => Promise<T>): Promise<NonNullable<T>> {
 }
 
 /**
- * A workspace whose approver's account the fake knows, and a person approved by the member and
- * enrolled by campaigns' subscriber through the host's outbox, with an outreach row on the account,
- * the connection request sent and the next steps scheduled, awaiting approval and planned.
+ * A workspace whose approver, its Owner, has an account the fake knows, so the seeded campaign sends
+ * from it (gamma-p6-040), and a person approved by the member and enrolled by campaigns' subscriber
+ * through the host's outbox, with an outreach row on the account, the connection request sent and
+ * the next steps scheduled, awaiting approval and planned.
  */
 async function enrolledReply() {
   const { workspace } = await tenancy.createOrganizationWithWorkspace();
   const workspaceId: string = workspace.id;
+  const user = { id: APPROVER, email: `${APPROVER}@example.com` };
+  await app.user.upsert({ where: { id: APPROVER }, create: user, update: {} });
+  await tenancy.createMembership({ userId: APPROVER, workspaceId, role: "Owner" });
   const ref = `fake-account-${randomUUID()}`;
   const account = { ownerUserId: APPROVER, providerAccountRef: ref };
   const { id: senderAccountId } = await linkedin.createConnectedAccount(workspaceId, account);

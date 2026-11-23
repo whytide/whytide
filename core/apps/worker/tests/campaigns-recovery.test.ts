@@ -6,8 +6,9 @@
 // budget's wait on the step and in "Up next", the day's limits and spacing after an outage,
 // linkedin.account_replaced delivered by the worker's outbox loop, then again, and the read before an
 // invite's (fixtures/campaigns-member-reference.ts): a settle retried after its files are gone, a
-// stored URL off the port's schema, and the read's attempts; the gate's test hook refused outside
-// APP_ENV=test. The safety cases are tests/safety/recovery.test.ts.
+// stored URL off the port's schema, and the read's attempts; a person without a LinkedIn profile's
+// connection request and message (gamma-rf-050); the gate's test hook refused outside APP_ENV=test.
+// The safety cases are tests/safety/recovery.test.ts.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
@@ -25,6 +26,7 @@ import {
 import {
   afterSend,
   app,
+  contacts,
   DAY_MS,
   fake,
   leasesEnd,
@@ -504,6 +506,48 @@ test("a stored URL off the port's schema reserves no read: the credits freed, th
     [status, exitReason, exitDetail],
     ["exited", "send_refused", "linkedin_input_invalid"],
   );
+});
+
+/** The lead's person made one known by an email address alone, no LinkedIn profile (gamma-rf-050). */
+async function withoutProfile(s: Sender, personId: string, slug: string): Promise<void> {
+  await s.run(() => contacts.recordPersonEmail({ personId, address: `${slug}@nolink.example` }));
+  await app.person.update({ where: { id: personId }, data: { linkedinUrl: null } });
+}
+
+test("a connection request of a person without a LinkedIn profile reserves no read (gamma-rf-050): no call, the credits freed, no slot, the step failed no_linkedin_profile, its enrollment exited, and the run goes on", async () => {
+  const s = await sender();
+  const step = await unknownLead(s, "no-profile-invite");
+  await withoutProfile(s, step.personId, "no-profile-invite");
+  assert.deepEqual((await s.send()).result, { sent: 0, blocked: 1, refused: 0, end: "no_step" });
+  assert.deepEqual(callsOf("getProfile"), []);
+  assert.deepEqual(sends(), []);
+  assert.deepEqual(await readCounts(s.accountId), { reserved: 0, committed: 0, actions: 0 });
+  const row = await stepOf(step.id);
+  assert.deepEqual([row.status, row.errorCode], ["failed", "no_linkedin_profile"]);
+  assert.deepEqual(await usagesOf(step.id), [":1 released 1"]);
+  assert.deepEqual(await slotsOf(step.id), []);
+  assert.equal(await s.hasRequest(step.id), false);
+  assert.deepEqual(await profileFiles(s.workspaceId, step.id), []);
+  const ended = ["exited", "send_refused", "no_linkedin_profile", "finished"];
+  assert.deepEqual(await endOf(step), ended);
+});
+
+test("a message to a person without a LinkedIn profile writes no request though their member id is stored (gamma-rf-050): no call, the credits and the slot freed, the step failed no_linkedin_profile, its enrollment exited", async () => {
+  const s = await sender();
+  const step = await s.ready("no-profile-message", "message_1", "Hello Noor");
+  await withoutProfile(s, step.personId, "no-profile-message");
+  assert.deepEqual((await s.send()).result, { sent: 0, blocked: 1, refused: 0, end: "no_step" });
+  assert.deepEqual(callsOf("getProfile"), []);
+  assert.deepEqual(sends(), []);
+  const { reserved, committed } = await readCounts(s.accountId);
+  assert.deepEqual([reserved, committed], [0, 0], "no read");
+  const row = await stepOf(step.id);
+  assert.deepEqual([row.status, row.errorCode], ["failed", "no_linkedin_profile"]);
+  assert.deepEqual(await usagesOf(step.id), [":1 released 1"]);
+  assert.deepEqual(await slotsOf(step.id), ["released"]);
+  assert.equal(await s.hasRequest(step.id), false);
+  const ended = ["exited", "send_refused", "no_linkedin_profile", "finished"];
+  assert.deepEqual(await endOf(step), ended);
 });
 
 test("linkedin's profile read failing on every attempt gets linkedin's three, not the worker's five: no answer, the read released, the credits freed, the step waiting member_ref_unknown", async () => {

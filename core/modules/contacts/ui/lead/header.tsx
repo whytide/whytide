@@ -2,14 +2,19 @@
 // the list and to the neighbours; the header, the person's initial and name, their title at their
 // company, then, while the person may not be contacted, the never-contact badge with its reason,
 // the tier, the status unless qualified, the outreach status (unless the never-contact badge says
-// it), the fit with its bar, the location, and where the name came from, with the Never contact
-// menu (the page's, not the loading state's) and the actions slot at the inline end. Shared: the
-// server renders them in the loading state, the browser in the page.
+// it), the fit with its bar, the location, and where the name came from, in its source class's
+// words, never the provider's name (RB-7.3.2), or the Edited mark of the header's field a member
+// edited last (lead-fields-edit), with Edit (edit.tsx) and the Never contact menu (the page's, not
+// the loading state's) and the actions slot at the inline end. Shared: the server renders them in
+// the loading state, the browser in the page.
 import { Avatar, Badge, type BadgeTone, ButtonLink, Meter, PageHeader } from "@whytide/ui";
-import { ArrowLeft, Ban, ChevronLeft, ChevronRight, MapPin } from "@whytide/ui/icons";
+import { ArrowLeft, Ban, ChevronLeft, ChevronRight, MapPin, Pencil } from "@whytide/ui/icons";
 import { useFormatter, useTranslations } from "next-intl";
 import type { ReactNode } from "react";
+import { MEMBER } from "../../domain/provenance.ts";
 import { NeverContactMenu } from "../never-contact/block.tsx";
+import { HEADER_FIELDS } from "./constants.ts";
+import { EditLead } from "./edit.tsx";
 import type { Lead } from "./page.tsx";
 
 type Status = Lead["qualificationStatus"];
@@ -76,19 +81,57 @@ export function useRoleText() {
       : title || companyName || undefined;
 }
 
-/** Where a field's value came from and when, small; nothing for a field without a value. */
+/**
+ * Where a field's value came from and when, small, or the Edited mark of a value a member set;
+ * nothing for a field without a value.
+ */
 export function useProvenance(person: Lead["person"]) {
   const t = useTranslations("contacts.lead");
+  const edit = useTranslations("contacts.lead_edit");
+  const label = useSourceLabel();
   const format = useFormatter();
   return (field: string) => {
     const stamp = person.provenance[field];
     if (!stamp) return undefined;
     const at = format.dateTime(new Date(stamp.at), { dateStyle: "medium" });
+    if (stamp.source === MEMBER) {
+      return (
+        <small className="inline-flex items-center gap-1 text-xs text-ink-subtle">
+          <Pencil aria-hidden="true" className="size-3 shrink-0" />
+          {edit("edited", { at })}
+        </small>
+      );
+    }
     return (
       <small className="text-xs text-ink-subtle">
-        {t("provenance", { source: stamp.source, at })}
+        {t("provenance", { source: label(stamp.source), at })}
       </small>
     );
+  };
+}
+
+/** A source class's words (`contacts.provenance.source.*`), never its provider's name (RB-7.3.2). */
+function useSourceLabel(): (source: string) => string {
+  const t = useTranslations("contacts.provenance.source");
+  return (source) => {
+    switch (source) {
+      case "linkedin":
+        return t("linkedin");
+      case "import":
+        return t("import");
+      case "website":
+        return t("website");
+      case "open_data":
+        return t("open_data");
+      case "data_vendor":
+        return t("data_vendor");
+      case "web_search":
+        return t("web_search");
+      case "ai_inferred":
+        return t("ai_inferred");
+      default:
+        return t("other");
+    }
   };
 }
 
@@ -122,7 +165,12 @@ export function LeadHeader(props: {
   const from = useProvenance(person);
   const role = useRoleText()(person);
   const { locationText } = person;
-  const named = from("firstName") ?? from("lastName");
+  // The header's field a member edited last, whose mark stands for the header; else the name's source.
+  const edited = HEADER_FIELDS.filter((field) => person.provenance[field]?.source === MEMBER).sort(
+    (a, b) =>
+      Date.parse(person.provenance[b]?.at ?? "") - Date.parse(person.provenance[a]?.at ?? ""),
+  );
+  const named = from(edited[0] ?? "firstName") ?? from("lastName");
   return (
     <PageHeader
       title={name}
@@ -164,6 +212,7 @@ export function LeadHeader(props: {
           actions
         ) : (
           <>
+            <EditLead workspace={workspace} lead={lead} />
             <NeverContactMenu
               workspace={workspace}
               personId={lead.personId}

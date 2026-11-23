@@ -1,0 +1,23 @@
+# tenancy's members (core/modules/tenancy/README.md "Members", gamma-p6-030): a member's session,
+# workspace.read to list, members.manage (Owner) to change a role or remove a member. Put your
+# workspaceId and a `membershipId` the list answers in http-client.private.env.json. A write sends
+# the cookie, so it sends Origin too. No one changes their own role or removes themselves.
+
+### GET /v1/workspaces/{workspaceId}/tenancy/members: the workspace's active members with their email, name and role, Owners first, then by name; the caller's own row is isSelf
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/tenancy/members
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PATCH /v1/workspaces/{workspaceId}/tenancy/members/{membershipId}: another member's role, Owner or Member, answered with the member; the same role answers it unchanged; 400 validation_failed (role), 404 membership_not_found (unknown or removed), 409 member_is_self, 409 last_owner
+PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/tenancy/members/{{membershipId}}
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "role": "Owner" }
+
+### DELETE /v1/workspaces/{workspaceId}/tenancy/members/{membershipId}: removes another member, refused by the workspace from their next request, with tenancy.member_removed once; 204, and 204 again for a removed one; 404 membership_not_found, 409 member_is_self, 409 last_owner
+DELETE {{baseUrl}}/v1/workspaces/{{workspaceId}}/tenancy/members/{{membershipId}}
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}

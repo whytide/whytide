@@ -1,9 +1,9 @@
-// qualification's panel on the lead page (alpha-p10-100; core/modules/qualification/README.md
-// "Screen"), in its actions slot, on leads that the e2e api's test-only module writes
-// (core/apps/api/tests/fixtures/e2e) in wsp_e2e_qual, this spec's alone. A lead with no scored
-// assessment is the empty state, which says what comes next, with no Re-score: pending with no
-// reason or for credits, ai_failed after the provider's three failures or for its answer. A
-// needs_review lead says what to check, with Re-score. A failed request, through Playwright's
+// qualification's panel on the lead page (alpha-p10-100, lead-rescore-ai;
+// core/modules/qualification/README.md "Screen"), in its actions slot, on leads that the e2e api's
+// test-only module writes (core/apps/api/tests/fixtures/e2e) in wsp_e2e_qual, this spec's alone. A
+// pending lead says what it waits for, with no Re-score: no reason, credits, or a member's request.
+// An ai_failed lead, after the provider's three failures or for its answer, has Re-score with why.
+// A needs_review lead says what to check, with Re-score. A failed request, through Playwright's
 // routing, is the error state, whose retry asks again and waits. Axe on each.
 import { AxeBuilder } from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
@@ -59,9 +59,12 @@ const LEADS = [
     decision: review,
     snapshot: { ...review, summary: "Runs a data team.", disqualifiers: [], verdicts: [] },
   },
+  {
+    ...person("asked", "Asked"),
+    decision: { status: "pending", reason: "member_requested" },
+  },
 ] as const;
-const AGAIN =
-  "A re-score needs an assessment: after a change to the ICP’s targeting, the next batch assesses it again.";
+const AGAIN = "Re-score asks the AI again.";
 
 /** Replaces the workspace's leads with these, through the e2e api's test-only route; their ids. */
 async function seed(page: Page, origin: string | undefined) {
@@ -75,23 +78,36 @@ async function seed(page: Page, origin: string | undefined) {
 
 const panelOf = (page: Page) => page.locator('[data-slot="actions"]');
 
-test("a lead with no scored assessment is the empty state, which says what comes next, with no Re-score; axe", async ({
+test("a pending lead says what it waits for, with no Re-score; an ai_failed lead has Re-score and says why the AI failed; axe", async ({
   page,
   signInAs,
   baseURL,
 }) => {
   await signInAs();
   const ids = await seed(page, baseURL);
-  const said = [
-    "Not assessed yet: the next batch assesses it.",
-    "Waiting for credits: the next batch after a top-up assesses it.",
-    `The model’s provider failed three times. ${AGAIN}`,
-    `The model’s answer could not be used. ${AGAIN}`,
+  const waiting: [number, string][] = [
+    [0, "Not assessed yet: the next batch assesses it."],
+    [1, "Waiting for credits: the next batch after a top-up assesses it."],
+    [5, "Asked for by a member: the AI assesses it again in a few minutes."],
   ];
-  for (const [index, text] of said.entries()) {
+  for (const [index, text] of waiting) {
     await page.goto(`/w/${WORKSPACE}/leads/${ids[index]}`);
     await expect(panelOf(page)).toHaveText(text);
     await expect(panelOf(page).getByRole("button")).toHaveCount(0);
+  }
+  await expectNoSeriousViolation(page);
+  const failed: [number, string][] = [
+    [2, `The model’s provider failed three times. ${AGAIN}`],
+    [3, `The model’s answer could not be used. ${AGAIN}`],
+  ];
+  for (const [index, text] of failed) {
+    await page.goto(`/w/${WORKSPACE}/leads/${ids[index]}`);
+    const panel = panelOf(page);
+    await expect(
+      panel.getByRole("button", { name: say("qualification.action.rescore") }),
+    ).toBeVisible();
+    await expect(panel.getByText(say("qualification.action.rescore_hint"))).toBeVisible();
+    await expect(panel.getByText(text)).toBeVisible();
   }
   await expectNoSeriousViolation(page);
 });
@@ -105,12 +121,13 @@ test("a needs_review lead says what to check before Re-score; a failed request i
   const ids = await seed(page, baseURL);
   await page.goto(`/w/${WORKSPACE}/leads/${ids[4]}`);
   const panel = panelOf(page);
-  await expect(panel.locator("p")).toHaveText(say("qualification.explain.needs_review"));
+  await expect(panel.getByText(say("qualification.explain.needs_review"))).toBeVisible();
+  await expect(panel.getByText(say("qualification.action.rescore_hint"))).toBeVisible();
   const rescore = panel.getByRole("button", { name: say("qualification.action.rescore") });
   await expectNoSeriousViolation(page);
 
   let calls = 0;
-  await page.route("**/qualification/rescore", async (route) => {
+  await page.route("**/qualification/leads/*/reassess", async (route) => {
     calls += 1;
     if (calls > 1) return route.fallback();
     await route.fulfill({ status: 500, json: { code: "internal_error" } });
@@ -121,11 +138,11 @@ test("a needs_review lead says what to check before Re-score; a failed request i
   await expect(alert).toContainText(say("platform.error.generic"));
   await expectNoSeriousViolation(page);
 
-  const answer = page.waitForResponse("**/qualification/rescore");
+  const answer = page.waitForResponse("**/qualification/leads/*/reassess");
   await alert.getByRole("button", { name: say("ui.action.retry") }).click();
   expect((await answer).status()).toBe(202);
-  expect(await (await answer).json()).toMatchObject({ marked: 1 });
-  // No worker runs here: the panel waits for a new snapshot, busy.
+  expect(await (await answer).json()).toEqual({ status: "pending", requested: true });
+  // No worker runs here: the panel reads the lead, which waits, busy.
   await expect(panel.getByRole("status")).toHaveText(say("ui.state.loading"));
   await expect(rescore).toHaveAttribute("aria-busy", "true");
   expect(calls).toBe(2);

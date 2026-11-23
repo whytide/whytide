@@ -1,0 +1,37 @@
+# identity's invites (core/modules/identity/README.md "Invites", gamma-p6-020): an Owner's session
+# for the workspace's invites (identity.invite); any session for the caller's own invitations. Put
+# your workspaceId and an `inviteId` the list answers in http-client.private.env.json. A write sends
+# the cookie, so it sends Origin too. The revoke is @Idempotent(): its Idempotency-Key is an example
+# UUID; another one asks again. An invite mail goes through the app-mail port: run on the fake.
+
+### GET /v1/workspaces/{workspaceId}/identity/invites: the invites not accepted, open, expired or revoked, latest expiry first
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/identity/invites
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/identity/invites: invites an email as Owner or Member for 7 days and mails it; an expired or revoked invite is renewed; 201 with mail sent, skipped or failed; 409 invite_exists, 409 already_member, 400 identity_input_invalid (email), 400 validation_failed (role)
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/identity/invites
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "email": "new.member@example.test", "role": "Member" }
+
+### POST /v1/workspaces/{workspaceId}/identity/invites/{id}/revoke: revokes an open or expired invite, answered with it; a revoked one answers unchanged; 404 invite_not_found, 409 invite_accepted
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/identity/invites/{{inviteId}}/revoke
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000006020
+
+### GET /v1/invitations: the open invites to the caller's own email, with the workspace's name, the role, the inviter and the expiry
+GET {{baseUrl}}/v1/invitations
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/invitations/{id}/accept: accepts the caller's own open invite, answered with the workspace's id and slug; an accepted one answers the same; 404 invite_not_found
+POST {{baseUrl}}/v1/invitations/{{inviteId}}/accept
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}

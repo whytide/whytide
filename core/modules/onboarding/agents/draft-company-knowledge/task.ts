@@ -21,8 +21,11 @@ export const draftCompanyKnowledgeTask = defineAgentTask(
     promptVersion: 2,
     inputSchema: draftInput,
     outputSchema: draftOutput,
-    // Not priced in credits in alpha: the cost event alone records it.
-    budget: { maxInputTokens: 40_000, maxOutputTokens: 6_000, maxCostCredits: 0 },
+    // Every page and document whole: the largest Draft, ten pages and five documents of 50,000
+    // three-byte characters, estimates at about 766,000 input tokens (README.md "Input"); the output
+    // counts the model's thinking. Both within the 1M context of the current models. Not priced in
+    // credits in alpha: the cost event alone records it.
+    budget: { maxInputTokens: 800_000, maxOutputTokens: 16_000, maxCostCredits: 0 },
     tools: [],
     gates: DRAFT_GATES,
   },

@@ -1,0 +1,9 @@
+# credits' prices (gamma-p2-060; core/modules/credits/README.md "Showing a price"): a session with
+# credits.read in the workspace, every role, no body. Every priced action of the price list in effect,
+# by action, with its credits per unit, its version and the date it took effect; `next` is the coming
+# price of a rise announced for a later date, with that date and when it was announced, else null.
+
+### GET /v1/workspaces/{workspaceId}/credits/prices: every priced action's credits per unit in the price list in effect, its version and date, and `next`, a rise announced for a later date, or null
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/credits/prices
+Accept: application/json
+Cookie: {{sessionCookie}}

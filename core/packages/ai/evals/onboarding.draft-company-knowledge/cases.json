@@ -498,5 +498,59 @@
       }
     ],
     "expected": { "fields": { "oneLiner": null, "products": null } }
+  },
+  {
+    "name": "price-past-the-first-6000-characters",
+    "input": {
+      "pages": [
+        {
+          "url": "https://spoke.example/",
+          "title": "Spoke Works",
+          "text": "# Cargo bike repairs for courier firms\nSpoke Works repairs cargo bikes for courier firms in the city.\n## How we work\nWe fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening. We fix brakes, chains, gears and wheels on every make of cargo bike. Our mechanics ride the same routes as your couriers and know what wears out first. Bring a bike in before nine and it leaves the workshop the same evening.\n## Prices\nA full service costs 80 euros a bike.\n## Customers\nTrusted by 60 courier firms."
+        }
+      ]
+    },
+    "fake": [
+      {
+        "oneLiner": {
+          "text": "Spoke Works repairs cargo bikes for courier firms.",
+          "sourceUrl": "https://spoke.example/",
+          "quote": "repairs cargo bikes for courier firms"
+        },
+        "longDescription": null,
+        "products": [
+          {
+            "text": "Full cargo bike service at 80 euros a bike",
+            "sourceUrl": "https://spoke.example/",
+            "quote": "a full service costs 80 euros a bike"
+          }
+        ],
+        "painPoints": [],
+        "featuresBenefits": [
+          {
+            "text": "Same-day repairs",
+            "sourceUrl": "https://spoke.example/",
+            "quote": "it leaves the workshop the same evening"
+          }
+        ],
+        "proofPoints": [
+          {
+            "text": "Trusted by 60 courier firms",
+            "sourceUrl": "https://spoke.example/",
+            "quote": "trusted by 60 courier firms"
+          }
+        ],
+        "competitors": [],
+        "tone": null
+      }
+    ],
+    "expected": {
+      "fields": {
+        "oneLiner": "https://spoke.example/",
+        "products": "https://spoke.example/",
+        "proofPoints": "https://spoke.example/",
+        "competitors": null
+      }
+    }
   }
 ]

@@ -1,8 +1,9 @@
 "use client";
 // The runs panel of one source (README.md "Screen"), read in the browser with its loading state and
-// its error state with a retry: each run's status as a badge in its colour, start, end, counts and
-// drops by reason, a failed run's end code in words, and for a waiting one when it reads again: the
-// next start of its sender account's working hours (linkedin's usage, `nextWindowAt`), where a
+// its error state with a retry: each run's status as a badge in its colour, start, end, counts (a
+// posts kind's posts read too) and drops by reason, a failed run's end code in words, a done one that
+// stopped at its share of the day's reads (gamma-p5-040), and for a waiting one when it reads again:
+// the next start of its sender account's working hours (linkedin's usage, `nextWindowAt`), where a
 // refusal for the hours or for the day's cap both end, shown in the account's time zone.
 import {
   Badge,
@@ -47,8 +48,12 @@ type Props = { workspaceId: string; source: Source; sender: Account | undefined 
 const DROPS = [
   "dropped_company",
   "dropped_own",
+  "dropped_recruiter",
+  "dropped_job_seeker",
+  "dropped_competitor",
   "dropped_hashed",
   "dropped_known",
+  "dropped_triage",
   "dropped_filtered",
   "dropped_unread",
 ];
@@ -116,6 +121,7 @@ export function RunsPanel({ workspaceId, source, sender }: Props) {
     linkedin_rate_limited: t("errors.linkedin_rate_limited"),
     linkedin_provider_error: t("errors.linkedin_provider_error"),
     linkedin_error_unmapped: t("errors.linkedin_error_unmapped"),
+    linkedin_not_found: t("errors.linkedin_not_found"),
     platform_stopped: t("errors.platform_stopped"),
     workspace_stopped: t("errors.workspace_stopped"),
     account_stopped: t("errors.account_stopped"),
@@ -125,6 +131,12 @@ export function RunsPanel({ workspaceId, source, sender }: Props) {
     if (run.status === "failed") {
       if (!run.error) return t("runs.error_other");
       return ends[run.error] ?? <RunError code={run.error} />;
+    }
+    if (run.status === "done" && count(run.counts.adapters_spent) > 0) {
+      return t("runs.research_adapters_spent");
+    }
+    if (run.status === "done" && count(run.counts.budget_reached) > 0) {
+      return isResearch(run) ? t("runs.research_budget_reached") : t("runs.budget_reached");
     }
     const resumesAt = loaded?.resumesAt;
     if (run.status === "waiting" && resumesAt !== undefined && sender) {
@@ -136,10 +148,48 @@ export function RunsPanel({ workspaceId, source, sender }: Props) {
     }
     return null;
   };
-  const counts = (run: Run) =>
-    Object.keys(run.counts).length === 0 ? null : (
+  /** A research run's counts hold the plan's; a LinkedIn run's never do. */
+  const isResearch = (run: Run) => run.counts.queries_planned !== undefined;
+  const researchCounts = (run: Run) => (
+    <span className="grid gap-0.5">
       <span className="whitespace-nowrap">
-        {t("runs.counts", { staged: count(run.counts.staged), created: count(run.counts.created) })}
+        {t("runs.research_counts", {
+          planned: count(run.counts.queries_planned),
+          asked: count(run.counts.searches_asked),
+          results: count(run.counts.search_results),
+        })}
+      </span>
+      {count(run.counts.searches_failed) > 0 ? (
+        <span className="whitespace-nowrap">
+          {t("runs.research_failed", { failed: count(run.counts.searches_failed) })}
+        </span>
+      ) : null}
+    </span>
+  );
+  const counts = (run: Run) =>
+    Object.keys(run.counts).length === 0 ? null : isResearch(run) ? (
+      researchCounts(run)
+    ) : (
+      <span className="grid gap-0.5">
+        {typeof run.counts.posts === "number" ? (
+          <span className="whitespace-nowrap">{t("runs.posts", { posts: run.counts.posts })}</span>
+        ) : null}
+        <span className="whitespace-nowrap">
+          {t("runs.counts", {
+            staged: count(run.counts.staged),
+            created: count(run.counts.created),
+          })}
+        </span>
+        {count(run.counts.rated) > 0 ? (
+          <span className="whitespace-nowrap">
+            {t("runs.rated", { rated: count(run.counts.rated) })}
+          </span>
+        ) : null}
+        {count(run.counts.unrated) > 0 ? (
+          <span className="whitespace-nowrap">
+            {t("runs.unrated", { unrated: count(run.counts.unrated) })}
+          </span>
+        ) : null}
       </span>
     );
   const drops = (run: Run) => {

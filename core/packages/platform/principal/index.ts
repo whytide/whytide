@@ -2,7 +2,8 @@
 // host's guard builds a human principal from the session and, once identity resolves the membership
 // in the URL's workspace (alpha-p3-030), fills the workspace, the membership and the role; the worker
 // and the seeder run as a service principal, internal code that no request can produce. can() in
-// ../permissions decides from it; the tenant transaction (alpha-p1-045) writes userId to app.user_id.
+// ../permissions decides from it, a human's role against the action's roles (gamma-p6-010); the
+// tenant transaction (alpha-p1-045) writes userId to app.user_id.
 import { AppError, defineErrors } from "../errors/index.ts";
 
 /** Agents join in Core 1.1. */
@@ -19,8 +20,9 @@ export type Principal = {
   /** Set by the guard once the membership is resolved; absent on a non-member and on a service. */
   readonly membershipId?: string;
   readonly workspaceId?: string;
+  /** The membership's, read on every request; can() refuses an action whose roles lack it. */
   readonly role?: Role;
-  /** Carried for the API keys and agents of Core 1.1; not evaluated in alpha. */
+  /** Carried for the API keys and agents of Core 1.1; not evaluated until then. */
   readonly scopes: readonly string[];
 };
 

@@ -15,9 +15,10 @@ import { approvedContent } from "@whytide/approvals";
 import { tenantClient } from "@whytide/db";
 import { reserveSend } from "@whytide/linkedin";
 import { credits, currentTenant } from "@whytide/platform";
-import { STEP_NOT_READY } from "../gate/constants.ts";
+import { GATE_WAIT_REASONS, STEP_NOT_READY } from "../gate/constants.ts";
 import { checkGate, type GateReason } from "../gate/gate.ts";
 import { MIN_ACTION_GAP_MS } from "../plan/constants.ts";
+import { linkedinActionType, linkedinOnly, linkedinSenderAccount } from "../steps/actions.ts";
 import { isSendRefusal } from "../steps/codes.ts";
 import { CHARGED_ACTIONS, LINKEDIN_SEND_ACTION, SEND_QUANTITY } from "./constants.ts";
 import { blockClaimed } from "./gate.ts";
@@ -63,13 +64,19 @@ export async function chargeStep(placed: Placed, at: Date): Promise<ChargeAnswer
   const { stepExecutionId: id, scheduledFor } = placed;
   // A step a gap past its time, after a slow read of the chat, is the plan's to place again.
   if (scheduledFor.getTime() < at.getTime() - MIN_ACTION_GAP_MS) return { blocked: STEP_NOT_READY };
-  const where = { id, status: "scheduled", scheduledFor: placedAt(scheduledFor) } as const;
+  // LinkedIn's actions only: an email step is never claimed by this sender (gamma-p3-030).
+  const where = {
+    id,
+    status: "scheduled",
+    scheduledFor: placedAt(scheduledFor),
+    ...linkedinOnly(),
+  } as const;
   const step = await tenantClient.stepExecution.findFirst({ where, select: READ });
   if (step === null) return { blocked: STEP_NOT_READY };
   const gate = await checkGate(id, { at });
   if (!gate.pass) {
-    // touched_today writes its code alone: unplaced, the step waits for another day's plan.
-    if (gate.reason === "touched_today") await waitAgain(placedStep(placed), gate.reason);
+    // touched_today and a pause write their code alone: unplaced, the step waits for a later plan.
+    if (isWait(gate.reason)) await waitAgain(placedStep(placed), gate.reason);
     return { blocked: gate.reason };
   }
   // The plan's touch rule reads no `executing` step (beta-p4-010): one in flight may have reached
@@ -130,11 +137,14 @@ async function takeSlot(
 ): Promise<ClaimAnswer> {
   const claimed = { id, status: "executing" } as const;
   const step = await tenantClient.stepExecution.findFirstOrThrow({ where: claimed, select: READ });
-  const { actionType, idempotencyKey } = step;
+  const actionType = linkedinActionType({ id, actionType: step.actionType });
+  const { idempotencyKey } = step;
   const { usageId, attempt } = charged;
-  // The month's notes are counted for an invite whose approved note is not empty.
-  const withNote = actionType === "invite" && ((await approvedContent(id))?.text ?? "") !== "";
-  const accountId = step.senderAccountId;
+  // The month's notes are counted for an invite whose approved note is not empty: a person's, as a
+  // connection request is a first touch, which the mode never approves (gamma-p4-070).
+  const note = actionType === "invite" ? await approvedContent(id, { allowMode: false }) : null;
+  const withNote = (note?.text ?? "") !== "";
+  const accountId = linkedinSenderAccount({ id, senderAccountId: step.senderAccountId });
   const slot = await reserveSend({ accountId, actionType, idempotencyKey, withNote });
   if ("refused" in slot) {
     await releaseHolds({ usageId, reservationId: null });
@@ -169,6 +179,9 @@ async function inFlight(personId: string, id: string): Promise<boolean> {
   const where = { personId, status: "executing", id: { not: id } } as const;
   return (await tenantClient.stepExecution.count({ where })) > 0;
 }
+
+const isWait = (reason: GateReason): reason is (typeof GATE_WAIT_REASONS)[number] =>
+  (GATE_WAIT_REASONS as readonly string[]).includes(reason);
 
 const placedStep = ({ stepExecutionId, scheduledFor }: Placed) =>
   ({ id: stepExecutionId, status: "scheduled", scheduledFor }) as const;

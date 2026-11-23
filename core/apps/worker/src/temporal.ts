@@ -1,7 +1,8 @@
 // The Temporal side of the host (README "Temporal"): the SDK's runtime, installed once per process
 // with its warnings on pino, no metrics exporter and no signal handler of its own (main.ts stops the
 // worker); the workflow bundle, built once per entry file with the metrics interceptor, and the sink
-// that counts what it reports; one identity, so that no hostname reaches a history.
+// that counts what it reports, logs a long history and raises a failed run's alert (alerts.ts); one
+// identity, so that no hostname reaches a history.
 import { join } from "node:path";
 import {
   bundleWorkflowCode,
@@ -11,7 +12,8 @@ import {
   Runtime,
   type WorkflowBundle,
 } from "@temporalio/worker";
-import { createLogger } from "@whytide/platform";
+import { createLogger, type Logger } from "@whytide/platform";
+import { raiseAlert } from "./alerts.ts";
 import { workerMetrics } from "./metrics.ts";
 import type { MetricsSinks } from "./workflow-interceptors.ts";
 
@@ -60,8 +62,11 @@ export function workflowBundle(workflowsPath: string): Promise<WorkflowBundle> {
   return bundle;
 }
 
-/** The sink the interceptor reports to, for every worker of the bundle, a replaying one included. */
-export function metricSinks(): InjectedSinks<MetricsSinks> {
+/**
+ * The sink the interceptor reports to, for every worker of the bundle, a replaying one included; a
+ * long history's warn line goes to `log`, the host's.
+ */
+export function metricSinks(log: Logger = createLogger()): InjectedSinks<MetricsSinks> {
   return {
     metrics: {
       started: {
@@ -73,8 +78,16 @@ export function metricSinks(): InjectedSinks<MetricsSinks> {
         },
       },
       ended: {
-        fn: ({ workflowType: workflow }, outcome) => {
+        fn: ({ workflowType: workflow }, outcome, failure) => {
           workerMetrics["worker.workflow.runs"].add(1, { workflow, outcome });
+          if (outcome === "failed") raiseAlert({ kind: "workflow", name: workflow, code: failure });
+        },
+      },
+      // The type and the id only: a workflow's id is built from ids (platform README "Workflows").
+      historyLong: {
+        fn: ({ workflowType: workflow, workflowId }) => {
+          workerMetrics["worker.workflow.history_long"].add(1, { workflow });
+          log.warn({ workflow, workflow_id: workflowId }, "worker: a workflow's history is long");
         },
       },
     },

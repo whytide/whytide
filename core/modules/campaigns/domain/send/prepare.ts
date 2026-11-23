@@ -5,19 +5,32 @@
 // written under the workspace's raw/ after the run (workflows/sender.ts), so the text and the member
 // id never enter a workflow's input, result or history. A person with no member id known waits
 // (member_ref_unknown); one erased meanwhile waits as person_not_found, which the next gate stops.
+// A person known by an email address alone, with no profile, never has a request built: the step
+// fails with no_linkedin_profile, its holds freed and its enrollment ended (gamma-rf-050).
 // beta-p4-040: a file off the port's schema is a defect, the step failed (linkedin_input_invalid)
 // with its holds freed; for a check (`check`), the file is written again from the step left
 // `executing`, and when it cannot be, why, with no write: the activity checks with the file the send
-// left, or, with none, puts the step back (recover.ts putBackUnsent).
+// left, or, with none, puts the step back (recover.ts putBackUnsent). gamma-p4-070: the approved text
+// is the mode's too, its AI disclosure line included, for a follow-up in a campaign whose effective
+// mode is review_first_touches at `at`, as the gate takes it (review-gaps: a follow-up after a message
+// of its action went out from the enrollment).
 import { approvedContent } from "@whytide/approvals";
 import { errors as contactsErrors, getPerson } from "@whytide/contacts";
 import { tenantClient } from "@whytide/db";
 import { type SendRequestFile, sendRequestFile } from "@whytide/linkedin";
 import { isAppError } from "@whytide/platform";
+import { PERSON_OR_MODE } from "../approval-mode/constants.ts";
+import { stepRequirement } from "../approval-mode/requirement.ts";
 import { STEP_NOT_READY } from "../gate/constants.ts";
 import { checkGate, type GateReason } from "../gate/gate.ts";
 import type { StepReasonCode } from "../steps/constants.ts";
-import { INPUT_INVALID, MEMBER_REF_KEY, REQUEST_FILE, REQUEST_FOLDER } from "./constants.ts";
+import {
+  INPUT_INVALID,
+  MEMBER_REF_KEY,
+  NO_LINKEDIN_PROFILE,
+  REQUEST_FILE,
+  REQUEST_FOLDER,
+} from "./constants.ts";
 import { blockClaimed } from "./gate.ts";
 import { failStep } from "./recover.ts";
 import { type Holds, releaseHolds, waitAgain } from "./release.ts";
@@ -51,12 +64,23 @@ export async function prepareRequest(
   const id = stepExecutionId;
   const step = await tenantClient.stepExecution.findFirst({
     where: { id, status: "executing" },
-    select: { personId: true, actionType: true, idempotencyKey: true },
+    select: {
+      ...{ id: true, personId: true, actionType: true, idempotencyKey: true },
+      ...{ enrollmentId: true, templateId: true, templateVersion: true, stepKey: true },
+    },
   });
   if (step === null && check) return { waiting: STEP_NOT_READY };
   if (step === null) return { waiting: (await blockClaimed(id, holds, STEP_NOT_READY)).reason };
   const { personId, actionType, idempotencyKey } = step;
   const memberRef = await memberRefOf(personId);
+  if (memberRef === NO_PROFILE) {
+    // A person known by an email address alone (gamma-rf-050): no LinkedIn request is ever built,
+    // whatever member id is stored; the step fails, the code its exit detail.
+    if (check) return { unbuilt: NO_LINKEDIN_PROFILE };
+    await releaseHolds(holds);
+    await failStep(id, NO_LINKEDIN_PROFILE, true, at);
+    return { waiting: NO_LINKEDIN_PROFILE };
+  }
   if (memberRef === null || memberRef === GONE) {
     const code = memberRef === GONE ? "person_not_found" : "member_ref_unknown";
     if (check) return { unbuilt: code };
@@ -67,7 +91,8 @@ export async function prepareRequest(
   const base = { stepExecutionId: id, personId, memberRef, idempotencyKey };
   const request = { id, key: requestKeyOf(id), holds, at, check };
   if (actionType === "withdraw") return parsed(request, { ...base, actionType }, null);
-  const content = await approvedContent(id);
+  const { required } = await stepRequirement(step, at);
+  const content = await approvedContent(id, { allowMode: required === PERSON_OR_MODE });
   if (content === null && check) return { unbuilt: "not_approved" };
   if (content === null) {
     // No longer approved since the claim: the gate stops it as it would right before the call.
@@ -101,11 +126,20 @@ async function parsed(
 
 /** contacts' person was erased meanwhile. */
 const GONE = Symbol("person_not_found");
+/** contacts' person has no LinkedIn profile, an email address alone (gamma-rf-050). */
+const NO_PROFILE = Symbol(NO_LINKEDIN_PROFILE);
 
-/** The person's member id at the provider, null when none is known; GONE for a person erased. */
-async function memberRefOf(personId: string): Promise<string | null | typeof GONE> {
+/**
+ * The person's member id at the provider, null when none is known; GONE for a person erased,
+ * NO_PROFILE for one without a profile, whatever member id is stored.
+ */
+async function memberRefOf(
+  personId: string,
+): Promise<string | null | typeof GONE | typeof NO_PROFILE> {
   try {
-    const refs = (await getPerson(personId)).providerRefs;
+    const person = await getPerson(personId);
+    if (person.linkedinUrl === null) return NO_PROFILE;
+    const refs = person.providerRefs;
     return refs !== null && Object.hasOwn(refs, MEMBER_REF_KEY)
       ? (refs[MEMBER_REF_KEY] ?? null)
       : null;

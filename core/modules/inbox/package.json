@@ -15,23 +15,27 @@
     }
   },
   "scripts": {
-    "generate": "node ../../packages/db/src/cli.ts generate && node ../../packages/providers/_pattern/generate.ts",
+    "generate": "pnpm -F ai generate && node ../signals/scripts/kinds-generate.ts",
     "build": "pnpm run generate && tsc -b",
     "typecheck": "pnpm run generate && tsc -b",
     "lint": "node ../../../tools/lint/lint.ts .",
     "test": "pnpm run build && APP_ENV=test PROVIDER_LINKEDIN=fake PROVIDER_FILES=fake PROVIDER_LLM=fake node --test tests/*.test.ts",
     "test:safety": "pnpm run build && APP_ENV=test PROVIDER_LINKEDIN=fake PROVIDER_FILES=fake PROVIDER_LLM=fake node --test \"tests/safety/*.test.ts\"",
     "test:tenancy": "pnpm run build && APP_ENV=test PROVIDER_LINKEDIN=fake PROVIDER_FILES=fake PROVIDER_LLM=fake node --test tests/tenancy.test.ts",
-    "inbox:export-labels": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/export-labels.js"
+    "inbox:export-labels": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/export-labels.js",
+    "inbox:report": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/report.js"
   },
   "dependencies": {
     "@nestjs/common": "12.1.3",
     "@temporalio/workflow": "1.24.0",
+    "@whytide/ai": "workspace:*",
     "@whytide/approvals": "workspace:*",
     "@whytide/campaigns": "workspace:*",
     "@whytide/contacts": "workspace:*",
     "@whytide/db": "workspace:*",
+    "@whytide/enrichment": "workspace:*",
     "@whytide/linkedin": "workspace:*",
+    "@whytide/messaging": "workspace:*",
     "@whytide/platform": "workspace:*",
     "@whytide/providers": "workspace:*",
     "@whytide/tenancy": "workspace:*",

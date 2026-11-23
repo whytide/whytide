@@ -8,44 +8,111 @@
 // IN ('executing', 'succeeded'); and three CHECKs, enrollments_exit_reason (exit_reason set exactly
 // when the status is exited), enrollments_ended_at (ended_at set exactly when the status is not
 // active) and step_executions_quota_day_date (quota_day a YYYY-MM-DD text, as linkedin's).
+//
+// gamma-p3-030, migrations campaigns_email_action and campaigns_versions: three more tenant tables,
+// campaigns, their versions and each version's steps. Enrollments and step executions name a
+// campaign by template_id (its key_ref) and a version by template_version (its version_no), so
+// beta's rows (linkedin_default, 1) read as the seeded campaign's version 1 with nothing rewritten.
+// Hand-written SQL in campaigns_versions: REVOKE UPDATE, DELETE ON campaign_versions, steps FROM
+// app (a version never changes once saved), and the CHECK step_executions_channel_actor
+// (sender_account_id null exactly for an email step; mailbox_id null unless it is one).
+//
+// gamma-p3-060, migrations campaigns_paused_status and campaigns_fallback_pause: an enrollment and
+// a campaign pause and resume, and a step may carry a condition. Hand-written SQL in
+// campaigns_fallback_pause: the CHECKs enrollments_paused (paused_reason set exactly when the
+// status is paused, paused_until only then) and campaigns_paused (paused_reason and paused_at set
+// exactly when the status is paused); enrollments_active_person recreated WHERE status IN
+// ('active', 'paused'), so a person has one live enrollment; enrollments_ended_at recreated as
+// ended_at set exactly when the status is neither active nor paused.
+//
+// gamma-p4-050, migration campaigns_reply_actions: what a reply's label did to an enrollment. Its
+// label and when, the instant a hold was released (the gate counts replies after it), the not-now
+// reminder (its instant, whom it mails, when it went) and the not-interested cool-down. Hand-written
+// SQL: the CHECKs enrollments_reply_label (reply_label one of domain/replies/constants.ts
+// REPLY_ACTION_LABELS, set exactly when reply_label_at is) and enrollments_remind (remind_at and
+// remind_user_id set together, reminded_at only with them).
+//
+// gamma-p3-065, migration campaigns_playbooks: a campaign's agent, playbooks' id as a plain id.
+// Hand-written SQL: the partial unique key campaigns_playbook, (workspace_id, playbook_id) WHERE
+// playbook_id IS NOT NULL, one campaign per agent; the seeded campaign holds none.
+//
+// gamma-p6-080, migration campaigns_funnel_indexes: three indexes and nothing else. Enrollments by
+// campaign (template_id, its key_ref) for the Results page's funnel; a sender's sends by executed_at
+// and its enrollments by ended_at for the Counts page, whose queries read the workspace's prefix
+// alone before.
+//
+// gamma-p4-070, migration campaigns_approval_mode: a campaign's approval mode and its lock, and who
+// last changed the mode and when. review_locked_until defaults in the database to now() plus 7
+// days, so the campaigns there at the migration are locked from its time, and a row written outside
+// campaigns' commands from its own insert. Hand-written SQL: the CHECK campaigns_approval_mode_set
+// (approval_mode_set_by and approval_mode_set_at set together).
 
 /// tenant
 model Enrollment {
-  id              String                @id
-  workspaceId     String                @map("workspace_id")
-  personId        String                @map("person_id")
+  id              String                 @id
+  workspaceId     String                 @map("workspace_id")
+  personId        String                 @map("person_id")
   /// The approver's connected account; null when it exited without one (no_sender, suppressed).
-  senderAccountId String?               @map("sender_account_id")
+  senderAccountId String?                @map("sender_account_id")
   /// The template that stands where a campaign will (RB-9.3.3): linkedin_default.
-  templateId      String                @map("template_id")
-  templateVersion Int                   @map("template_version")
+  templateId      String                 @map("template_id")
+  templateVersion Int                    @map("template_version")
   status          EnrollmentStatus
-  exitReason      EnrollmentExitReason? @map("exit_reason")
+  exitReason      EnrollmentExitReason?  @map("exit_reason")
   /// A code of domain/steps/constants.ts EXIT_DETAILS: the suppression reason behind suppressed.
-  exitDetail      String?               @map("exit_detail")
+  exitDetail      String?                @map("exit_detail")
   /// The contacts.lead_approved event it came from, so that a redelivery enrolls no one again.
-  sourceEventId   String                @map("source_event_id")
+  sourceEventId   String                 @map("source_event_id")
   /// Null for an enrollment that ended as it was made: its sequence never started.
-  startedAt       DateTime?             @map("started_at") @db.Timestamptz()
-  endedAt         DateTime?             @map("ended_at") @db.Timestamptz()
-  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamptz()
+  startedAt       DateTime?              @map("started_at") @db.Timestamptz()
+  endedAt         DateTime?              @map("ended_at") @db.Timestamptz()
+  /// Set only while paused: when the queue run resumes it; null, until a member resumes it.
+  pausedUntil     DateTime?              @map("paused_until") @db.Timestamptz()
+  /// Set exactly while paused (the CHECK enrollments_paused).
+  pausedReason    EnrollmentPauseReason? @map("paused_reason")
+  /// When a reply's hold was last released: the gate holds again only for a reply after it.
+  resumedAt       DateTime?              @map("resumed_at") @db.Timestamptz()
+  /// The not-now reminder: when the queue run mails it, and to whom (a user id).
+  remindAt        DateTime?              @map("remind_at") @db.Timestamptz()
+  remindUserId    String?                @map("remind_user_id")
+  /// When the reminder's event was published; set once, so it mails once.
+  remindedAt      DateTime?              @map("reminded_at") @db.Timestamptz()
+  /// Until when a not-interested reply blocks a new enrollment of the person.
+  coolDownUntil   DateTime?              @map("cool_down_until") @db.Timestamptz()
+  /// The reply label last acted on (the CHECK enrollments_reply_label), and its reply's instant.
+  replyLabel      String?                @map("reply_label")
+  replyLabelAt    DateTime?              @map("reply_label_at") @db.Timestamptz()
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime               @updatedAt @map("updated_at") @db.Timestamptz()
   stepExecutions  StepExecution[]
 
   @@unique([workspaceId, id])
   @@unique([workspaceId, sourceEventId])
   @@index([workspaceId, personId])
+  @@index([workspaceId, remindAt])
+  @@index([workspaceId, templateId, status])
+  @@index([workspaceId, senderAccountId, endedAt])
   @@map("enrollments")
 }
 
-// active, then replied, completed or exited, never back (data model §5.2, reduced).
+// active, then replied, completed or exited, never back (data model §5.2, reduced); active and
+// paused go back and forth (gamma-p3-060, campaigns_paused_status, a migration of its own).
 enum EnrollmentStatus {
   active
   replied
   completed
   exited
+  paused
 
   @@map("enrollment_status")
+}
+
+// Who paused an enrollment: a member, or gamma-p4-050's out-of-office reply.
+enum EnrollmentPauseReason {
+  user
+  out_of_office
+
+  @@map("enrollment_pause_reason")
 }
 
 enum EnrollmentExitReason {
@@ -64,8 +131,13 @@ model StepExecution {
   workspaceId      String              @map("workspace_id")
   enrollmentId     String              @map("enrollment_id")
   personId         String              @map("person_id")
-  senderAccountId  String              @map("sender_account_id")
+  /// The LinkedIn step's sending account; null exactly for an email step (the CHECK).
+  senderAccountId  String?             @map("sender_account_id")
+  /// An email step's mailbox, a plain id (gamma-p4-010 sets it); null on every LinkedIn step.
+  mailboxId        String?             @map("mailbox_id")
+  /// The campaign's key_ref: linkedin_default for the seeded campaign, its own id for any other.
   templateId       String              @map("template_id")
+  /// The campaign version's version_no.
   templateVersion  Int                 @map("template_version")
   stepKey          String              @map("step_key")
   position         Int
@@ -101,13 +173,17 @@ model StepExecution {
   @@unique([workspaceId, enrollmentId, stepKey])
   @@index([workspaceId, senderAccountId, status, scheduledFor])
   @@index([workspaceId, personId])
+  @@index([workspaceId, senderAccountId, executedAt])
   @@map("step_executions")
 }
 
+// email from gamma-p3-030 (campaigns_email_action, a migration of its own: Postgres refuses a new
+// value in the transaction that adds it); nothing sends an email step until gamma-p4-010.
 enum StepActionType {
   invite
   message
   withdraw
+  email
 
   @@map("step_action_type")
 }
@@ -125,4 +201,135 @@ enum StepExecutionStatus {
   cancelled
 
   @@map("step_execution_status")
+}
+
+/// tenant
+model Campaign {
+  id               String               @id
+  workspaceId      String               @map("workspace_id")
+  /// What enrollments and step executions carry as template_id: linkedin_default, or its own id.
+  keyRef           String               @map("key_ref")
+  /// Empty for the seeded campaign.
+  name             String
+  status           CampaignStatus
+  /// The member whose accounts the campaign sends from (gamma-p6-040); the Owner for the seeded one.
+  ownerUserId      String               @map("owner_user_id")
+  /// Null until the first version is written.
+  currentVersionId String?              @map("current_version_id")
+  launchedAt       DateTime?            @map("launched_at") @db.Timestamptz()
+  /// Set exactly while paused (the CHECK campaigns_paused), as paused_at.
+  pausedReason     CampaignPauseReason? @map("paused_reason")
+  pausedAt         DateTime?            @map("paused_at") @db.Timestamptz()
+  /// The agent it was made for (playbooks' id); null for the seeded one and any other without one.
+  playbookId       String?              @map("playbook_id")
+  /// Who approves its steps (domain/approval-mode/): a person, or the mode for a follow-up.
+  approvalMode      CampaignApprovalMode @default(review_everything) @map("approval_mode")
+  /// review_everything until then, whatever approval_mode says: the creation plus 7 days.
+  reviewLockedUntil DateTime             @default(dbgenerated("(now() + '7 days'::interval)")) @map("review_locked_until") @db.Timestamptz()
+  /// The member who last changed the mode, and when; both null until one does (the CHECK).
+  approvalModeSetBy String?              @map("approval_mode_set_by")
+  approvalModeSetAt DateTime?            @map("approval_mode_set_at") @db.Timestamptz()
+  /// A user's id, or system.
+  createdBy        String               @map("created_by")
+  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime             @updatedAt @map("updated_at") @db.Timestamptz()
+  currentVersion   CampaignVersion?     @relation("CampaignCurrentVersion", fields: [workspaceId, currentVersionId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+  versions         CampaignVersion[]    @relation("CampaignVersions")
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, keyRef])
+  @@index([workspaceId, status])
+  @@index([workspaceId, ownerUserId])
+  @@map("campaigns")
+}
+
+// Data model §5.6; gamma-p3-030 writes draft and active only.
+enum CampaignStatus {
+  draft
+  active
+  paused
+  completed
+  archived
+
+  @@map("campaign_status")
+}
+
+/// tenant
+model CampaignVersion {
+  id          String             @id
+  workspaceId String             @map("workspace_id")
+  campaignId  String             @map("campaign_id")
+  versionNo   Int                @map("version_no")
+  changeKind  CampaignChangeKind @map("change_kind")
+  /// A user's id, or system.
+  createdBy   String             @map("created_by")
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+  campaign    Campaign           @relation("CampaignVersions", fields: [workspaceId, campaignId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+  currentOf   Campaign[]         @relation("CampaignCurrentVersion")
+  steps       Step[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, campaignId, versionNo])
+  @@map("campaign_versions")
+}
+
+// Who paused a campaign: a member, or the bounce rate (wired by a later task).
+enum CampaignPauseReason {
+  user
+  bounce_rate
+
+  @@map("campaign_pause_reason")
+}
+
+enum CampaignChangeKind {
+  initial
+  structural
+
+  @@map("campaign_change_kind")
+}
+
+// gamma-p4-070: two modes of RB-14.2.1's four; the others add their values with their own migration.
+enum CampaignApprovalMode {
+  review_everything
+  review_first_touches
+
+  @@map("campaign_approval_mode")
+}
+
+/// tenant
+model Step {
+  id                String          @id
+  workspaceId       String          @map("workspace_id")
+  campaignVersionId String          @map("campaign_version_id")
+  position          Int
+  /// One of domain/campaigns/constants.ts STEP_KEYS, given at save by action and order.
+  stepKey           String          @map("step_key")
+  actionType        StepActionType  @map("action_type")
+  channel           StepChannel
+  /// The template's StepDelay (domain/template/constants.ts).
+  delay             Json
+  /// SHA-256, hex, of the step's canonical definition (domain/template/keys.ts).
+  stepTemplateHash  String          @map("step_template_hash")
+  /// Null for none; invite_not_accepted_within marks the email fallback (gamma-p3-060).
+  condition         StepCondition?
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz()
+  campaignVersion   CampaignVersion @relation(fields: [workspaceId, campaignVersionId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([workspaceId, campaignVersionId, position])
+  @@unique([workspaceId, campaignVersionId, stepKey])
+  @@map("steps")
+}
+
+// The only condition gamma has: the step runs while the connection request is not accepted.
+enum StepCondition {
+  invite_not_accepted_within
+
+  @@map("step_condition")
+}
+
+enum StepChannel {
+  linkedin
+  email
+
+  @@map("step_channel")
 }

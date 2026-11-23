@@ -3,8 +3,12 @@
 import type { z } from "zod";
 import { leadListQuery } from "./leads.ts";
 
-/** The lead list's filters: a status, a tier, `unreviewed`, an outreach status; none is every lead. */
+/**
+ * The lead list's filters: a source's ref, a status, a tier, `unreviewed`, an outreach status; none
+ * is every lead.
+ */
 export const leadsCsvQuery = leadListQuery.pick({
+  source: true,
   status: true,
   tier: true,
   review: true,

@@ -4,12 +4,17 @@
 // browser is in Tokyo. The e2e api runs no worker: a drafting row's draft is written and attached by
 // the e2e module, and the queue's next read shows it. The queue grouped and flagged, its times in the
 // sender's zone; Approve and Skip with the counters, and the requests the page sends; Edit and the
-// gates' refusals, a failed draft written by hand, an empty note; a drafting row; a member who does
-// not own the account; Show facts; the states; a phone's width. Every text from its key; axe.
+// gates' refusals, a failed draft written by hand, an empty note; a drafting row; Show facts; the
+// states; a phone's width. An email row from the user's mailbox, a row the campaign's mode will
+// approve and one it left to its owner (gamma-p4-090), with a light screenshot. Two senders, the
+// account and a mailbox in London, a section each; another member, an Owner with no sender, sees
+// none of the rows, and the empty state that says to connect a LinkedIn account (gamma-p6-050).
+// Every text from its key; axe.
 import { AxeBuilder } from "@axe-core/playwright";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { createTranslator } from "next-intl";
 import approvals from "../../../modules/approvals/messages/en.json" with { type: "json" };
+import messaging from "../../../modules/messaging/messages/en.json" with { type: "json" };
 import qualification from "../../../modules/qualification/messages/en.json" with { type: "json" };
 import platform from "../../../packages/platform/messages/en.json" with { type: "json" };
 import ui from "../../../packages/ui/messages/en.json" with { type: "json" };
@@ -20,6 +25,8 @@ const PATH = `/w/${WORKSPACE}/up-next`;
 const API = `/api/v1/workspaces/${WORKSPACE}`;
 /** The sender account's zone; the browser's is another, half a day ahead. */
 const ZONE = "America/New_York";
+/** The mailbox's, in the test of two senders. */
+const MAILBOX_ZONE = "Europe/London";
 const BROWSER_ZONE = "Asia/Tokyo";
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -48,12 +55,25 @@ const LEADS = {
   connect: ["Eve", "Connect", "warm"],
   yesterday: ["Finn", "Yesterday", "cool"],
   waited: ["Gus", "Waited", "hot"],
+  email: ["Hana", "Email", "warm"],
+  mode: ["Ivo", "Mode", "hot"],
+  declined: ["Jo", "Declined", "cool"],
 } as const;
 type Row = keyof typeof LEADS;
-const ROWS = Object.keys(LEADS) as Row[];
+/** The rows of an email step and of the campaign's mode, which only their own test seeds. */
+const GAMMA_ROWS = ["email", "mode", "declined"] as const satisfies readonly Row[];
+const ROWS = (Object.keys(LEADS) as Row[]).filter(
+  (row) => !(GAMMA_ROWS as readonly Row[]).includes(row),
+);
 const WHY = { criterion: "title_function", quote: "Head of Data", met: 4, total: 5 };
 const GLOBEX = { gate: "grounding", entity: "Globex" };
 const LATER = "Dan, one more question: who at Blue Harbor Labs answers warm leads this month?";
+/** The e2e module's account of the user (UP_NEXT_ACCOUNT) by its label, and their mailbox. */
+const ACCOUNT = "Up next e2e";
+/** The e2e module's mailbox of the user (UP_NEXT_MAILBOX), and the email row's subjects. */
+const MAILBOX = "up-next-e2e@example.com";
+const SUBJECT = "Warm leads at Blue Harbor";
+const EDITED_SUBJECT = "Warm leads this week";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 test.use({ timezoneId: BROWSER_ZONE });
@@ -77,7 +97,7 @@ function nest(flat: Record<string, string>) {
 }
 const t = createTranslator({
   locale: "en",
-  messages: nest({ ...approvals, ...qualification, ...platform, ...ui }),
+  messages: nest({ ...approvals, ...messaging, ...qualification, ...platform, ...ui }),
   onError: (error) => {
     throw error;
   },
@@ -130,11 +150,34 @@ function itemOf(row: Row, personId: string, dossier: Dossier, hour: number) {
       const times = { scheduledFor: iso(now - 49 * HOUR), createdAt: iso(now - 73 * HOUR) };
       return { personId, ...times, stepKey: "message_1", draft: ready };
     }
+    case "email":
+      return { ...at(10 * MINUTE), stepKey: "email_1", draft: { ...ready, subject: SUBJECT } };
+    case "mode":
+      return {
+        ...at(HOUR + 10 * MINUTE),
+        stepKey: "follow_up_1",
+        approvalBy: "mode",
+        draft: { status: "drafting" },
+      };
+    case "declined": {
+      const gates = [{ gate: "grounding", issues: [GLOBEX] }];
+      const draft = { ...ready, status: "flagged", gates, flagReasons: [GLOBEX] };
+      const mode = { approvalBy: "mode", waitCode: "mode_declined" };
+      return { ...at(2 * HOUR + 10 * MINUTE), stepKey: "follow_up_2", ...mode, draft };
+    }
   }
 }
 
-/** The workspace's leads and the rows' items, replaced: each row's item, draft and due time. */
-async function seed(page: Page, origin: string | undefined, rows: readonly Row[] = ROWS) {
+/**
+ * The workspace's leads and the rows' items, replaced: each row's item, draft and due time; the
+ * mailbox in the account's zone unless given.
+ */
+async function seed(
+  page: Page,
+  origin: string | undefined,
+  rows: readonly Row[] = ROWS,
+  mailboxTimeZone?: string,
+) {
   const headers = { origin: origin ?? "" };
   const leads = rows.map((row) => {
     const [firstName, lastName, tier] = LEADS[row];
@@ -154,7 +197,7 @@ async function seed(page: Page, origin: string | undefined, rows: readonly Row[]
     expect(read.status(), await read.text()).toBe(200);
     items.push(itemOf(row, personId, (await read.json()) as Dossier, hour));
   }
-  const data = { timeZone: ZONE, items };
+  const data = { timeZone: ZONE, ...(mailboxTimeZone && { mailboxTimeZone }), items };
   const seeded = await page.request.post(`${API}/e2e/up-next`, { data, headers });
   expect(seeded.status(), await seeded.text()).toBe(200);
   const ids = ((await seeded.json()) as { items: { id: string; draftId: string }[] }).items;
@@ -229,8 +272,9 @@ const button = (scope: Locator | Page, key: string) =>
   scope.getByRole("button", { name: t(key), exact: true });
 const text = (scope: Locator | Page, key: string, values?: Record<string, string | number>) =>
   scope.getByText(t(key, values), { exact: true });
+/** The header's counters, the member's totals; a sender's section has its own (gamma-p6-050). */
 const counted = (page: Page, key: "to_approve" | "decided_today", count: number) =>
-  text(page, `approvals.up_next.count.${key}`, { count });
+  text(page.locator("header.wt-page-header"), `approvals.up_next.count.${key}`, { count });
 
 test("Overdue first, then by the hour in the sender's zone, never the browser's; each row's lead, step, time and flags; the counters; axe", async ({
   page,
@@ -304,7 +348,7 @@ test("Approve moves the row out and counts it decided today; Skip asks first, a 
   baseURL,
 }) => {
   await signInAs();
-  await seed(page, baseURL);
+  const seeded = await seed(page, baseURL);
   const sent = recorded(page);
   await page.goto(PATH);
   const approved = text(page, "approvals.up_next.toast.approved", { name: nameOf("ready") });
@@ -364,8 +408,8 @@ test("Approve moves the row out and counts it decided today; Skip asks first, a 
   expect(posts.map(({ path }) => path.split("/").at(-1))).toEqual(["approve", "skip", "skip"]);
   expect(posts.every(({ key }) => key !== undefined && UUID.test(key))).toBe(true);
   expect(new Set(posts.map(({ key }) => key)).size).toBe(3);
-  // A bare Approve sends the draft as it is: the body is required, and empty.
-  expect(posts[0]?.body).toBe("{}");
+  // A bare Approve sends the draft as it is, the one shown (gamma-p4-090): its id alone.
+  expect(JSON.parse(posts[0]?.body ?? "")).toEqual({ draftId: seeded.ready.draftId });
 });
 
 test("Edit shows the text's counter; a red line or a colleague is refused with the gates' reasons, the typed text kept; a failed draft written by hand is approved; a connection request is approved with an empty note; axe", async ({
@@ -421,8 +465,62 @@ test("Edit shows the text's counter; a red line or a colleague is refused with t
   await button(connect, "approvals.up_next.action.approve").click();
   await expect(connect).toHaveCount(0);
   await expect(counted(page, "decided_today", 3)).toBeVisible();
-  await expect(text(page, "approvals.up_next.empty")).toBeVisible();
+  await expect(text(page, "approvals.up_next.empty.no_steps")).toBeVisible();
   await axe(page);
+});
+
+test("an email row names its mailbox and shows its subject, which Edit opens beside the body within its limits and Approve sends with the shown draft; a row the campaign's mode will approve says so with its channel's AI disclosure line; one it left to its owner says why; axe; a light screenshot", async ({
+  page,
+  signInAs,
+  baseURL,
+}, testInfo) => {
+  await signInAs();
+  const seeded = await seed(page, baseURL, GAMMA_ROWS);
+  const sent = recorded(page);
+  await page.goto(PATH);
+  await expect(counted(page, "to_approve", 3)).toBeVisible();
+  const email = rowOf(page, "email");
+  await expect(text(email, "approvals.up_next.step.email_1")).toBeVisible();
+  await expect(text(email, "approvals.up_next.mailbox", { address: MAILBOX })).toBeVisible();
+  await expect(email.getByText(SUBJECT, { exact: true })).toBeVisible();
+  await expect(email.getByText(textOf("email"), { exact: true })).toBeVisible();
+  const mode = rowOf(page, "mode");
+  await expect(text(mode, "approvals.up_next.by_mode")).toBeVisible();
+  await expect(text(mode, "messaging.disclosure.linkedin")).toBeVisible();
+  const declined = rowOf(page, "declined");
+  const why = { reason: "draft" };
+  await expect(text(declined, "approvals.up_next.wait.mode_declined", why)).toBeVisible();
+  await expect(text(declined, "approvals.up_next.by_mode")).toHaveCount(0);
+  await axe(page);
+  await page.screenshot({ path: testInfo.outputPath("up-next-email.png") });
+  await mode.screenshot({ path: testInfo.outputPath("up-next-mode.png") });
+  await declined.screenshot({ path: testInfo.outputPath("up-next-declined.png") });
+
+  const subject = email.getByRole("textbox", { name: t("approvals.up_next.subject") });
+  await press(button(email, "approvals.up_next.action.edit"), subject);
+  await expect(subject).toHaveValue(SUBJECT);
+  const counter = (said: string) => ({
+    words: said.split(" ").length,
+    count: said.length,
+    maxWords: 6,
+    max: 60,
+  });
+  await expect(text(email, "approvals.up_next.subject_counter", counter(SUBJECT))).toBeVisible();
+  const approve = button(email, "approvals.up_next.action.approve");
+  await subject.fill(`${SUBJECT} Labs this week`);
+  await expect(approve).toBeDisabled();
+  await subject.fill(EDITED_SUBJECT);
+  await expect(approve).toBeEnabled();
+  await approve.click();
+  await expect(email).toHaveCount(0);
+  await expect(counted(page, "decided_today", 1)).toBeVisible();
+  const posts = sent.filter(({ method }) => method === "POST");
+  expect(posts.map(({ path }) => path)).toEqual([
+    `${API}/approvals/items/${seeded.email.id}/approve`,
+  ]);
+  // The open field's body goes with the subject, both for the draft shown.
+  const shown = { text: textOf("email"), subject: EDITED_SUBJECT, draftId: seeded.email.draftId };
+  expect(JSON.parse(posts[0]?.body ?? "")).toEqual(shown);
 });
 
 test("a drafting row shows a spinner and no Approve, then its text once its draft is ready, without a reload; axe", async ({
@@ -450,7 +548,49 @@ test("a drafting row shows a spinner and no Approve, then its text once its draf
   await axe(page);
 });
 
-test("a member who does not own the sender account sees Approve, Edit and Skip disabled, with the hint; axe", async ({
+test("two senders, the account in New York and a mailbox in London: a section each, by label, titled with its label and zone, with its counters; in each, Overdue first, then the hours in its own zone; the header the totals; axe; at a phone's width nothing scrolls sideways", async ({
+  page,
+  signInAs,
+  baseURL,
+}) => {
+  await signInAs();
+  const seeded = await seed(page, baseURL, ["ready", "yesterday", "email"], MAILBOX_ZONE);
+  await page.goto(PATH);
+  await expect(counted(page, "to_approve", 3)).toBeVisible();
+  await expect(counted(page, "decided_today", 0)).toBeVisible();
+  const main = page.getByRole("main");
+  const title = (label: string, zone: string) =>
+    t("approvals.up_next.sender.title", { label, zone });
+  const sections = [title(ACCOUNT, ZONE), title(MAILBOX, MAILBOX_ZONE)];
+  await expect(main.getByRole("heading", { level: 2 })).toHaveText(sections);
+  const counters = (count: number, decided: number) => [
+    t("approvals.up_next.sender.to_approve", { count }),
+    t("approvals.up_next.sender.decided_today", { count: decided }),
+  ];
+
+  const account = main.getByRole("region", { name: sections[0], exact: true });
+  for (const said of counters(2, 0))
+    await expect(account.getByText(said, { exact: true })).toBeVisible();
+  const hour = await worded(page, seeded.ready.scheduledFor, GROUP, ZONE);
+  const groups = account.getByRole("heading", { level: 3 });
+  await expect(groups).toHaveText([t("approvals.up_next.group.overdue"), hour]);
+  await expect(account.getByRole("article")).toHaveText([/Finn Yesterday/, /Ana Ready/]);
+
+  const mailbox = main.getByRole("region", { name: sections[1], exact: true });
+  for (const said of counters(1, 0))
+    await expect(mailbox.getByText(said, { exact: true })).toBeVisible();
+  const local = await worded(page, seeded.email.scheduledFor, GROUP, MAILBOX_ZONE);
+  expect(local).not.toBe(await worded(page, seeded.email.scheduledFor, GROUP, ZONE));
+  await expect(mailbox.getByRole("heading", { level: 3 })).toHaveText([local]);
+  await expect(mailbox.getByRole("article")).toHaveText([/Hana Email/]);
+  await axe(page);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(account.getByRole("article").first()).toBeVisible();
+  expect(await overflows(page)).toEqual([]);
+});
+
+test("another member, an Owner with no sender, sees none of the rows: the empty state says to connect a LinkedIn account and links to its screen; the counters 0; axe", async ({
   page,
   signInAs,
   baseURL,
@@ -459,17 +599,13 @@ test("a member who does not own the sender account sees Approve, Edit and Skip d
   await seed(page, baseURL, ["ready", "failed"]);
   await signInAs("e2e-usage@example.com");
   await page.goto(PATH);
-  const ready = rowOf(page, "ready");
-  const hint = t("approvals.up_next.hint.not_owner");
-  await expect(text(ready, "approvals.up_next.hint.not_owner")).toBeVisible();
-  for (const action of ["approve", "edit", "skip"]) {
-    const control = button(ready, `approvals.up_next.action.${action}`);
-    await expect(control).toBeDisabled();
-    await expect(control).toHaveAccessibleDescription(hint);
-  }
-  const failed = rowOf(page, "failed");
-  await expect(failed.getByRole("textbox")).toHaveCount(0);
-  await expect(button(failed, "approvals.up_next.action.approve")).toBeDisabled();
+  await expect(text(page, "approvals.up_next.empty.no_sender")).toBeVisible();
+  const connect = page.getByRole("link", { name: t("approvals.up_next.empty.connect") });
+  await expect(connect).toHaveAttribute("href", `/w/${WORKSPACE}/linkedin`);
+  await expect(page.getByRole("article")).toHaveCount(0);
+  await expect(page.getByText(nameOf("ready"))).toHaveCount(0);
+  await expect(counted(page, "to_approve", 0)).toBeVisible();
+  await expect(counted(page, "decided_today", 0)).toBeVisible();
   await axe(page);
 });
 
@@ -489,7 +625,7 @@ test("the screen's states: loading while its read is held, then empty; a failed 
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(t("approvals.up_next.title"));
   await axe(page);
   await context.clearCookies({ name: "e2e_hold" });
-  const empty = text(page, "approvals.up_next.empty");
+  const empty = text(page, "approvals.up_next.empty.no_steps");
   await expect(empty).toBeVisible();
   await expect(counted(page, "to_approve", 0)).toBeVisible();
   await axe(page);

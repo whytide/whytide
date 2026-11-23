@@ -131,6 +131,15 @@ export function applyDraft(
   return { fields, fieldSources, changed };
 }
 
+/** Whether a draft holds a value an accept could write: a text, or a list with an item. */
+export function draftHasValue(draft: DraftOutput): boolean {
+  const lists = [...LIST_FIELDS, "proofPoints"] as const;
+  return (
+    TEXT_FIELDS.some((field) => (draft[field]?.text.trim() ?? "") !== "") ||
+    lists.some((field) => draft[field].some((item) => item.text.trim() !== ""))
+  );
+}
+
 /** The company's domain: the host of its website without a leading `www.`; null without one. */
 export function domainOf(sourceUrl: string | null): string | null {
   const host = sourceUrl === null ? "" : (URL.parse(sourceUrl)?.hostname ?? "");

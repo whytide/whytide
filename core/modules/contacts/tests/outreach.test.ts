@@ -16,6 +16,7 @@ import { approveLead, listStatusChanges, recordLeadStatus } from "../domain/outr
 import { erasePerson, upsertPersonFromSource } from "../domain/persons.ts";
 import { reviewLead } from "../domain/review/reviews.ts";
 import { recordTouch } from "../domain/suppression/checks.ts";
+import { RECENT_TOUCH_DAYS } from "../domain/suppression/constants.ts";
 import { addOptOut, addSuppression, removeSuppression } from "../domain/suppression/entries.ts";
 import { useHashSalt } from "../testing/index.ts";
 
@@ -271,7 +272,7 @@ test("Approve is independent of review: Good lead and Not a fit leave the outrea
   assert.equal(await statusOf(notAFit), "approved", "a decision after Approve leaves it too");
 });
 
-test("Approve refuses a suppressed person with the reason, recently_contacted included; once unblocked the lead is approved again, unless it was ever in a campaign", async () => {
+test("Approve refuses a suppressed person with the reason, recently_contacted included, with its days unset; once unblocked the lead is approved again, unless it was ever in a campaign", async () => {
   const blocked = await leadAt("noor-approve-blocked");
   const touched = await leadAt("noor-approve-touched");
   const campaigned = await leadAt("noor-approve-campaigned");
@@ -288,7 +289,7 @@ test("Approve refuses a suppressed person with the reason, recently_contacted in
     asTester(() => approveLead(touched)),
     {
       code: "person_suppressed",
-      details: { reason: "recently_contacted" },
+      details: { reason: "recently_contacted", days: RECENT_TOUCH_DAYS.default },
     },
   );
   assert.equal(await statusOf(touched), "pending_review", "a refusal writes nothing");
@@ -335,7 +336,7 @@ test("a status change is append-only: app cannot update one; erasePerson deletes
   assert.equal(await sqlstate(update), "42501", "app must not update a status change");
 
   const { counts } = await run(() => erasePerson(personId));
-  assert.deepEqual(counts, { review_decisions: 0, leads: 1, persons: 1 });
+  assert.deepEqual(counts, { person_email_hashes: 0, review_decisions: 0, leads: 1, persons: 1 });
   assert.equal(await app().leadStatusChange.count({ where: { personId } }), 0);
   assert.equal(await app().leadStatusChange.count({ where: { personId: kept } }), 1);
 });

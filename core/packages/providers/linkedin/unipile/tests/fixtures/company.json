@@ -1,0 +1,9 @@
+{
+  "object": "CompanyProfile",
+  "id": "1000001",
+  "name": "Example Ltd",
+  "public_identifier": "example-ltd",
+  "profile_url": "https://www.linkedin.com/company/example-ltd",
+  "entity_urn": "urn:li:fsd_company:1000001",
+  "description": "fixture-body-marker: a synthetic company."
+}

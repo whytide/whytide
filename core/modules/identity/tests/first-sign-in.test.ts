@@ -18,11 +18,13 @@ useIdentityClient(asRole("app"));
 
 test("the first invite bootstraps the organization and the workspace; the second user joins it as Owner", async () => {
   const lines: string[] = [];
-  assert.equal(await runInvite(["first@example.test"], (line) => lines.push(line)), 0);
-  assert.equal(await runInvite(["second@example.test"], (line) => lines.push(line)), 0);
+  const say = (line: string) => lines.push(line);
+  assert.equal(await runInvite(["first@example.test", "--no-mail"], say), 0);
+  assert.equal(await runInvite(["second@example.test", "--no-mail"], say), 0);
+  // The first email is the new workspace's Owner already: no invite for it.
   assert.deepEqual(
     lines.map((line) => line.split(":")[0]),
-    ["organization_created", "invite_created", "invite_created"],
+    ["organization_created", "already_member", "invite_created", "mail_skipped"],
   );
   const organizations = await asRole("app").organization.findMany({ select: { name: true } });
   assert.deepEqual(organizations, [{ name: settings.ORGANIZATION_NAME }]);

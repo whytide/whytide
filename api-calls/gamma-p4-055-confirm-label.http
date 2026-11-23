@@ -1,0 +1,63 @@
+# inbox's label (core/modules/inbox/README.md "API"; gamma-p4-055): the thread owner's session and
+# inbox.label. One of the 7 labels confirms the classifier's suggestion or changes it; for the
+# person's newest reply the label's default action runs then (an interested notice, a reminder, a
+# cool-down, a pause, an opt-out on every channel, which nothing lifts); an older reply's label is
+# recorded and acts on nothing but an opt-out. The PUT sets a state, so it takes no Idempotency-Key
+# and the same label again changes nothing. It sends the cookie, so it sends Origin: {{appOrigin}}
+# too. Put in http-client.private.env.json, with your workspaceId: `messageId`, the newest reply on a
+# thread of yours, its label suggested; `olderMessageId`, an earlier reply of the same person;
+# `otherMessageId`, a reply on another member's thread.
+
+### PUT /v1/workspaces/{workspaceId}/inbox/messages/{id}/label: confirms the suggested label; 200 { label: "positive", classLabel: "interested", labeledBy, labeledAt }, and its notice to you
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/messages/{{messageId}}/label
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "label": "interested" }
+
+### The same label again: 200, the row as it was; no second notice
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/messages/{{messageId}}/label
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "label": "interested" }
+
+### Changes it: 200 { label: "not_positive", classLabel: "not_interested" }; the held steps cancelled and the cool-down set
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/messages/{{messageId}}/label
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "label": "not_interested" }
+
+### An older reply of the same person: 200, the label recorded; no action
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/messages/{{olderMessageId}}/label
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "label": "not_now" }
+
+### Another member's reply: 404 inbox_message_not_found, as another workspace's; nothing written
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/messages/{{otherMessageId}}/label
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "label": "interested" }
+
+### Beta's word: 400 validation_failed; a label is one of the 7
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/messages/{{messageId}}/label
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "label": "positive" }

@@ -1,11 +1,15 @@
 // test:tenancy for privacy (docs/rules/security.md §3; core/packages/db README "Register a tenant
 // table in the isolation test"): erasure_log is isolated by workspace and append-only for app; the
 // log's write and the platform rows' eraser go through the tenant client of the caller's run, and the
-// eraser leaves another workspace's rows; and the pipeline check: every tenant table with a person_id
-// belongs to a module the deletion script erases, which fails on a fixture table naming it.
+// eraser leaves another workspace's rows; the CHECK that ties the hash to the reason; the 30-day
+// rule's deletion in one workspace leaves another's person with the same URL; and the pipeline check:
+// every tenant table with a person_id belongs to a module the deletion script erases, which fails on
+// a fixture table naming it.
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
+import { upsertPersonFromSource } from "@whytide/contacts";
+import { useHashSalt } from "@whytide/contacts/testing";
 import { type TenantClient, withTenant } from "@whytide/db";
 import {
   asRole,
@@ -15,17 +19,23 @@ import {
   tenantTablesWithColumn,
   withTestDb,
 } from "@whytide/db/testing";
-import { servicePrincipal } from "@whytide/platform";
+import { collectLogs, createLogger, servicePrincipal } from "@whytide/platform";
+import { useClient } from "../domain/client.ts";
 import { erasingModules } from "../domain/erase/erasers.ts";
 import { type ErasureEntry, writeErasureLog } from "../domain/erase/log.ts";
 import { erasePlatformRows } from "../domain/erase/platform.ts";
+import { cutoffOf } from "../domain/retention/candidates.ts";
+import { runRetention } from "../domain/retention/job.ts";
 
 withTestDb();
+useHashSalt("test-salt-".repeat(4));
+useClient(asRole("app"));
 const principal = servicePrincipal("privacy_test");
 const inRun = <T>(workspaceId: string, fn: (tx: TenantClient) => Promise<T>) =>
   withTenant({ workspaceId, principal }, fn, { client: asRole("app") });
 const entry: ErasureEntry = {
   personHash: "a".repeat(64),
+  reason: "request",
   requestedAt: new Date(),
   counts: { contacts: { persons: 1 } },
   performedBy: "operator",
@@ -47,6 +57,54 @@ test("app writes and reads the log, and never changes or removes a row", async (
   const remove = app.$executeRaw`DELETE FROM erasure_log WHERE id = ${id}`;
   assert.equal(await sqlstate(remove), "42501", "app must not remove a log row");
   assert.equal(await app.erasureLog.count(), 1);
+});
+
+test("the CHECK refuses a request's row without a hash, and a 30-day rule's or a lead deletion's row with one", async () => {
+  const workspaceId = "wsp_privacy_check";
+  const write = (row: Partial<ErasureEntry>) =>
+    inRun(workspaceId, () => writeErasureLog({ ...entry, ...row }));
+  const retention = "retention_never_contacted" as const;
+  const deleted = "lead_deleted" as const;
+  assert.equal(await sqlstate(write({ personHash: null })), "23514", "a request keeps its hash");
+  assert.equal(await sqlstate(write({ reason: retention })), "23514", "the rule keeps none");
+  assert.equal(await sqlstate(write({ reason: deleted })), "23514", "a lead deletion keeps none");
+  await write({ reason: retention, personHash: null, performedBy: "retention" });
+  await write({ reason: deleted, personHash: null });
+  await write({});
+  const rows = await inRun(workspaceId, (tx) => tx.erasureLog.findMany({ orderBy: { id: "asc" } }));
+  assert.deepEqual(rows.map((row) => [row.reason, row.personHash]).sort(), [
+    [deleted, null],
+    ["request", entry.personHash],
+    [retention, null],
+  ]);
+});
+
+test("the 30-day rule's deletion in one workspace leaves another workspace's person with the same URL", async () => {
+  const [a, b] = ["wsp_retention_a", "wsp_retention_b"];
+  const profile = {
+    linkedinUrl: "https://linkedin.com/in/wren-haldane-r30",
+    firstName: "Wren",
+    locationText: "Leeds, United Kingdom",
+  };
+  const found = async (workspaceId: string) =>
+    inRun(workspaceId, async () => {
+      const source = { source: "import", provider: "csv", profile } as const;
+      return (await upsertPersonFromSource(source)).person.id;
+    });
+  const [inA, inB] = [await found(a), await found(b)];
+  // Both found on 1 September, never touched: candidates of a run on 2 October, each in its workspace.
+  const owner = asRole("owner");
+  await owner.$executeRaw`UPDATE persons SET created_at = '2026-09-01T09:00:00Z'`;
+  const log = createLogger({ destination: collectLogs().destination });
+  const run = await runRetention(a, cutoffOf(new Date("2026-10-02T03:15:00.000Z")), log);
+  assert.deepEqual(run, { candidates: 1, deleted: 1, skipped: 0, failed: 0, deletedIds: [inA] });
+  const left = await owner.person.findMany({ select: { id: true, workspaceId: true } });
+  assert.deepEqual(left, [{ id: inB, workspaceId: b }]);
+  const logs = await owner.erasureLog.findMany();
+  assert.deepEqual(
+    logs.map((row) => [row.workspaceId, row.reason, row.personHash, row.performedBy]),
+    [[a, "retention_never_contacted", null, "retention"]],
+  );
 });
 
 test("the log's write and the platform rows' eraser go through the tenant client of the caller's run", async () => {

@@ -4,6 +4,9 @@
 // worktree's database, answering real HTTP; a write sends the app's Origin. The events are read from
 // the outbox: the Draft's workflow, which the worker starts from its event, is the worker's test
 // (core/apps/worker/tests/onboarding-fetch.test.ts). It lives here: a module never imports a host.
+// The Draft's body (onboarding-setup): the documents the Company screen read, and the automatic accept.
+// The documents' limits (env-settings-b): each answer carries the settings, here their defaults, which
+// the screen reads files by; a sixth document is the domain's documents_too_many, no schema's.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
@@ -11,7 +14,13 @@ import { databaseUrl } from "@whytide/db";
 import { asRole, withTestDb } from "@whytide/db/testing";
 import { collectLogs, createLogger } from "@whytide/platform";
 import { signInAs } from "@whytide/providers/auth/testing";
-import { createTwoWorkspaces, type TestTenant, useTenancyClient } from "@whytide/tenancy/testing";
+import {
+  createMembership,
+  createTwoWorkspaces,
+  createUser,
+  type TestTenant,
+  useTenancyClient,
+} from "@whytide/tenancy/testing";
 import type { ModuleLoader } from "../src/modules.ts";
 import type { Api } from "../src/start.ts";
 
@@ -59,8 +68,8 @@ const empty = {
   tone: "",
 };
 
-/** The cookie of a new session of the tenant's Owner. */
-const cookieOf = ({ user }: TestTenant) =>
+/** The cookie of a new session of the tenant's Owner, or of another user. */
+const cookieOf = ({ user }: Pick<TestTenant, "user">) =>
   signInAs(user.id)
     .map(({ name, value }) => `${name}=${value}`)
     .join("; ");
@@ -90,7 +99,14 @@ test("the first GET is an empty record; a PUT of a one-liner and two proof point
     ...{ fetchStatus: "none", fetchedAt: null, fetchError: null },
     ...{ fieldSources: {}, pendingDraft: null },
   };
-  assert.deepEqual(fieldsOf(first), { ...empty, ...initial, version: 1, pages: [] });
+  const documentLimits = { files: 5, bytes: 10 * 1024 * 1024 };
+  assert.deepEqual(fieldsOf(first), {
+    ...empty,
+    ...initial,
+    version: 1,
+    pages: [],
+    documentLimits,
+  });
 
   const proofPoints = [
     { text: "Picking is 40% faster at Beta", sourceUrl: "https://acme.test/customers" },
@@ -155,11 +171,18 @@ test("workspace B never reads workspace A's record: its own stays empty, A's ans
   assert.deepEqual(await call(b, a.workspace.id), { status: 403, body: { code: "forbidden" } });
 });
 
-/** POST …/company-knowledge/draft of `workspaceId` as `who` under the Idempotency-Key `key`. */
-async function draft(who: TestTenant, workspaceId: string, key: string) {
+/** POST …/company-knowledge/draft of `workspaceId` as `who` under the Idempotency-Key `key`, `input` as JSON. */
+async function draft(
+  who: Pick<TestTenant, "user">,
+  workspaceId: string,
+  key: string,
+  input?: object,
+) {
   const url = new URL(`/v1/workspaces/${workspaceId}/onboarding/company-knowledge/draft`, api.url);
   const headers = { cookie: cookieOf(who), origin: APP_ORIGIN, "idempotency-key": key };
-  const res = await fetch(url, { method: "POST", headers });
+  const json = input === undefined ? {} : { "content-type": "application/json" };
+  const sent = input === undefined ? {} : { body: JSON.stringify(input) };
+  const res = await fetch(url, { method: "POST", headers: { ...headers, ...json }, ...sent });
   const body = (await res.json()) as Record<string, unknown>;
   return { status: res.status, replayed: res.headers.get("idempotent-replayed"), body };
 }
@@ -285,4 +308,142 @@ test("discard drops the draft and changes no field; another workspace's member a
   assert.deepEqual(kept(discarded), kept(saved));
   const where = { workspaceId, eventName: "onboarding.company_knowledge_updated" };
   assert.equal((await asRole("app").outboxEntry.findMany({ where })).length, 1, "the save's only");
+});
+
+const doc = (name: string, text: string, more: object = {}) => ({
+  ...{ name, mediaType: "text/plain", status: "read", text },
+  ...more,
+});
+
+test("a Draft's documents start it without a website, each stored with its text; neither a website nor a document is 409, with a body or without; a Member answers 403", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const none = { status: 409, replayed: null, body: { code: "company_knowledge_no_website" } };
+  assert.deepEqual(await draft(a, workspaceId, randomUUID(), {}), none);
+  assert.deepEqual(await draft(a, workspaceId, randomUUID(), { autoAccept: true }), none);
+  const documents = [
+    doc("deck.pdf", "Corvid Freight", { mediaType: "application/pdf", status: "truncated" }),
+    doc("faq.md", "# Questions", { mediaType: "text/markdown" }),
+  ];
+  const started = await draft(a, workspaceId, randomUUID(), { documents });
+  assert.deepEqual(
+    [started.status, started.body.fetchStatus, started.body.sourceUrl],
+    [202, "fetching", null],
+  );
+  const app = asRole("app");
+  const record = await app.companyKnowledge.findFirstOrThrow({ where: { workspaceId } });
+  const stored = await app.companyDocument.findMany({
+    where: { workspaceId },
+    orderBy: { id: "asc" },
+  });
+  assert.deepEqual(
+    stored.map(({ name, mediaType, status, text }) => ({ name, mediaType, status, text })),
+    documents,
+  );
+  assert.equal(record.draftAutoAccept, false, "no autoAccept: the draft waits for review");
+
+  const member = await createUser();
+  await createMembership({ userId: member.id, workspaceId, role: "Member" });
+  const refused = await draft({ user: member }, workspaceId, randomUUID(), { documents });
+  assert.deepEqual([refused.status, refused.body], [403, { code: "forbidden" }]);
+  const where = { workspaceId, eventName: "onboarding.draft_requested" };
+  assert.equal(await app.outboxEntry.count({ where }), 1, "the Owner's Draft only");
+});
+
+test("autoAccept is the run's: a Draft with it marks the run, the next without it clears it; five documents of 50,000 three-byte characters fit the body", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  await call(a, workspaceId, { ...empty, sourceUrl: "https://acme.test/" });
+  const flag = async () =>
+    (await asRole("app").companyKnowledge.findFirstOrThrow({ where: { workspaceId } }))
+      .draftAutoAccept;
+  const auto = await draft(a, workspaceId, randomUUID(), { autoAccept: true });
+  assert.deepEqual([auto.status, auto.body.fetchStatus, await flag()], [202, "fetching", true]);
+  assert.equal((await draft(a, workspaceId, randomUUID())).status, 202, "no body: as before");
+  assert.equal(await flag(), false);
+  const full = Array.from({ length: 5 }, (_, at) => doc(`part-${at}.txt`, "€".repeat(50_000)));
+  const large = await draft(a, workspaceId, randomUUID(), { documents: full, autoAccept: true });
+  assert.deepEqual([large.status, await flag()], [202, true]);
+});
+
+test("each refusal of the Draft's body names its field, never a value, and writes nothing; a sixth document is documents_too_many", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const secret = "Corvid's private rate card";
+  const one = doc("notes.txt", secret);
+  const cases: [object, string[]][] = [
+    [{ documents: [] }, ["documents"]],
+    [{ documents: [one, doc("faq.md", secret), one] }, ["documents.2.name"]],
+    [{ documents: [doc("a/b.txt", secret)] }, ["documents.0.name"]],
+    [{ documents: [doc("bad\u0007.txt", secret)] }, ["documents.0.name"]],
+    [
+      { documents: [doc("deck.doc", secret, { mediaType: "application/msword" })] },
+      ["documents.0.mediaType"],
+    ],
+    [{ documents: [doc("notes.txt", secret, { status: "cut" })] }, ["documents.0.status"]],
+    [{ documents: [one, doc("faq.md", secret), doc("c.txt", "")] }, ["documents.2.text"]],
+    [{ documents: [doc("c.txt", "x".repeat(50_001))] }, ["documents.0.text"]],
+    [{ documents: [doc("c.txt", `${secret}\u0000`)] }, ["documents.0.text"]],
+    [
+      { documents: [{ name: "c.txt", text: secret }] },
+      ["documents.0.mediaType", "documents.0.status"],
+    ],
+    [{ autoAccept: "yes" }, ["autoAccept"]],
+    [{ urls: [secret] }, [""]],
+  ];
+  for (const [body, fields] of cases) {
+    const answer = await draft(a, workspaceId, randomUUID(), body);
+    const refusal = { status: 400, body: { code: "validation_failed", details: { fields } } };
+    assert.deepEqual({ status: answer.status, body: answer.body }, refusal, JSON.stringify(fields));
+    assert.ok(!JSON.stringify(answer.body).includes(secret), "no value in the answer");
+  }
+  const six = Array.from({ length: 6 }, (_, at) => doc(`${at}.txt`, secret));
+  const many = await draft(a, workspaceId, randomUUID(), { documents: six });
+  const tooMany = { code: "documents_too_many", details: { files: 5 } };
+  assert.deepEqual([many.status, many.body], [400, tooMany], "ONBOARDING_MAX_FILES, five unset");
+  const app = asRole("app");
+  assert.deepEqual(
+    await Promise.all([
+      app.companyDocument.count(),
+      app.outboxEntry.count({ where: { workspaceId } }),
+    ]),
+    [0, 0],
+  );
+});
+
+test("the Draft's body takes 10 MB (draft-body-10mb): 69 full three-byte documents reach the route, which refuses them as documents_too_many; 70 pass 10 MB, 413 payload_too_large before the route runs, and nothing is written", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  await call(a, workspaceId, { ...empty, sourceUrl: "https://acme.test/" });
+  const app = asRole("app");
+  const where = { workspaceId, eventName: "onboarding.draft_requested" };
+  const documents = (count: number) =>
+    Array.from({ length: count }, (_, at) => doc(`part-${at}.txt`, "中".repeat(50_000)));
+  const bytes = (list: object[]) => Buffer.byteLength(JSON.stringify({ documents: list }));
+  const written = () =>
+    Promise.all([app.companyDocument.count(), app.outboxEntry.count({ where })]);
+  // Five documents are allowed, so the route answers 400 to the 69: the body reader let them by.
+  assert.ok(bytes(documents(69)) < 10 * 1024 * 1024);
+  const fits = await draft(a, workspaceId, randomUUID(), { documents: documents(69) });
+  const tooMany = { code: "documents_too_many", details: { files: 5 } };
+  assert.deepEqual([fits.status, fits.body], [400, tooMany], "past 1 MB, under 10 MB");
+  assert.ok(bytes(documents(70)) > 10 * 1024 * 1024);
+  const over = await draft(a, workspaceId, randomUUID(), { documents: documents(70) });
+  assert.deepEqual([over.status, over.body], [413, { code: "payload_too_large" }]);
+  assert.deepEqual(await written(), [0, 0], "nothing written");
+});
+
+test("every other route keeps 1 MB: a Company Knowledge save just past it is 413 payload_too_large, one just under it is read", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const MB = 1024 * 1024;
+  const sized = (bytes: number) => {
+    const fixed = Buffer.byteLength(JSON.stringify({ ...empty, oneLiner: "" }));
+    return { ...empty, oneLiner: "x".repeat(bytes - fixed) };
+  };
+  const over = await call(a, workspaceId, sized(MB + 1));
+  assert.deepEqual([over.status, over.body], [413, { code: "payload_too_large" }]);
+  const under = await call(a, workspaceId, sized(MB));
+  assert.equal(under.status, 400, "read in full and refused by its schema, not by the reader");
+  assert.equal(under.body.code, "validation_failed");
 });

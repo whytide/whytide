@@ -2,13 +2,15 @@
 // (TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE), never on a downloaded test server, so there is no time
 // skipping yet: keep a test's timers short. withTestWorkflowEnvironment(), once at the top of a test
 // file, connects before its tests and closes after them, on a task queue of its own; runWorkflow
-// runs one workflow there on a worker with the activities given; replayHistories needs no server.
+// runs one workflow there on a worker with the activities given, the host's sink logging to the log
+// given; replayHistories needs no server.
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { after, before } from "node:test";
 import { Client } from "@temporalio/client";
 import { NativeConnection, Worker } from "@temporalio/worker";
+import type { Logger } from "@whytide/platform";
 import { workerConfig } from "../src/config.ts";
 import {
   generatedWorkflows,
@@ -60,11 +62,18 @@ export function withTestWorkflowEnvironment(
   return env;
 }
 
-/** Runs workflow `name` to its end on a worker of the environment's queue, with `activities`. */
+/**
+ * Runs workflow `name` to its end on a worker of the environment's queue, with `activities`; under
+ * `workflowId`, for a test that reads or records its history, else `<name>-<uuid>`.
+ */
 export async function runWorkflow<T = unknown>(
   name: string,
   input: unknown,
-  options: { readonly activities?: Activities } = {},
+  options: {
+    readonly activities?: Activities;
+    readonly log?: Logger;
+    readonly workflowId?: string;
+  } = {},
 ): Promise<T> {
   if (!current) throw new Error("runWorkflow() needs withTestWorkflowEnvironment() first");
   const { env, connection } = current;
@@ -75,12 +84,12 @@ export async function runWorkflow<T = unknown>(
     identity: IDENTITY,
     workflowBundle: await workflowBundle(env.workflowsPath),
     activities: options.activities ?? {},
-    sinks: metricSinks(),
+    sinks: metricSinks(options.log),
   });
   const run = env.client.workflow.execute(name, {
     args: [input],
     taskQueue: env.taskQueue,
-    workflowId: `${name}-${randomUUID()}`,
+    workflowId: options.workflowId ?? `${name}-${randomUUID()}`,
     workflowExecutionTimeout: "1 minute",
   });
   return (await worker.runUntil(run)) as T;

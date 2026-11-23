@@ -1,18 +1,18 @@
-// Unit tests: the retry policy by activity kind, the provider's own delay, the schedule id
-// derivation and a row's schedule's calendar.
+// Unit tests: the retry policy by activity kind, an activity's own bound and codes beside it, the
+// provider's own delay, the schedule id derivation and a row's schedule's calendar.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AppError } from "@whytide/platform";
+import { ACTIVITY_ATTEMPTS, AppError } from "@whytide/platform";
 import { scheduleId } from "../src/modules.ts";
-import { ACTIVITY_ATTEMPTS, retries, retryDelayMs } from "../src/retry.ts";
+import { attemptsOf, NOT_RETRIED, retries, retryDelayMs } from "../src/retry.ts";
 import { calendarOf } from "../src/scheduler.ts";
 
-test("a provider activity gets five attempts, an ai or db one three; the five codes are never retried", () => {
+test("a provider activity gets five attempts, an ai or db one three; NOT_RETRIED keeps its eight codes, never retried", () => {
   assert.deepEqual(ACTIVITY_ATTEMPTS, { provider: 5, ai: 3, db: 3 });
   for (const [kind, attempts] of Object.entries(ACTIVITY_ATTEMPTS)) {
     const k = kind as keyof typeof ACTIVITY_ATTEMPTS;
-    assert.equal(retries(k, "llm_rate_limited", attempts - 1), true);
-    assert.equal(retries(k, "llm_rate_limited", attempts), false);
+    assert.equal(retries({ kind: k }, "llm_rate_limited", attempts - 1), true);
+    assert.equal(retries({ kind: k }, "llm_rate_limited", attempts), false);
   }
   const never = [
     "llm_invalid_key",
@@ -20,8 +20,32 @@ test("a provider activity gets five attempts, an ai or db one three; the five co
     "ai_input_invalid",
     "ai_budget_exceeded",
     "cost_price_missing",
+    "activity_input_invalid",
+    "activity_attempts_exhausted",
+    "activity_not_in_workflow",
   ];
-  for (const code of never) assert.equal(retries("provider", code, 1), false, code);
+  assert.deepEqual([...NOT_RETRIED], never);
+  for (const code of never) assert.equal(retries({ kind: "provider" }, code, 1), false, code);
+});
+
+test("an activity's own notRetried codes are never retried and its own attempts bound the rest, under its kind's", () => {
+  const mail = { kind: "provider", notRetried: ["mail_rejected", "mail_input_invalid"] } as const;
+  for (const code of mail.notRetried) assert.equal(retries(mail, code, 1), false, code);
+  const unreachable = [1, 2, 3, 4, 5].map((attempt) => retries(mail, "mail_unreachable", attempt));
+  assert.deepEqual(unreachable, [true, true, true, true, false]);
+  assert.equal(retries(mail, "llm_invalid_key", 1), false);
+
+  const once = { kind: "provider", attempts: 1 } as const;
+  assert.equal(attemptsOf(once), 1);
+  assert.equal(retries(once, "mail_unreachable", 1), false);
+  assert.equal(retries(once, "activity_failed", 1), false);
+  const three = { kind: "provider", attempts: 3 } as const;
+  const failed = [1, 2, 3].map((attempt) => retries(three, "linkedin_provider_error", attempt));
+  assert.deepEqual(failed, [true, true, false]);
+
+  // Unset, the kind's; above it (a definition that skipped defineActivity), still the kind's.
+  assert.equal(attemptsOf({ kind: "db" }), ACTIVITY_ATTEMPTS.db);
+  assert.equal(attemptsOf({ kind: "db", attempts: 9 }), ACTIVITY_ATTEMPTS.db);
 });
 
 test("a schedule's id is its module's name, a dot and its own id, the same at every start", () => {

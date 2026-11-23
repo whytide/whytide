@@ -3,12 +3,13 @@
 // available balance, a repeated key, another workspace than the run's, ten reserves in parallel on
 // ten connections, a run that commits then reserves beside another reserve, and the leases on a
 // clock the test moves, swept by a reserve of another workspace of the organization; each outcome
-// counted in credits.usage.
+// counted in credits.usage. Each row records the price list's version it was charged at
+// (gamma-p2-060), before and after a rise's date, and `app` cannot change it.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createDbClient, type PrismaClient, withTenant } from "@whytide/db";
-import { asRole, withTestDb } from "@whytide/db/testing";
+import { asRole, sqlstate, withTestDb } from "@whytide/db/testing";
 import {
   type CreditsClient,
   type CreditsLease,
@@ -21,21 +22,25 @@ import {
 import { ids as tenancyIds } from "@whytide/tenancy";
 import { createTwoWorkspaces, useTenancyClient } from "@whytide/tenancy/testing";
 import { createCreditsClient } from "../domain/client.ts";
+import { DAY_MS } from "../domain/constants.ts";
 import { LEASE_MS, leaseExpiresAt } from "../domain/lease.ts";
 import { syncPrices } from "../domain/prices.ts";
+import { settings } from "../settings.ts";
 import { grantAllowance } from "../testing/index.ts";
 
 const db = withTestDb();
 useTenancyClient(asRole("app"));
 const principal = servicePrincipal("credits_test");
 const log = createLogger({ destination: collectLogs().destination });
+/** When the wallet's prices start: before every clock a test here sets. */
+const PRICED_AT = new Date("2026-10-01T00:00:00Z");
 
 /** A workspace of an organization granted 100 credits, `test.read` at 2 credits a lead. */
 async function wallet() {
   const [a] = await createTwoWorkspaces();
   await grantAllowance([a.organization.id], 100);
   const price = { action: "test.read", credits: "2", unit: "lead" };
-  await syncPrices(asRole("billing_writer"), [price], log);
+  await syncPrices(asRole("billing_writer"), [price], log, PRICED_AT);
   return a.workspace;
 }
 
@@ -210,6 +215,45 @@ test("a sync reservation is expired and freed by the next reserve of its organiz
     reserved: "2",
     committed: "0",
   });
+});
+
+test("a rise keeps the old price until 30 days after the start that announced it: a reserve before the date charges and records version 1, one at the date version 2; app cannot change a row's version", async () => {
+  const { id } = await wallet();
+  const announced = new Date("2026-11-02T09:00:00Z");
+  const raised = [{ action: "test.read", credits: "3", unit: "lead" }];
+  assert.equal(await syncPrices(asRole("billing_writer"), raised, log, announced), 1);
+  const date = announced.getTime() + settings.CREDITS_PRICE_CHANGE_NOTICE_DAYS * DAY_MS;
+  const at = (instant: number, key: string) =>
+    inRun(
+      id,
+      reserve(
+        createCreditsClient(() => new Date(instant)),
+        id,
+        key,
+        10,
+      ),
+    );
+  const before = await at(date - 1, "before");
+  const after = await at(date, "after");
+  assert.deepEqual([before.credits, after.credits], ["20", "30"]);
+  const rows = await asRole("app").creditUsage.findMany({
+    where: { id: { in: [before.usageId, after.usageId] } },
+    orderBy: { createdAt: "asc" },
+  });
+  assert.deepEqual(
+    rows.map((row) => [row.idempotencyKey, row.credits.toFixed(), row.priceListVersion]),
+    [
+      ["before", "20", 1],
+      ["after", "30", 2],
+    ],
+  );
+  const update = `UPDATE "credit_usage" SET "price_list_version" = 1 WHERE "id" = '${after.usageId}'`;
+  assert.equal(await sqlstate(asRole("app").$executeRawUnsafe(update)), "42501");
+  assert.equal(
+    (await asRole("app").creditUsage.findUniqueOrThrow({ where: { id: after.usageId } }))
+      .priceListVersion,
+    2,
+  );
 });
 
 test("the lease rule: a sync reservation holds 15 minutes, an async one 24 hours", () => {

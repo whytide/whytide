@@ -17,10 +17,45 @@ const evidence = z.strictObject({
   /** Set once alpha-p10-020 reduced it to a summary. */
   reducedAt: z.iso.datetime().nullable(),
 });
-/** One of the lead's sources (contacts' kinds): a signal source's label, null once it is deleted. */
+/**
+ * One of the lead's sources (contacts' kinds): a signal source's label, null once it is deleted; an
+ * import's file name, null for a lead imported before its leads were named; a member's by hand
+ * (`manual`, lead-manual-create), null.
+ */
 const leadSource = z.strictObject({
-  kind: z.enum(["signal", "imported"]),
+  kind: z.enum(["signal", "imported", "manual"]),
   label: z.string().nullable(),
+});
+/**
+ * What a Web research event adds (gamma-wr-061): the page the person was found on and the found company's
+ * reasons as gamma-wr-050 kept them, each a line about the company with its quote and the page it is on.
+ * Absent for every other kind. `company` is null when the found company is gone.
+ */
+const research = z.strictObject({
+  url: z.string(),
+  /**
+   * Present when the person was not found as a page printed them: `search`, the LinkedIn profile found by
+   * a web search on their name (gamma-wr-070); `managers`, the person found by the search of the company's
+   * managers (gamma-wr-090), whose `url` is then the company's site and `title` the title of the result
+   * that gave them (absent once the evidence is reduced).
+   */
+  foundBy: z.enum(["search", "managers"]).optional(),
+  title: z.string().optional(),
+  company: z
+    .strictObject({
+      name: z.string(),
+      domain: z.string(),
+      reasons: z.array(
+        z.strictObject({
+          kind: z.string(),
+          criterion: z.string().nullable(),
+          line: z.string(),
+          quote: z.string(),
+          url: z.string(),
+        }),
+      ),
+    })
+    .nullable(),
 });
 export const evidenceResponse = z.strictObject({
   events: z.array(
@@ -33,6 +68,7 @@ export const evidenceResponse = z.strictObject({
       runId: z.string().nullable(),
       occurredAt: z.iso.datetime(),
       evidence: evidence.nullable(),
+      research: research.optional(),
     }),
   ),
   /** The lead's first source and the others, in contacts' order; null for a person without a lead. */

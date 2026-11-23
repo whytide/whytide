@@ -5,3 +5,8 @@
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/leads/{{personId}}/evidence
 Accept: application/json
 Cookie: {{sessionCookie}}
+
+### The same route for a person found by a Web research source (gamma-wr-061): the event has `evidence: null` and a `research` field, `{ url, company: { name, domain, reasons: [{ kind, criterion, line, quote, url }] } }`, the page the person was found on and the found company's reasons with their quotes as the run kept them; `company` is null when the company is gone. A LinkedIn event has no `research` field. A person of another workspace is a 404 person_not_found.
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/leads/{{researchPersonId}}/evidence
+Accept: application/json
+Cookie: {{sessionCookie}}

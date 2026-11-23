@@ -1,11 +1,13 @@
-// The workspace's own address, where sign-in lands: a greeting, and the navigation's entries as the
-// steps of the tester's day, each a card that opens its screen.
+// The workspace's own address, where sign-in lands: a greeting, the `home` slot a module fills
+// (onboarding's prompt to set up Company Knowledge, docs/screens.md), and the navigation's entries as
+// the steps of the tester's day, each a card that opens its screen.
 import { PageHeader } from "@whytide/ui";
 import { ArrowRight } from "@whytide/ui/icons";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { data, serverApi } from "../../../src/api/server.ts";
 import { navigation } from "../../../src/shell/nav.generated.ts";
+import { slots } from "../../../src/shell/slots.generated.tsx";
 
 type Props = { params: Promise<{ workspace: string }> };
 
@@ -14,9 +16,11 @@ export default async function WorkspaceHome({ params }: Props) {
   const me = await data((await serverApi()).GET("/v1/me"));
   const own = me.memberships.find((m) => workspace === m.slug || workspace === m.workspaceId);
   const t = await getTranslations("web.home");
+  const Home = slots.home;
   return (
     <>
       <PageHeader title={t("title", { workspace: own?.name ?? "" })} description={t("body")} />
+      {Home && own ? <Home email={me.user.email} workspaceId={own.workspaceId} /> : null}
       <Steps
         workspace={workspace}
         label={await getTranslations()}

@@ -2,23 +2,39 @@
 // 20261027140000_privacy_erasure_log. erasure_log is a tenant table: one row per erasure the deletion
 // script committed, with no personal data beyond the salted hash contacts keeps of the person's URL.
 // Append-only: the migration's hand-written REVOKE keeps UPDATE and DELETE from app.
+// gamma-p7-010, migration 20261101124448_privacy_erasure_reason: `reason`, and the person hash
+// nullable, with the hand-written CHECK erasure_log_reason_hash: a request's row has the hash, the
+// 30-day rule's has none. lead-delete-script, migration 20261104101759_privacy_lead_deleted: the
+// reason `lead_deleted`, `pnpm lead:delete`'s, whose row has none either.
 
 /// tenant
 model ErasureLog {
-  id          String   @id
-  workspaceId String   @map("workspace_id")
+  id          String        @id
+  workspaceId String        @map("workspace_id")
   /// The salted hash of the person's LinkedIn URL, as contacts' erased hash holds it: pseudonymous.
+  /// Null for a deletion of the 30-day rule or of a lead (`pnpm lead:delete`), which keep no hash.
   /// pii: personal
-  personHash  String   @map("person_hash")
+  personHash  String?       @map("person_hash")
+  /// Why the person was erased: a request (`pnpm erase`), the 30-day rule's job, or a lead deleted
+  /// so that it can be added again (`pnpm lead:delete`).
+  reason      ErasureReason @default(request)
   /// When the command started.
-  requestedAt DateTime @map("requested_at") @db.Timestamptz()
+  requestedAt DateTime      @map("requested_at") @db.Timestamptz()
   /// When the erasers had all run, just before the commit.
-  completedAt DateTime @map("completed_at") @db.Timestamptz()
+  completedAt DateTime      @map("completed_at") @db.Timestamptz()
   /// The rows removed, by module and table: { "signals": { "signal_events": 2, "evidence": 2 } }.
   counts      Json
-  /// The operator who ran the command (`--operator`), never the person.
-  performedBy String   @map("performed_by")
+  /// The operator who ran the command (`--operator`), or `retention` for the job; never the person.
+  performedBy String        @map("performed_by")
 
   @@index([workspaceId, completedAt])
   @@map("erasure_log")
+}
+
+enum ErasureReason {
+  request
+  retention_never_contacted
+  lead_deleted
+
+  @@map("erasure_reason")
 }

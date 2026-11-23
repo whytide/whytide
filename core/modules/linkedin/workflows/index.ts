@@ -3,15 +3,19 @@
 // status on a Refresh status press (events.ts), and linkedin_status_refresh, global and hourly, every
 // account with a reference, workspace by workspace, each through the activity linkedin_refresh_status,
 // which also stores the account's member id's hash (domain/disclosure/member.ts), then
-// linkedin_check_invites, the day's check of its pending invitations (invites.ts); the activities
+// linkedin_check_invites, the day's check of its pending invitations (invites.ts), a page of
+// workspaces a run (pages.ts), each run continued as new until the last page; the activities
 // linkedin_read_post_engagers and linkedin_read_profile, the engager and profile reads a signal run
-// calls by name, the account read again just before each call, each error's health in the run that
-// logs it (domain/health/); linkedin_notify, the
+// calls by name, with linkedin_read_posts (posts.ts), the account read again just before each call,
+// each error's health in the run that logs it (reads.ts; domain/health/); linkedin_notify, the
 // owner's mail about a health event, or the operator's about the fleet breaker's trip, through the
 // activity linkedin_mail_health; the daily job's workflows and schedule, with the activities of
-// daily.ts; and onWorkerStart, which keeps the host's logger.
+// daily.ts; onWorkerStart, which keeps the host's logger; and alerts, the module's events that alert
+// the team channel (core/apps/worker/README.md "Alerts"). Loading it registers withDecryptedRef as
+// readCompany's way to open an account's reference (domain/company/read.ts; gamma-en-060): the
+// worker's alone, so that a company page is read in the worker only.
 import { json } from "node:stream/consumers";
-import type { TenantClient } from "@whytide/db";
+import { type TenantClient, tenantClient } from "@whytide/db";
 import {
   type ActivityContext,
   AppError,
@@ -34,16 +38,15 @@ import {
 } from "@whytide/providers";
 import { listWorkspaceIds } from "@whytide/tenancy";
 import { z } from "zod";
-import { findAccount, type SenderAccountStatus } from "../domain/accounts.ts";
+import type { SenderAccountStatus } from "../domain/accounts.ts";
 import { countAction, logAction, outcomeOf } from "../domain/action-log/log.ts";
 import { now } from "../domain/clock.ts";
-import { readControls } from "../domain/controls/controls.ts";
+import { useRefOpener } from "../domain/company/read.ts";
 import { memberHash } from "../domain/hash.ts";
 import { type HealthMailResult, mailHealthEvent, mailOperator } from "../domain/health/mail.ts";
 import { afterPortError } from "../domain/health/signals.ts";
 import { linkedin } from "../domain/provider.ts";
 import { effectOf, pauseAccount, retryAfterOf } from "../domain/send/outcome.ts";
-import { type ReadCallRefusal, readCallRefusal } from "../domain/send/state.ts";
 import { setStatus } from "../domain/status.ts";
 import { errors } from "../errors.ts";
 import type { EngagersPage, EngagersRefused, ReadPostEngagers } from "../schemas/engagers.ts";
@@ -54,11 +57,30 @@ import {
   type ReadProfile,
 } from "../schemas/profile.ts";
 import type { ActionOutcome } from "../schemas/quota.ts";
-import { ALERT_EMAIL_MISSING, DAILY_CRON, DAILY_ZONE, PROFILE_READ_ATTEMPTS } from "./constants.ts";
+import {
+  ALERT_EMAIL_MISSING,
+  DAILY_CRON,
+  DAILY_ZONE,
+  ID_MAX_CHARS,
+  POST_READ_ATTEMPTS,
+  PROFILE_READ_ATTEMPTS,
+} from "./constants.ts";
 import { dailyActivities } from "./daily.ts";
 import { type RefContext, withDecryptedRef } from "./decrypt.ts";
 import { invitesActivities } from "./invites.ts";
+import { workspacePage } from "./pages.ts";
+import { postsActivities } from "./posts.ts";
+import { beforeRead, logRead } from "./reads.ts";
 import { isPortError, sendActivities } from "./send.ts";
+
+// readCompany's reference, opened in the run its caller gives, on that run's transaction.
+useRefOpener((context, id, fn) =>
+  withDecryptedRef(
+    { workspaceId: context.workspaceId, tenant: (run) => context.tenant(() => run(tenantClient)) },
+    id,
+    fn,
+  ),
+);
 
 const accountId = z.string().min(1).max(64);
 const refreshInput = workflowInput.extend({ accountId });
@@ -78,6 +100,15 @@ const profileInput = workflowInput.extend({ accountId, requestKey: rawKey, rawKe
 const notifyInput = workflowInput.extend({
   healthEventId: z.string().min(1).max(64),
   recipient: z.enum(["owner", "operator"]),
+});
+/** A page of the status refresh's workspaces: the ones after its cursor (gamma-p0-085). */
+const pageInput = globalWorkflowInput.extend({
+  afterId: z.string().min(1).max(ID_MAX_CHARS).optional(),
+});
+const count = z.int().min(0);
+/** linkedin_status_refresh's: continued as new, its cursor and its counts so far (gamma-p0-085). */
+const statusRefreshInput = pageInput.extend({
+  counts: z.strictObject({ accounts: count, failed: count }).optional(),
 });
 const { linkedin_account_disconnected, linkedin_not_found, linkedin_provider_error } =
   linkedinPort.errors;
@@ -312,40 +343,25 @@ export async function readProfile(
   }
 }
 
-/**
- * Just before a read's port call, on every attempt (Temporal retries a read that threw): the switches
- * and the account read again, as its reservation read them, so that a stop, a lost connection, a
- * warning or the third error of an attempt before, or of a send meanwhile, stops the call:
- * readCallRefusal's code, answered with no row, as no call was made; else null.
- */
-async function beforeRead(context: RefContext, accountId: string): Promise<ReadCallRefusal | null> {
-  return context.tenant(async () => {
-    const account = await findAccount(accountId);
-    return readCallRefusal(account, await readControls(), now());
-  });
-}
-
-/** A read's row; after a port error, the account's health in the same run (domain/health/signals.ts). */
-async function logRead(entry: Parameters<typeof logAction>[0], error: unknown) {
-  const logged = await logAction(entry);
-  if (error !== undefined) await afterPortError(entry.accountId, error, now());
-  return logged;
-}
-
 export const activities = {
   ...dailyActivities,
   ...invitesActivities,
+  ...postsActivities,
   linkedin_refresh_status: defineActivity<typeof refreshInput, Refreshed, TenantClient>({
     kind: "provider",
     input: refreshInput,
     run: ({ accountId }, context) => refreshStatus(context, accountId),
   }),
-  /** Every workspace's id, from tenancy, and nothing else: linkedin_status_refresh's fan-out. */
+  /**
+   * A page of the workspaces' ids, from tenancy, and nothing else: linkedin_status_refresh's
+   * fan-out, after the run's cursor, with the next page's cursor, or null after the last
+   * (pages.ts).
+   */
   linkedin_list_workspaces: defineActivity({
     kind: "db",
     scope: "global",
-    input: globalWorkflowInput,
-    run: async () => ({ workspaceIds: await listWorkspaceIds() }),
+    input: pageInput,
+    run: async ({ afterId }) => workspacePage(await listWorkspaceIds(), afterId),
   }),
   /** The workspace's accounts with a reference, oldest first, ids only, read in its own run. */
   linkedin_list_referenced_accounts: defineActivity<
@@ -372,6 +388,7 @@ export const activities = {
     TenantClient
   >({
     kind: "provider",
+    attempts: POST_READ_ATTEMPTS,
     input: readInput,
     run: (input, context) => readPostEngagers(context, input),
   }),
@@ -381,6 +398,7 @@ export const activities = {
     TenantClient
   >({
     kind: "provider",
+    attempts: PROFILE_READ_ATTEMPTS,
     input: profileInput,
     run: (input, context) => readProfile(context, input),
   }),
@@ -402,7 +420,7 @@ export const workflows = defineWorkflows({
   linkedin_notify: { input: notifyInput, taskQueue: DEFAULT_TASK_QUEUE },
   linkedin_refresh_account: { input: refreshInput, taskQueue: DEFAULT_TASK_QUEUE },
   linkedin_status_refresh: {
-    input: globalWorkflowInput,
+    input: statusRefreshInput,
     taskQueue: DEFAULT_TASK_QUEUE,
     scope: "global",
   },
@@ -426,6 +444,9 @@ export const schedules = defineSchedules([
     input: {},
   },
 ]);
+
+/** The events the worker raises a team-channel alert for: the fleet breaker's trip, a health pause. */
+export const alerts = ["linkedin.invites_paused", "linkedin.account_paused"];
 
 /** Before the worker polls: the host's logger, for refreshStatus' and the operator's mail's lines. */
 export async function onWorkerStart(context: { readonly log: Logger }): Promise<void> {

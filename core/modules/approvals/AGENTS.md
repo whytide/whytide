@@ -5,3 +5,4 @@
 3. Commands, from the repository root: `pnpm -F approvals build`, `pnpm -F approvals typecheck`, `pnpm -F approvals test`, `pnpm -F approvals lint`.
 4. Stay inside this folder and the module's schema file. A change to a shared package is its own task.
 5. Nothing outside approvals decides an item: campaigns opens items and tells approvals about its holds and waits (`openItem`, `cancelItems`, `noteItemWait`); only the routes approve or skip, as the sender account's owner.
+6. The queue never reads another member's items, whatever the caller's role: "Up next" holds the items of the caller's own senders only (gamma-p6-050).

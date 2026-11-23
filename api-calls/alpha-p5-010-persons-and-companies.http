@@ -6,7 +6,7 @@ GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/persons?limit=2
 Accept: application/json
 Cookie: {{sessionCookie}}
 
-### GET /v1/workspaces/{workspaceId}/contacts/persons/{id}: one person, business fields and the provenance of each; 404 person_not_found
+### GET /v1/workspaces/{workspaceId}/contacts/persons/{id}: one person, business fields and the provenance of each, linkedinUrl null for a person known by an email address alone (gamma-rf-050); 404 person_not_found
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/persons/{{personId}}
 Accept: application/json
 Cookie: {{sessionCookie}}

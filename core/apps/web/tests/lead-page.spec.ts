@@ -3,8 +3,12 @@
 // users' second workspace, whose leads are this spec's alone (lead-list.spec.ts seeds the fixture's):
 // a qualified lead's fields with their sources, its decision and why in qualification's words, the
 // summary under its label, the verdicts behind a disclosure, the fixture module's panel in the
-// evidence slot, axe and the keyboard; a hard-filtered lead and an ai_failed one; the neighbours in
-// the list's view; the not-found state for another workspace's person and for one without a lead.
+// evidence slot, qualification's intent panel there (gamma-p5-065: the priority, tier and intent,
+// the tier rule applied, why now with its date, each signal's share newest first), axe and the
+// keyboard; a hard-filtered lead and an ai_failed one, with no intent panel; the neighbours in the
+// list's view; the not-found state for another workspace's person and for one without a lead; a lead
+// known by an email address alone, with no LinkedIn profile (gamma-rf-050): its name and fields, no
+// LinkedIn link, no error, the address nowhere, and "Name unknown" for one with no name either.
 import { AxeBuilder } from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import contacts from "../../../modules/contacts/messages/en.json" with { type: "json" };
@@ -82,10 +86,36 @@ const WHY = [
   },
   { key: "qualification.why.gap", params: { criterion: "company_size", more: 0 } },
 ];
+/**
+ * The lead's intent row as qualification's intent write leaves it: fit 82 and intent 53 make
+ * round(45.1 + 23.85) = 69, boosted 79, Hot; its signals strongest first, the first the why-now.
+ */
+const INTENT = {
+  intentScore: 53,
+  priority: 79,
+  tier: "hot",
+  boostUntil: "2026-11-03T12:00:00.000Z",
+  breakdown: [
+    {
+      ...{ eventId: "evt_page_strong", kind: "competitor_engagement", role: "comment" },
+      ...{ contribution: 6, at: "2026-10-30T12:00:00.000Z" },
+    },
+    {
+      ...{ eventId: "evt_page_newer", kind: "my_post_engagement", role: "reaction" },
+      ...{ contribution: 2, at: "2026-11-01T12:00:00.000Z" },
+    },
+  ],
+};
+/** The audience the hot lead was judged against (gamma-p5-050). */
+const AUDIENCE = "Data leaders in Iberia";
 const hot = {
   ...person("hot", "Hot"),
   decision: { ...qualified(82, "hot"), why: WHY },
-  snapshot: { ...qualified(82, "hot"), summary: SUMMARY, disqualifiers: [], verdicts: VERDICTS },
+  snapshot: {
+    ...qualified(82, "hot"),
+    ...{ audience: AUDIENCE, summary: SUMMARY, disqualifiers: [], verdicts: VERDICTS },
+  },
+  intent: INTENT,
 };
 const warm = { ...person("warm", "Warm"), decision: qualified(64, "warm") };
 const cool = { ...person("cool", "Cool"), decision: qualified(55, "cool") };
@@ -106,6 +136,26 @@ const filtered = {
 const failed = {
   ...person("failed", "Failed"),
   decision: { status: "ai_failed", reason: "length" },
+};
+
+/** A lead known by this address alone, with no LinkedIn profile (gamma-rf-050), synthetic. */
+const UNLINKED = "page.unlinked@blueharbor.example";
+const unlinked = {
+  firstName: "Page",
+  lastName: "Unlinked",
+  headline: "Data leader at a software company",
+  title: "Head of Data",
+  companyName: "Blue Harbor Labs",
+  locationText: "Lisbon, Portugal",
+  source: "imported",
+  email: UNLINKED,
+  decision: qualified(64, "warm"),
+};
+/** One with no name either: the page and the list name them "Name unknown". */
+const nameless = {
+  source: "imported",
+  email: "page.nameless@blueharbor.example",
+  decision: qualified(55, "cool"),
 };
 
 /** Replaces the workspace's leads with these, through the e2e api's test-only route; their ids. */
@@ -129,7 +179,7 @@ const section = (page: Page, key: string) => page.getByRole("region", { name: sa
 const rowLinks = (page: Page) =>
   page.locator("tbody tr a").evaluateAll((links) => links.map((link) => link.getAttribute("href")));
 
-test("a qualified lead: its fields with their sources, the decision and three why bullets in qualification's words, the summary under its label, six verdicts opened by the keyboard, the LinkedIn link, the fixture's evidence panel; axe", async ({
+test("a qualified lead: its fields with their sources, the decision and three why bullets in qualification's words, the summary under its label, six verdicts opened by the keyboard, the LinkedIn link, the fixture's evidence panel, the audience it was judged against, the intent panel; axe", async ({
   page,
   signInAs,
   baseURL,
@@ -181,6 +231,7 @@ test("a qualified lead: its fields with their sources, the decision and three wh
       say(`qualification.verdict.${verdict}`),
       evidence,
       String(weight),
+      say("contacts.lead.verdict_edit"),
     ]);
   }
   await expect(section(page, "contacts.lead.disqualifiers").locator("p")).toHaveText(
@@ -196,12 +247,37 @@ test("a qualified lead: its fields with their sources, the decision and three wh
     say("fixture.evidence.body").replace("{personId}", id),
   );
 
+  // qualification's note of the audience the lead was judged against, by its name.
+  await expect(
+    page.locator('[data-slot="evidence"]').getByText(`Judged against the audience “${AUDIENCE}”`),
+  ).toBeVisible();
+
+  // qualification's intent panel: the scores, the rule applied, why now, each share newest first.
+  const intent = section(page, "qualification.intent.title");
+  await expect(intent.locator("dt")).toHaveText(
+    ["priority", "tier", "intent"].map((key) => say(`qualification.intent.${key}`)),
+  );
+  await expect(intent.locator("dd")).toHaveText(["79", say("ui.tier.hot"), "53"]);
+  await expect(intent.locator("p").first()).toHaveText(
+    "Hot from a priority of 75. The priority is 55% of the fit, 82, and 45% of the intent, 53, plus 10 for a fresh signal.",
+  );
+  await expect(intent.locator("h3")).toHaveText(
+    ["why_now", "signals"].map((key) => say(`qualification.intent.${key}`)),
+  );
+  await expect(intent.locator("h3 + p")).toHaveText(
+    "A comment on a competitor’s post, Oct 30, 2026",
+  );
+  await expect(intent.getByRole("listitem")).toHaveText([
+    "A reaction to your post, Nov 1, 2026: 25% of the intent",
+    "A comment on a competitor’s post, Oct 30, 2026: 75% of the intent",
+  ]);
+
   const { violations } = await new AxeBuilder({ page }).analyze();
   const blocking = violations.filter((v) => v.impact === "serious" || v.impact === "critical");
   expect(blocking.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(", ")}`)).toEqual([]);
 });
 
-test("a hard-filtered lead says which filter stopped it and the ICP's values; an ai_failed one, the reason", async ({
+test("a hard-filtered lead says which filter stopped it and the ICP's values, with no intent panel; an ai_failed one, the reason", async ({
   page,
   signInAs,
   baseURL,
@@ -224,9 +300,11 @@ test("a hard-filtered lead says which filter stopped it and the ICP's values; an
   await expect(section(page, "contacts.lead.why").getByRole("listitem")).toHaveText([
     "The title “Recruiter” is none of the ICP’s: Head of Data, VP Data",
   ]);
-  // No snapshot: no summary, verdicts or disqualifiers.
+  // No snapshot: no summary, verdicts or disqualifiers; once the evidence slot read, no intent panel.
   await expect(section(page, "contacts.lead.summary")).toHaveCount(0);
   await expect(page.locator("main details")).toHaveCount(0);
+  await expect(page.locator('[data-slot="evidence"] > p')).toBeVisible();
+  await expect(section(page, "qualification.intent.title")).toHaveCount(0);
 
   await page.goto(leadPath(failing));
   await expect(decision.locator("dd")).toHaveText([say("contacts.leads.status.ai_failed"), DATE]);
@@ -307,4 +385,40 @@ test("another workspace's person, and a person whose lead is gone, are the lead 
   await expect(heading).toHaveText(say("contacts.lead.not_found"));
   await page.goto(leadPath(kept));
   await expect(heading).toHaveText("Page Hot");
+});
+
+test("a lead without a LinkedIn profile, known by an email address alone: its name and fields with their sources, no LinkedIn link, no error and the address nowhere; one with no name either is Name unknown, on the page and in the list", async ({
+  page,
+  signInAs,
+  baseURL,
+}) => {
+  await signInAs();
+  const [id, unnamed] = await seed(page, baseURL, [unlinked, nameless]);
+  await page.goto(leadPath(id));
+  await expect(page).toHaveTitle("Page Unlinked");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Page Unlinked");
+  const values = ["Data leader at a software company", "Head of Data", "Blue Harbor Labs"];
+  await expect(page.locator("main dl").first().locator("dd")).toHaveText(
+    [...values, "Lisbon, Portugal"].flatMap((value) => [value, new RegExp(`^${FROM_IMPORT}$`)]),
+  );
+  // The name's and the four fields', and no LinkedIn URL's.
+  await expect(page.locator("main small")).toHaveText(
+    Array(5).fill(new RegExp(`^${FROM_IMPORT}$`)),
+  );
+  await expect(page.getByRole("link", { name: say("contacts.lead.linkedin") })).toHaveCount(0);
+  await expect(section(page, "contacts.lead.qualification").locator("dd").first()).toHaveText(
+    say("contacts.leads.status.qualified"),
+  );
+  // contacts keeps the address's hash, never the address: the page cannot hold it.
+  expect(await page.content()).not.toContain(UNLINKED);
+
+  await page.goto(leadPath(unnamed));
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(say("contacts.leads.unnamed"));
+  await expect(page.getByRole("link", { name: say("contacts.lead.linkedin") })).toHaveCount(0);
+  // The list's qualified leads by fit, each named.
+  await page.goto(`/w/${WORKSPACE}/leads`);
+  await expect(page.locator("tbody tr a")).toHaveText([
+    /Page Unlinked/,
+    new RegExp(say("contacts.leads.unnamed")),
+  ]);
 });

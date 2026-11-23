@@ -1,6 +1,7 @@
 // The fixture workflows, run in Temporal's sandbox: ids in, or none for the global one, and their
 // one activity's answer out. fixture_hold stays open until cancelled; its cancellation handler runs
-// its activity once more, then the workflow ends cancelled.
+// its activity once more, then the workflow ends cancelled. fixture_binds runs its activity once, with
+// no retry, as the host's start order test needs.
 import {
   CancellationScope,
   condition,
@@ -14,6 +15,11 @@ const { fixture_tenant, fixture_global_probe, fixture_hold_step } = proxyActivit
   ActivityFunctions<typeof activities>
 >({
   startToCloseTimeout: "1 minute",
+});
+
+const { fixture_binds_probe } = proxyActivities<ActivityFunctions<typeof activities>>({
+  startToCloseTimeout: "1 minute",
+  retry: { maximumAttempts: 1 },
 });
 
 export async function fixture_echo(input: { workspaceId: string }) {
@@ -35,4 +41,8 @@ export async function fixture_hold(input: { workspaceId: string }) {
     }
     throw error;
   }
+}
+
+export async function fixture_binds(input: { workspaceId: string }) {
+  return fixture_binds_probe(input);
 }

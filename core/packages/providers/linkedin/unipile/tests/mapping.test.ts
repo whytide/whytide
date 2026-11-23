@@ -19,7 +19,12 @@ import { inspect } from "node:util";
 import { collectLogs, createLogger, isAppError } from "@whytide/platform";
 import { bindPort } from "../../../_pattern/index.ts";
 import { linkedinCases } from "../../contract.ts";
-import { LINKEDIN_WEBHOOK_KINDS, type LinkedinWebhook, linkedinPort } from "../../port.ts";
+import {
+  LINKEDIN_WEBHOOK_KINDS,
+  type LinkedinWebhook,
+  linkedinPort,
+  type PostsPage,
+} from "../../port.ts";
 import { MAX_ANSWER_BYTES } from "../constants.ts";
 import { signedCursors } from "../cursor.ts";
 import { SECRET_HEADER, unipileLinkedin } from "../index.ts";
@@ -80,6 +85,12 @@ const ROUTES: Readonly<Record<string, string>> = {
   "GET /api/v1/chat_attendees/fixture-member-chidi/chats": "member-chats.json",
   [`GET /api/v1/chats/${CHAT}/messages`]: "messages-1.json",
   [`GET /api/v1/chats/${CHAT}/messages messages-page-2`]: "messages-2.json",
+  "POST /api/v1/linkedin/search": "posts-search-1.json",
+  "POST /api/v1/linkedin/search search-page-2": "posts-search-2.json",
+  "GET /api/v1/users/fixture-member-ada/posts": "posts-member.json",
+  "GET /api/v1/linkedin/company/example-ltd": "company.json",
+  "GET /api/v1/users/1000001/posts": "posts-company.json",
+  [`GET /api/v1/users/${SELF}/posts`]: "posts-own.json",
 };
 /** The routes Unipile answers 201 Created. */
 const CREATED = new Set(["POST /api/v1/chats", `POST /api/v1/chats/${CHAT}/messages`]);
@@ -187,6 +198,7 @@ test("a user response with emails, phones and profile_picture_url maps to a Prof
     companyUrl: "https://www.linkedin.com/company/example-ltd",
     locationText: "London, United Kingdom",
     industry: "Software Development",
+    connected: false,
     fetchedAt: new Date(NOW),
   });
   const { contact_info, profile_picture_url } = JSON.parse(fixture("user.json"));
@@ -196,6 +208,74 @@ test("a user response with emails, phones and profile_picture_url maps to a Prof
     received.map((request) => [request.route, request.query]),
     [["GET /api/v1/users/ada-example", query]],
   );
+});
+
+test("a profile says whether its member is a 1st-degree connection, from the same answer's network_distance as getRelation: FIRST_DEGREE connected, another distance not, none absent; one call each", async () => {
+  const profileUrl = "https://www.linkedin.com/in/ada-example/";
+  const user = JSON.parse(fixture("user.json"));
+  const read = () => linkedin.getProfile({ providerAccountRef: ACCOUNT, profileUrl });
+  answers.push({ body: JSON.stringify({ ...user, network_distance: "FIRST_DEGREE" }) });
+  assert.equal((await read()).connected, true);
+  answers.push({ body: JSON.stringify({ ...user, network_distance: "THIRD_DEGREE" }) });
+  assert.equal((await read()).connected, false);
+  answers.push({ body: JSON.stringify({ ...user, network_distance: null }) });
+  assert.equal(Object.hasOwn(await read(), "connected"), false);
+  assert.deepEqual(
+    received.map(({ route }) => route),
+    Array.from({ length: 3 }, () => "GET /api/v1/users/ada-example"),
+  );
+});
+
+test("getContactEmails reads a 1st-degree connection's profile by its provider_id with no section and notify=false, and maps only its contact_info emails: trimmed, lower case, each once, three at most, a non-address dropped; never its phones, addresses, socials or birthdate (gamma-en-087)", async () => {
+  const user = JSON.parse(fixture("user.json"));
+  const contact_info = {
+    ...user.contact_info,
+    emails: [
+      " Ada@Example.com ",
+      "ada@example.com",
+      "not an address",
+      7,
+      "ada.home@example.org",
+    ].concat(["a@example.net", "late@example.com"]),
+  };
+  answers.push({
+    body: JSON.stringify({ ...user, network_distance: "FIRST_DEGREE", contact_info }),
+  });
+  const read = () => linkedin.getContactEmails({ providerAccountRef: ACCOUNT, memberRef: ADA });
+  const answer = await read();
+  assert.deepEqual(answer, {
+    emails: ["ada@example.com", "ada.home@example.org", "a@example.net"],
+  });
+  const text = JSON.stringify(answer);
+  for (const field of ["7946", "Example Street", "birth", "media.example.com", "Head of Growth"]) {
+    assert.ok(!text.includes(field), field);
+  }
+  assert.deepEqual(
+    received.map((request) => [request.route, request.query]),
+    [[`GET /api/v1/users/${ADA}`, { account_id: ACCOUNT, notify: "false" }]],
+  );
+});
+
+test("getContactEmails answers no email for a member who is not a 1st-degree connection, whatever the answer holds, nor for one who shows none; an off-shape answer is linkedin_provider_error with nothing of it", async () => {
+  const user = JSON.parse(fixture("user.json"));
+  const read = () => linkedin.getContactEmails({ providerAccountRef: ACCOUNT, memberRef: ADA });
+  // user.json is a 2nd-degree member who shows an address.
+  assert.deepEqual(await read(), { emails: [] });
+  answers.push({ body: JSON.stringify({ ...user, network_distance: null }) });
+  assert.deepEqual(await read(), { emails: [] });
+  const first = { ...user, network_distance: "FIRST_DEGREE" };
+  answers.push({ body: JSON.stringify({ ...first, contact_info: undefined }) });
+  assert.deepEqual(await read(), { emails: [] });
+  answers.push({
+    body: JSON.stringify({ ...first, contact_info: { phones: ["+44 20 7946 0000"] } }),
+  });
+  assert.deepEqual(await read(), { emails: [] });
+  answers.push({ body: JSON.stringify({ ...first, contact_info: { emails: "ada@example.com" } }) });
+  await assert.rejects(read(), (error: unknown) => {
+    assert.ok(isAppError(error) && error.code === "linkedin_provider_error", String(error));
+    assert.ok(!JSON.stringify(error.details ?? {}).includes("ada@"), "no address in the error");
+    return true;
+  });
 });
 
 test("reactions and comments merge into engagers newest first, with a cursor over both lists; no contact data crosses", async () => {
@@ -219,6 +299,7 @@ test("reactions and comments merge into engagers newest first, with a cursor ove
     reaction: commentText === undefined ? "like" : "comment",
     ...(commentText === undefined ? {} : { commentText }),
     engagedAt: new Date(at),
+    dateKnown: commentText !== undefined,
   });
   assert.deepEqual(
     pages.map((page) => page.engagers),
@@ -987,6 +1068,293 @@ catch ({ code, details }) { console.log(JSON.stringify({ code, variables: detail
   assert.deepEqual(outcomes, expected);
 });
 
+test("a comment whose date does not parse takes the listing's time, dateKnown false, as every reaction", async () => {
+  const comment = {
+    author: "Dana Specimen",
+    author_details: { id: "fixture-member-dana", profile_url: `${LINKEDIN}/in/dana-specimen` },
+    date: "2 days ago",
+    text: "Useful",
+  };
+  const list = (items: unknown[]) => ({ body: JSON.stringify({ items, cursor: null }) });
+  answers.push(undefined, list([]), list([comment]));
+  const { engagers } = await linkedin.listPostEngagers({ ...account, postUrl: POST, limit: 2 });
+  assert.deepEqual(
+    engagers.map(({ engagedAt, dateKnown }) => [engagedAt.getTime(), dateKnown]),
+    [[NOW, false]],
+  );
+});
+
+const POSTS_SINCE = new Date("2026-09-25T00:00:00.000Z");
+const MEMBER_PAGE = `${LINKEDIN}/in/ada-example`;
+const COMPANY_PAGE = `${LINKEDIN}/company/example-ltd`;
+const ADA_AUTHOR = {
+  kind: "member",
+  providerMemberRef: ADA,
+  profileUrl: MEMBER_PAGE,
+  name: "Ada Example",
+  headline: "Head of Growth at Example Ltd",
+};
+const COMPANY = { kind: "company", companyUrl: COMPANY_PAGE, name: "Example Ltd" };
+/** Every page of a post read from the first: the posts' numbers, the last three digits, and the routes. */
+async function postPages(read: (cursor?: string) => Promise<PostsPage>) {
+  received.length = 0;
+  const pages = [await read()];
+  for (let next = pages[0]?.nextCursor; next && pages.length < 5; ) {
+    pages.push(await read(next));
+    next = pages.at(-1)?.nextCursor;
+  }
+  const numbers = pages.map(({ posts }) => posts.map(({ postUrl }) => Number(postUrl.slice(-3))));
+  return { pages, numbers, routes: received.map(({ route }) => route) };
+}
+const at = (cursor?: string) => (cursor ? { cursor } : {});
+
+test("searchPosts asks the search for the phrase in quotes, posts by date; its two vendor pages make three, newest first, of the posts since postedSince that hold the phrase, a repost passed over", async () => {
+  const query = { ...account, phrase: "Sales  Automation", postedSince: POSTS_SINCE, limit: 2 };
+  const read = (cursor?: string) => linkedin.searchPosts({ ...query, ...at(cursor) });
+  const { pages, numbers, routes } = await postPages(read);
+  assert.deepEqual(numbers, [[101, 102], [103, 104], [105]]);
+  assert.equal(pages[2]?.nextCursor, null);
+  const search = "POST /api/v1/linkedin/search";
+  assert.deepEqual(routes, [search, search, `${search} search-page-2`, `${search} search-page-2`]);
+  assert.deepEqual(received[0]?.query, { account_id: ACCOUNT, limit: "2" });
+  const keywords = '"Sales  Automation"';
+  const body = { api: "classic", category: "posts", sort_by: "date", keywords };
+  assert.deepEqual(JSON.parse(received[0]?.body ?? ""), body);
+  const linked = (urn: string) => `${LINKEDIN}/feed/update/urn:li:${urn}`;
+  assert.deepEqual(pages[0]?.posts, [
+    {
+      postUrl: linked("activity:7000000000000000101"),
+      postedAt: new Date("2026-10-02T08:00:00.000Z"),
+      excerpt: "fixture-body-marker: our take on sales automation this week",
+      author: ADA_AUTHOR,
+    },
+    {
+      postUrl: linked("ugcPost:7000000000000000102"),
+      postedAt: new Date("2026-10-01T09:00:00.000Z"),
+      excerpt: "fixture-body-marker: SALES\n  Automation, the guide",
+      author: COMPANY,
+    },
+  ]);
+  // A member without a public id is linked by their id; the vendor's email, phone and photo stop.
+  const member = (id: string, page: string, name: string, headline: string) => ({
+    kind: "member",
+    providerMemberRef: `fixture-member-${id}`,
+    profileUrl: `${LINKEDIN}/in/${page}`,
+    name,
+    headline,
+  });
+  assert.deepEqual(
+    pages[1]?.posts.map(({ author }) => author),
+    [
+      member("bao", "fixture-member-bao", "Bao Sample", "Founder at Blue Harbor Labs"),
+      member("chidi", "chidi-fixture", "Chidi Fixture", "VP Sales at Northwind Example"),
+    ],
+  );
+  assert.ok(fixture("posts-search-2.json").includes('"emails"'), "the vendor's author held them");
+  assert.deepEqual(
+    await read(pages[0]?.nextCursor ?? undefined),
+    pages[1],
+    "the cursor reads again",
+  );
+});
+
+test("listAuthorPosts reads a member's posts by the id their public id gives, no profile view, over three pages; a pinned older post and a repost are passed over, and the vendor page that reaches postedSince ends the read", async () => {
+  const query = { ...account, authorUrl: `${MEMBER_PAGE}/`, postedSince: POSTS_SINCE, limit: 1 };
+  const read = (cursor?: string) => linkedin.listAuthorPosts({ ...query, ...at(cursor) });
+  const { pages, numbers, routes } = await postPages(read);
+  assert.deepEqual(numbers, [[201], [202], [203]]);
+  assert.equal(pages[2]?.nextCursor, null, "member-page-2 never asked for");
+  const posts = `GET /api/v1/users/${ADA}/posts`;
+  assert.deepEqual(routes, ["GET /api/v1/users/ada-example", posts, posts, posts]);
+  assert.deepEqual(received[0]?.query, { account_id: ACCOUNT, notify: "false" });
+  assert.deepEqual(received[1]?.query, { account_id: ACCOUNT, limit: "1" });
+  const authors = pages.flatMap((page) => page.posts.map(({ author }) => author));
+  assert.deepEqual(authors, [ADA_AUTHOR, ADA_AUTHOR, ADA_AUTHOR]);
+  assert.deepEqual(
+    await read(pages[0]?.nextCursor ?? undefined),
+    pages[1],
+    "the cursor reads again",
+  );
+});
+
+test("listAuthorPosts reads a company page's posts with is_company over three pages, its slug looked up once, its number not at all", async () => {
+  const query = { ...account, authorUrl: COMPANY_PAGE, postedSince: POSTS_SINCE, limit: 1 };
+  const read = (cursor?: string) => linkedin.listAuthorPosts({ ...query, ...at(cursor) });
+  const { pages, numbers, routes } = await postPages(read);
+  assert.deepEqual(numbers, [[301], [302], [303]]);
+  assert.equal(pages[2]?.nextCursor, null);
+  const posts = "GET /api/v1/users/1000001/posts";
+  assert.deepEqual(routes, ["GET /api/v1/linkedin/company/example-ltd", posts, posts, posts]);
+  assert.deepEqual(received[1]?.query, { account_id: ACCOUNT, limit: "1", is_company: "true" });
+  const authors = pages.flatMap((page) => page.posts.map(({ author }) => author));
+  assert.deepEqual(authors, [COMPANY, COMPANY, COMPANY]);
+  assert.deepEqual(
+    await read(pages[0]?.nextCursor ?? undefined),
+    pages[1],
+    "the cursor reads again",
+  );
+  received.length = 0;
+  await linkedin.listAuthorPosts({ ...query, authorUrl: `${LINKEDIN}/company/1000001` });
+  assert.deepEqual(
+    received.map(({ route }) => route),
+    [posts],
+  );
+});
+
+test("listOwnPosts reads the account's own member id, as getAccountStatus does, then its posts over three pages, one exactly at postedSince; without the id, linkedin_provider_error", async () => {
+  const query = { ...account, postedSince: POSTS_SINCE, limit: 1 };
+  const read = (cursor?: string) => linkedin.listOwnPosts({ ...query, ...at(cursor) });
+  const { pages, numbers, routes } = await postPages(read);
+  assert.deepEqual(numbers, [[401], [402], [403]]);
+  assert.equal(pages[2]?.nextCursor, null);
+  const posts = `GET /api/v1/users/${SELF}/posts`;
+  assert.deepEqual(routes, [`GET /api/v1/accounts/${ACCOUNT}`, posts, posts, posts]);
+  assert.deepEqual(
+    await read(pages[0]?.nextCursor ?? undefined),
+    pages[1],
+    "the cursor reads again",
+  );
+  answers.push({ status: 200, file: "account-without-member.json" });
+  const reason = "an account without its member id";
+  await assert.rejects(
+    linkedin.listOwnPosts(query),
+    fails("linkedin_provider_error", { method: "listOwnPosts", reason }),
+  );
+});
+
+test("an author whose id holds a dot, /in/jane.doe or /company/booking.com, is looked up as it is, and their posts keep the link", async () => {
+  const listed = (author: Record<string, unknown>) => {
+    const item = {
+      social_id: SOCIAL,
+      text: "",
+      parsed_datetime: "2026-10-01T09:00:00.000Z",
+      author,
+    };
+    return { body: JSON.stringify({ items: [item], cursor: null }) };
+  };
+  const jane = { kind: "member", providerMemberRef: "fixture-member-jane" };
+  const member = { ...jane, profileUrl: `${LINKEDIN}/in/jane.doe`, name: "Jane Doe", headline: "" };
+  const company = {
+    kind: "company",
+    companyUrl: `${LINKEDIN}/company/booking.com`,
+    name: "Booking",
+  };
+  answers.push(
+    { body: JSON.stringify({ provider_id: jane.providerMemberRef }) },
+    listed({ public_identifier: "jane.doe", id: jane.providerMemberRef, name: "Jane Doe" }),
+    { body: JSON.stringify({ id: "1000002" }) },
+    listed({ public_identifier: "booking.com", id: "1000002", name: "Booking", is_company: true }),
+  );
+  const read = (authorUrl: string) =>
+    linkedin.listAuthorPosts({ ...account, authorUrl, ...posted(1) });
+  assert.deepEqual((await read(member.profileUrl)).posts[0]?.author, member);
+  assert.deepEqual((await read(company.companyUrl)).posts[0]?.author, company);
+  assert.deepEqual(
+    received.map(({ route }) => route),
+    [
+      "GET /api/v1/users/jane.doe",
+      "GET /api/v1/users/fixture-member-jane/posts",
+      "GET /api/v1/linkedin/company/booking.com",
+      "GET /api/v1/users/1000002/posts",
+    ],
+  );
+});
+
+test("an excerpt is the post's first 500 characters, an emoji across the 500th left out whole", async () => {
+  const text = `sales automation ${"a".repeat(481)}👨‍👩‍👧 and the rest`;
+  const author = { public_identifier: "example-ltd", id: "1000001", is_company: true };
+  const item = { social_id: SOCIAL, text, parsed_datetime: "2026-10-01T09:00:00.000Z", author };
+  answers.push({ body: JSON.stringify({ items: [item], cursor: null }) });
+  const authorUrl = `${LINKEDIN}/company/1000001`;
+  const query = { ...account, authorUrl, postedSince: POSTS_SINCE, limit: 1 };
+  const { posts } = await linkedin.listAuthorPosts(query);
+  assert.equal(posts[0]?.excerpt, `sales automation ${"a".repeat(481)}`);
+});
+
+test("each post route's error is its port code, nothing of its body kept: the search, a member's and a company's lookups, the posts, the account", async () => {
+  const search = () =>
+    linkedin.searchPosts({ ...account, phrase: "sales automation", ...posted(2) });
+  const author = (authorUrl: string) => () =>
+    linkedin.listAuthorPosts({ ...account, authorUrl, ...posted(1) });
+  const own = () => linkedin.listOwnPosts({ ...account, ...posted(1) });
+  const disconnected = { status: 401, file: "error-disconnected.json" };
+  const missing = { status: 404, file: "error.json" };
+  const limited = { status: 429, headers: { "retry-after": "30" }, file: "error.json" };
+  const expired = { status: 401, file: "error-expired-credentials.json" };
+  const cases: [(Answer | undefined)[], () => Promise<unknown>, string][] = [
+    [[disconnected], search, "linkedin_account_disconnected"],
+    [[missing], author(MEMBER_PAGE), "linkedin_not_found"],
+    [[missing], author(COMPANY_PAGE), "linkedin_not_found"],
+    [[undefined, limited], author(MEMBER_PAGE), "linkedin_rate_limited"],
+    [
+      [{ status: 500, file: "error.json" }],
+      author(`${LINKEDIN}/company/1000001`),
+      "linkedin_provider_error",
+    ],
+    [[disconnected], own, "linkedin_account_disconnected"],
+    [[undefined, expired], own, "linkedin_account_disconnected"],
+  ];
+  for (const [queued, call, code] of cases) {
+    answers.push(...queued);
+    const error = await call().catch((e: unknown) => e);
+    fails(code)(error);
+    const seen = inspect(error, { depth: Number.POSITIVE_INFINITY, showHidden: true });
+    assert.ok(!seen.includes("fixture-body-marker"), `${code}: no body`);
+  }
+});
+
+test("a post read's cursor of another method, phrase, author or account, forged or unsigned, is linkedin_input_invalid before any request; it names neither the phrase nor the account", async () => {
+  const search = { ...account, phrase: "sales automation", ...posted(2) };
+  const member = { ...account, authorUrl: MEMBER_PAGE, ...posted(1) };
+  const own = { ...account, ...posted(1) };
+  const nextOf = async (page: Promise<PostsPage>) => (await page).nextCursor ?? "";
+  const s = await nextOf(linkedin.searchPosts(search));
+  const m = await nextOf(linkedin.listAuthorPosts(member));
+  const o = await nextOf(linkedin.listOwnPosts(own));
+  const state = { id: SELF, size: 1, at: [null, 1] };
+  const forged = signedCursors(randomBytes(32).toString("base64url")).sign("listOwnPosts", state, [
+    ACCOUNT,
+  ]);
+  const unsigned = Buffer.from(JSON.stringify({ size: 2, at: [null, 2] })).toString("base64url");
+  const other = "fixture-account-other";
+  received.length = 0;
+  const cases = [
+    [() => linkedin.searchPosts({ ...search, phrase: "sales automations", cursor: s }), "phrase"],
+    [() => linkedin.searchPosts({ ...search, providerAccountRef: other, cursor: s }), "phrase"],
+    [() => linkedin.searchPosts({ ...search, cursor: unsigned }), "phrase"],
+    [() => linkedin.listAuthorPosts({ ...member, authorUrl: COMPANY_PAGE, cursor: m }), "author"],
+    [() => linkedin.listAuthorPosts({ ...member, cursor: s }), "author"],
+    [() => linkedin.listOwnPosts({ ...own, providerAccountRef: other, cursor: o }), "account"],
+    [() => linkedin.listOwnPosts({ ...own, cursor: m }), "account"],
+    [() => linkedin.listOwnPosts({ ...own, cursor: forged }), "account"],
+  ] as const;
+  const methods = { phrase: "searchPosts", author: "listAuthorPosts", account: "listOwnPosts" };
+  for (const [call, of] of cases) {
+    const reason = `a cursor the adapter did not give for this ${of}`;
+    await assert.rejects(call(), fails("linkedin_input_invalid", { method: methods[of], reason }));
+  }
+  assert.deepEqual(received, [], "no request");
+  for (const cursor of [s, m, o]) {
+    const payload = Buffer.from(cursor.split(".")[0] ?? "", "base64url").toString("utf8");
+    assert.ok(payload && !payload.includes("sales") && !payload.includes(ACCOUNT), payload);
+  }
+});
+
+test("an author link of another form, a phrase over 5 words or 100 characters and a limit outside 1 to 50 are linkedin_input_invalid, and nothing is asked of Unipile", async () => {
+  received.length = 0;
+  const page = { ...account, ...posted(10) };
+  const calls = [
+    () => linkedin.listAuthorPosts({ ...page, authorUrl: POST }),
+    () => linkedin.listAuthorPosts({ ...page, authorUrl: "https://www.example.com/company/acme" }),
+    () => linkedin.searchPosts({ ...page, phrase: "one two three four five six" }),
+    () => linkedin.searchPosts({ ...page, phrase: "x".repeat(101) }),
+    () => linkedin.listOwnPosts({ ...page, limit: 0 }),
+    () => linkedin.listOwnPosts({ ...page, limit: 51 }),
+  ];
+  for (const call of calls) await assert.rejects(call(), fails("linkedin_input_invalid"));
+  assert.deepEqual(received, []);
+});
+
 test("the log check: every line the adapter's calls write, in a child's stdout and stderr, holds no key, secret, cursor or vendor body", async () => {
   // logged-calls.ts: every method, as it succeeds and through each failure, each error logged.
   const child = spawn(process.execPath, [join(import.meta.dirname, "logged-calls.ts")], {
@@ -1008,7 +1376,11 @@ test("the log check: every line the adapter's calls write, in a child's stdout a
     once(child, "close"),
   ]);
   assert.equal(code, 0, errorOutput);
-  const { cursors, errors } = JSON.parse(report) as { cursors: string[]; errors: number };
+  const { cursors, errors, labels } = JSON.parse(report) as {
+    cursors: string[];
+    errors: number;
+    labels: Record<string, string>[];
+  };
   const lines = `${output}\n${errorOutput}`.split("\n").filter(Boolean);
   assert.ok(cursors.length >= 3 && errors >= errorFixtures().length, "the calls ran");
   assert.ok(lines.length >= errors, "each error's line was seen");
@@ -1041,9 +1413,43 @@ test("the log check: every line the adapter's calls write, in a child's stdout a
       "a pairing token",
     );
     assert.ok(!line.includes("fixture-body-marker"), "a vendor body");
+    const lower = line.toLowerCase();
+    assert.deepEqual(
+      postWords.filter((word) => lower.includes(word)),
+      [],
+      "a phrase, an excerpt, a name or a headline",
+    );
   }
+  // The post reads ran, and no label of their calls holds any of it, nor a cursor.
+  const counted = JSON.stringify(labels).toLowerCase();
+  assert.ok(
+    labels.some(({ method }) => method === "listOwnPosts"),
+    "the post reads were counted",
+  );
+  assert.deepEqual(
+    [...postWords, ...parts].filter((value) => counted.includes(value.toLowerCase())),
+    [],
+    "a metric label",
+  );
   assert.ok(received.length > 0 && received.every(({ key }) => key === KEY), "the key was sent");
 });
+
+/** A post read's query from POSTS_SINCE, `limit` posts a page. */
+function posted(limit: number) {
+  return { postedSince: POSTS_SINCE, limit };
+}
+
+/** The post fixtures' personal words, lower-cased: each text, author's name and headline; the phrase. */
+const postWords = [
+  "sales automation",
+  ...readdirSync(join(import.meta.dirname, "fixtures"))
+    .filter((name) => name.startsWith("posts-"))
+    .flatMap((name) => (JSON.parse(fixture(name)) as { items: Record<string, unknown>[] }).items)
+    .flatMap(({ text, author }) => {
+      const { name, headline } = author as Record<string, unknown>;
+      return [text, name, headline].filter((value) => typeof value === "string");
+    }),
+].map((word) => String(word).toLowerCase());
 
 /** A body with the Unipile-Auth header, as Unipile sends a source's event. */
 function signed(rawBody: LinkedinWebhook["rawBody"], secret: unknown = SECRET): LinkedinWebhook {

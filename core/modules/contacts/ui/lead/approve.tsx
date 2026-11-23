@@ -2,7 +2,8 @@
 // (../leads/list.tsx): one press moves the lead to approved, POST …/contacts/leads/{personId}/approve,
 // and the screen's toast confirms it. One Idempotency-Key per press, which its retry sends again, as messaging's
 // draft panel does: the api acts on a press once. A lead a campaign has, or had, offers no Approve.
-// A refusal is shown in words; person_suppressed with the check's reason.
+// A refusal is shown in words; person_suppressed with the check's reason, and a recent touch with
+// the days the api's refusal answers (`details.days`, the setting's), never a number of its own.
 "use client";
 
 import { Button, ErrorState, Link } from "@whytide/ui";
@@ -11,15 +12,17 @@ import { ApiError, browserApi } from "@whytide/web/api/browser";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { IN_OUTREACH } from "../../domain/outreach/constants.ts";
-import { RECENT_TOUCH_DAYS, SUPPRESSION_REASONS } from "../../domain/suppression/constants.ts";
+import { SUPPRESSION_REASONS } from "../../domain/suppression/constants.ts";
 import type { Lead } from "./page.tsx";
 
 type Outreach = Lead["outreachStatus"];
-/** A press that failed: its code, the check's reason for person_suppressed, and its retry. */
+/** A press that failed: its code, the check's reason and days for person_suppressed, and its retry. */
 export type ApproveFailure = {
   readonly personId: string;
   readonly code: string;
   readonly reason?: string;
+  /** A recent touch's days, as the api answers them. */
+  readonly days?: number;
   readonly retry: () => void;
 };
 
@@ -51,9 +54,15 @@ export function useApprove(
       );
       if (!answer.response.ok || answer.data === undefined) {
         const { code } = new ApiError(answer.response.status, answer.error);
-        const given = (answer.error as { details?: { reason?: unknown } } | undefined)?.details;
-        const reason = SUPPRESSION_REASONS.find((known) => known === given?.reason);
-        setFailure({ personId, code, reason, retry });
+        const error = answer.error as
+          | { details?: { reason?: unknown; days?: unknown } }
+          | undefined;
+        const given = error?.details;
+        const days = typeof given?.days === "number" ? given.days : undefined;
+        const known = SUPPRESSION_REASONS.find((reason) => reason === given?.reason);
+        // Without the days, a recent touch reads as the check's generic refusal.
+        const reason = known === "recently_contacted" && days === undefined ? undefined : known;
+        setFailure({ personId, code, reason, days, retry });
         return;
       }
       onDone(personId, answer.data.outreachStatus, name);
@@ -116,7 +125,8 @@ export function ApproveFailed({ failure }: { failure: ApproveFailure }) {
           {errors("person_suppressed")}
         </strong>
         <p className="text-ink-muted">
-          {t("suppressed", { reason: failure.reason ?? "other", days: RECENT_TOUCH_DAYS })}
+          {/* Only a recent touch reads the days, and it always carries them (useApprove). */}
+          {t("suppressed", { reason: failure.reason ?? "other", days: failure.days ?? 0 })}
         </p>
       </div>
     );

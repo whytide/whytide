@@ -239,3 +239,24 @@ test("the owner's resume answers 200 with the account's health: healthy, the tar
     body: { code: "account_not_paused" },
   });
 });
+
+test("who reads and resumes an account's health (gamma-p6-070): its owner, a Member, reads it and reaches the resume's own checks, account_not_paused, not the route's 403; an Owner reads it, resumeBlockedBy not_account_owner; a teammate Member is 403 not_account_owner on both", async () => {
+  const [a] = await createTwoWorkspaces();
+  const ws = a.workspace.id;
+  const [member, teammate] = [await createUser(), await createUser()];
+  for (const { id: userId } of [member, teammate]) {
+    await createMembership({ userId, workspaceId: ws, role: "Member" });
+  }
+  const { id } = await createConnectedAccount(ws, { ownerUserId: member.id });
+  const read = (userId: string) => call(userId, ws, "GET", `/accounts/${id}/health`);
+  const resume = (userId: string) =>
+    call(userId, ws, "POST", `/accounts/${id}/resume`, { body: {}, key: randomUUID() });
+  const own = await read(member.id);
+  assert.deepEqual([own.status, own.body.resumeBlockedBy], [200, "account_not_paused"]);
+  assert.deepEqual(await resume(member.id), { status: 409, body: { code: "account_not_paused" } });
+  const byOwner = await read(a.user.id);
+  assert.deepEqual([byOwner.status, byOwner.body.resumeBlockedBy], [200, "not_account_owner"]);
+  const notOwner = { status: 403, body: { code: "not_account_owner" } };
+  assert.deepEqual(await read(teammate.id), notOwner);
+  assert.deepEqual(await resume(teammate.id), notOwner);
+});

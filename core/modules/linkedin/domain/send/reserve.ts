@@ -13,6 +13,7 @@ import {
   type SendInput,
   sendInput,
 } from "../../schemas/quota.ts";
+import { noteSettings } from "../../settings.ts";
 import { findAccount, type SenderAccount } from "../accounts.ts";
 import { writeLog } from "../action-log/log.ts";
 import { now } from "../clock.ts";
@@ -29,11 +30,7 @@ import {
   weekLeft,
   weekOpensIn,
 } from "../quota/limits.ts";
-import {
-  INVITE_NOTE_WINDOW_DAYS,
-  INVITE_NOTES_PER_MONTH,
-  SEND_RESERVATION_MS,
-} from "./constants.ts";
+import { INVITE_NOTE_WINDOW_DAYS, SEND_RESERVATION_MS } from "./constants.ts";
 import { type StateRefusal, sendStateRefusal } from "./state.ts";
 
 export type SendReservation = {
@@ -167,10 +164,12 @@ async function budgetRefusal(
   at: Date,
 ): Promise<SendRefusal | null> {
   if (withNote) {
-    // With three counted, the third newest must leave the 30 days first.
-    const third = (await notesCounted(account.id, at)).at(-INVITE_NOTES_PER_MONTH);
-    if (third !== undefined) {
-      return { refused: "invite_note_budget", retryAt: new Date(third + NOTE_WINDOW_MS) };
+    // With the budget counted (LINKEDIN_INVITE_NOTES_PER_MONTH, 3 unset), its oldest note, the
+    // budget's newest back, must leave the 30 days first.
+    const budget = noteSettings.LINKEDIN_INVITE_NOTES_PER_MONTH;
+    const oldest = (await notesCounted(account.id, at)).at(-budget);
+    if (oldest !== undefined) {
+      return { refused: "invite_note_budget", retryAt: new Date(oldest + NOTE_WINDOW_MS) };
     }
   }
   const nextDay = dayEndsAt(day, account.timeZone);

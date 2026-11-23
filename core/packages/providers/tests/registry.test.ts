@@ -1,16 +1,31 @@
 // Unit tests of the registry's selection (alpha-p1-090): the generated loaders from a folder tree, the
 // adapters registered for a port, the one adapter a selector names loaded and bound once, nothing
-// kept when a step fails.
+// kept when a step fails. Then many adapters per port (gamma-en-010): a list of one, of two in its
+// order, of an unknown name, of a name given twice, and empty; providerList() and allowance() read
+// and refused at start; an adapter's allowance and openData on the bound adapter. Then the email
+// finder's and verifier's lists (gamma-en-015): several adapters each, in their order, and an unknown
+// name or one given twice failing at start.
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { isAppError } from "@whytide/platform";
-import { knownAdapterNames, resolveAdapter } from "../_pattern/adapter.ts";
+import { promisify } from "node:util";
+import { defineConfig, httpStatus, isAppError } from "@whytide/platform";
+import { knownAdapterNames, resolveAdapter, resolveAdapters } from "../_pattern/adapter.ts";
 import { listAdapters, registrySource } from "../_pattern/generate.ts";
-import { defineAdapter, getAdapter, registeredAdapters } from "../index.ts";
+import {
+  type Allowance,
+  allowance,
+  defineAdapter,
+  getAdapter,
+  getAdapters,
+  isFake,
+  providerList,
+  registeredAdapters,
+} from "../index.ts";
 import { echoAdapter, greeter } from "./fixtures/pattern/fixture/echo/index.ts";
 import { fixtureFakeAdapter } from "./fixtures/pattern/fixture/fake/index.ts";
 import { fixturePort } from "./fixtures/pattern/fixture/port.ts";
@@ -147,4 +162,221 @@ test("a selector loads the one adapter it names; a loader that registers nothing
     );
   }
   assert.equal(halves, 2, "a failed shape check caches nothing");
+});
+
+test("a list loads each adapter it names, in its order, each the one instance getAdapter gives; an empty list, none", async () => {
+  let loads = 0;
+  const loaders = {
+    "fixture/needs-key": async () => {
+      loads += 1;
+      await import("./fixtures/pattern/fixture/needs-key/index.ts");
+    },
+  };
+  assert.ok(!registeredAdapters(fixturePort).has("needs-key"));
+  const one = await resolveAdapters(fixturePort, ["needs-key"], loaders);
+  assert.equal(loads, 1, "the one adapter named, through its loader");
+  assert.equal(one.length, 1);
+  assert.equal(one[0], await resolveAdapter(fixturePort, "needs-key", loaders));
+  assert.equal(loads, 1, "loaded and bound once per process");
+  assert.ok(Object.isFrozen(one));
+
+  const [echo, fake] = await getAdapters(fixturePort, ["echo", "fake"]);
+  assert.ok(echo && fake);
+  assert.equal(echo, await getAdapter(fixturePort, "echo"));
+  assert.equal(fake, await getAdapter(fixturePort, "fake"));
+  assert.ok(isFake(fake) && !isFake(echo));
+  const reversed = await getAdapters(fixturePort, ["fake", "echo"]);
+  assert.ok(reversed.length === 2 && reversed[0] === fake && reversed[1] === echo, "its order");
+  assert.deepEqual(await getAdapters(fixturePort, []), []);
+});
+
+test("a list naming an adapter the registry does not know, or one twice, fails before any adapter loads", async () => {
+  let loads = 0;
+  const loaders = { "fixture/hollow": async () => void (loads += 1) };
+  await assert.rejects(resolveAdapters(fixturePort, ["hollow", "nope"], loaders), (error) => {
+    assert.ok(isAppError(error) && error.code === "provider_unknown");
+    const known = knownAdapterNames(fixturePort, loaders);
+    assert.ok(known.includes("hollow") && known.includes("echo"));
+    assert.deepEqual(error.details, { port: "fixture", selector: "nope", known });
+    return true;
+  });
+  await assert.rejects(getAdapters(fixturePort, ["nope"]), { code: "provider_unknown" });
+  await assert.rejects(
+    resolveAdapters(fixturePort, ["hollow", "echo", "hollow"], loaders),
+    (error) => {
+      assert.ok(isAppError(error) && error.code === "provider_list_invalid");
+      assert.deepEqual(error.details, {
+        port: "fixture",
+        variable: "PROVIDER_FIXTURE",
+        adapter: "hollow",
+      });
+      return true;
+    },
+  );
+  assert.equal(loads, 0, "no adapter loaded");
+  assert.equal(httpStatus("provider_list_invalid"), 500);
+});
+
+/** The `variables` of the config_invalid `read` throws, as at start; a value it accepts fails. */
+function refusedAtStart(read: () => unknown, label: string): unknown {
+  try {
+    read();
+  } catch (error) {
+    assert.ok(isAppError(error) && error.code === "config_invalid", label);
+    assert.equal(error.details?.block, "packages/providers", label);
+    return error.details?.variables;
+  }
+  return assert.fail(`accepted ${label}`);
+}
+
+test("providerList(): adapter folder names separated by commas, in their order, each once; empty or unset is none; anything else fails at start", () => {
+  const shape = { PROVIDER_FIXTURE: providerList() };
+  const read = (env: Record<string, string>) =>
+    defineConfig("packages/providers", shape, env).PROVIDER_FIXTURE;
+  assert.deepEqual(read({ PROVIDER_FIXTURE: "echo" }), ["echo"]);
+  assert.deepEqual(read({ PROVIDER_FIXTURE: "echo,fake" }), ["echo", "fake"]);
+  assert.deepEqual(read({ PROVIDER_FIXTURE: "fake,needs-key,echo" }), [
+    "fake",
+    "needs-key",
+    "echo",
+  ]);
+  assert.deepEqual(read({ PROVIDER_FIXTURE: "" }), []);
+  assert.deepEqual(read({}), []);
+  assert.ok(Object.isFrozen(read({ PROVIDER_FIXTURE: "echo,fake" })));
+  for (const value of ["echo,echo", "fake,echo,fake"]) {
+    const variables = refusedAtStart(() => read({ PROVIDER_FIXTURE: value }), value);
+    assert.deepEqual(variables, ["PROVIDER_FIXTURE: an adapter named twice"], value);
+  }
+  const malformed = [
+    ["echo, fake", "echo,", ",echo", "echo,,fake", "echo;fake", "echo fake", " "],
+    ["Echo", "echo,Fake", "1echo", "echo,fake/x"],
+  ].flat();
+  for (const value of malformed) {
+    const variables = refusedAtStart(() => read({ PROVIDER_FIXTURE: value }), value);
+    assert.deepEqual(
+      variables,
+      ["PROVIDER_FIXTURE: adapter folder names separated by commas"],
+      JSON.stringify(value),
+    );
+  }
+});
+
+test("allowance(): <count>/day or <count>/month, the count 1 to 10,000,000; empty or unset, null, no limit; anything else fails at start", () => {
+  const shape = { FIXTURE_ALLOWANCE: allowance() };
+  const read = (env: Record<string, string>) =>
+    defineConfig("packages/providers", shape, env).FIXTURE_ALLOWANCE;
+  const parsed = [
+    ["100/day", { calls: 100, per: "day" }],
+    ["300/month", { calls: 300, per: "month" }],
+    ["1/day", { calls: 1, per: "day" }],
+    ["10000000/month", { calls: 10_000_000, per: "month" }],
+    ["", null],
+  ] as const;
+  for (const [value, expected] of parsed) {
+    assert.deepEqual(read({ FIXTURE_ALLOWANCE: value }), expected, value);
+  }
+  assert.equal(read({}), null);
+  assert.ok(Object.isFrozen(read({ FIXTURE_ALLOWANCE: "100/day" })));
+  const refused = [
+    ["0/day", "10000001/day", "99999999999999999999/month", "-5/day", "+5/day", "1.5/day"],
+    ["1e3/day", "0x10/day", "0100/day", "1,000/day", "1_000/day", "100", "/day", "100/", "day"],
+    ["100/week", "100/year", "100/days", "100/Day", "100/DAY", "100/day/month", "unlimited"],
+    ["100 /day", "100/ day", " 100/day", "100/day "],
+  ].flat();
+  const message = "FIXTURE_ALLOWANCE: <count>/day or <count>/month, the count 1 to 10000000";
+  for (const value of refused) {
+    const variables = refusedAtStart(() => read({ FIXTURE_ALLOWANCE: value }), value);
+    assert.deepEqual(variables, [message], JSON.stringify(value));
+  }
+});
+
+test("an adapter declares its allowance, read on every access, and whether its data is open data; the bound adapter exposes both, not among the port's methods", async () => {
+  const env = { FIXTURE_ALLOWANCE: "100/day" };
+  const config = defineConfig("packages/providers", { FIXTURE_ALLOWANCE: allowance() }, env);
+  const metered = defineAdapter(fixturePort, {
+    name: "metered",
+    allowance: config.FIXTURE_ALLOWANCE,
+    openData: true,
+    create: greeter,
+  });
+  let current: Allowance | null = null;
+  const moving = defineAdapter(fixturePort, {
+    name: "moving",
+    allowance: () => current,
+    create: greeter,
+  });
+  const [boundMetered, boundMoving, echo] = await getAdapters(fixturePort, [
+    "metered",
+    "moving",
+    "echo",
+  ]);
+  assert.ok(boundMetered && boundMoving && echo);
+  const hundred = { calls: 100, per: "day" };
+  assert.deepEqual([metered.allowance, metered.openData], [hundred, true]);
+  assert.deepEqual([boundMetered.allowance, boundMetered.openData], [hundred, true]);
+  assert.deepEqual([moving.allowance, boundMoving.allowance], [null, null]);
+  current = { calls: 5, per: "month" };
+  assert.deepEqual([moving.allowance, boundMoving.allowance], [current, current]);
+  current = null;
+  assert.equal(boundMoving.allowance, null, "read on every access");
+  assert.deepEqual([echo.allowance, echo.openData, boundMoving.openData], [null, false, false]);
+  for (const bound of [boundMetered, boundMoving, echo]) {
+    assert.deepEqual(Object.keys(bound), ["greet", "count"], "the port's methods only");
+  }
+  assert.deepEqual(await boundMetered.greet({ name: "Ada" }), { greeting: "hello Ada" });
+});
+
+test("PROVIDER_EMAIL_FINDER=a,b and PROVIDER_EMAIL_VERIFIER=a,b,c load in their order; an unknown name, or one given twice, fails at start; empty lists none", async () => {
+  // A child process per start, since each port's config reads its variable once, at import; stand-in
+  // adapters a, b and c registered for both ports before the lists load.
+  const at = (path: string) => JSON.stringify(import.meta.resolve(path));
+  const script = [
+    "const outcome = async (load) => { try { return await load(); } catch (error) { return error.code; } };",
+    "const ports = await outcome(async () => [",
+    `  (await import(${at("../email-finder/port.ts")})).emailFinderPort,`,
+    `  (await import(${at("../email-verifier/port.ts")})).emailVerifierPort,`,
+    "]);",
+    "if (typeof ports === 'string') { console.log(ports); process.exit(0); }",
+    `const { defineAdapter } = await import(${at("../_pattern/index.ts")});`,
+    `const { getAdapter, getAdapters } = await import(${at("../registry.ts")});`,
+    `const { emailFinderConfig } = await import(${at("../email-finder/config.ts")});`,
+    `const { emailVerifierConfig } = await import(${at("../email-verifier/config.ts")});`,
+    "const [finderPort, verifierPort] = ports;",
+    "const finder = { findEmail: async () => ({ result: 'not_found' }) };",
+    "const verifier = { verifyEmail: async () => ({ verdict: 'unknown', checkedAt: new Date() }) };",
+    "for (const name of ['a', 'b', 'c']) {",
+    "  defineAdapter(finderPort, { name, create: () => ({ ...finder }) });",
+    "  defineAdapter(verifierPort, { name, create: () => ({ ...verifier }) });",
+    "}",
+    "const order = (port, names) => outcome(async () => {",
+    "  const listed = await getAdapters(port, names);",
+    "  const known = ['a', 'b', 'c', 'fake'];",
+    "  const bound = await Promise.all(known.map((name) => getAdapter(port, name)));",
+    "  return `[${listed.map((adapter) => known[bound.indexOf(adapter)]).join(',')}]`;",
+    "});",
+    "const finders = await order(finderPort, emailFinderConfig.PROVIDER_EMAIL_FINDER);",
+    "const verifiers = await order(verifierPort, emailVerifierConfig.PROVIDER_EMAIL_VERIFIER);",
+    "console.log(`${finders} ${verifiers}`);",
+  ].join("\n");
+  const startWith = (PROVIDER_EMAIL_FINDER: string, PROVIDER_EMAIL_VERIFIER: string) =>
+    promisify(execFile)(process.execPath, ["--input-type=module", "-e", script], {
+      env: { ...process.env, APP_ENV: "test", PROVIDER_EMAIL_FINDER, PROVIDER_EMAIL_VERIFIER },
+    }).then(
+      ({ stdout }) => `${PROVIDER_EMAIL_FINDER} ${PROVIDER_EMAIL_VERIFIER}: ${stdout.trim()}`,
+    );
+  const starts = [
+    ["a,b", "a,b,c", "[a,b] [a,b,c]"],
+    ["b,a", "c,a,b", "[b,a] [c,a,b]"],
+    ["fake,a", "b,fake,c", "[fake,a] [b,fake,c]"],
+    ["fake", "", "[fake] []"],
+    ["a,no-such-finder", "a,b,c", "provider_unknown [a,b,c]"],
+    ["a,b", "a,no-such-verifier", "[a,b] provider_unknown"],
+    ["a,a", "a,b,c", "config_invalid"],
+    ["a,b", "c,b,c", "config_invalid"],
+    ["a, b", "a,b,c", "config_invalid"],
+  ] as const;
+  assert.deepEqual(
+    await Promise.all(starts.map(([finders, verifiers]) => startWith(finders, verifiers))),
+    starts.map(([finders, verifiers, outcome]) => `${finders} ${verifiers}: ${outcome}`),
+  );
 });

@@ -12,11 +12,13 @@
 // `colleague_signal` (a <step> or `colleagues`), no phrase of the colleague gate and no name of the
 // case's `colleagues`, the persons the gate's copy has no database for; `no_repeat` (a <step>), no
 // run of REPEAT_RUN_WORDS words of an earlier text of the step; `absent`, none of the case's `absent`
-// phrases, such as a reply the person never sent. tests/evals.test.ts keeps RED_LINES and
-// COLLEAGUE_SIGNAL_PHRASES equal to the module's lists.
+// phrases, such as a reply the person never sent. gamma-p3-075: the `signal_act` gate after the
+// colleague's, and its check on every case, no act phrase in the text; the helpers below are the
+// email writer's scorer's too. tests/evals.test.ts keeps RED_LINES, COLLEAGUE_SIGNAL_PHRASES and
+// SIGNAL_ACT_PHRASES equal to the module's lists.
 import type { GateResult } from "../../registry/define.ts";
 import type { EvalCase, EvalOutcome, EvalScore } from "../runner.ts";
-import { COLLEAGUE_SIGNAL_PHRASES, REPEAT_RUN_WORDS } from "./constants.ts";
+import { COLLEAGUE_SIGNAL_PHRASES, REPEAT_RUN_WORDS, SIGNAL_ACT_PHRASES } from "./constants.ts";
 
 export const thresholds = {
   outcome: 1,
@@ -28,6 +30,7 @@ export const thresholds = {
   colleague_signal: 1,
   no_repeat: 1,
   absent: 1,
+  signal_act: 1,
 };
 
 /** A sequence step's block (prompt version 2): its kind and the earlier texts; none for a lead's. */
@@ -42,8 +45,8 @@ type Expected = {
 };
 type Text = { text: string };
 
-const PLACEHOLDER = /\{\{[^}\n]*\}\}|\{[^{}\n]*\}|\[[^\]\n]*\]|<[^<>\n]*>|\bINSERT\b/gu;
-const FAKE_THREAD = /^[ \t]*(?:re|fwd?)[ \t]*:/imu;
+export const PLACEHOLDER = /\{\{[^}\n]*\}\}|\{[^{}\n]*\}|\[[^\]\n]*\]|<[^<>\n]*>|\bINSERT\b/gu;
+export const FAKE_THREAD = /^[ \t]*(?:re|fwd?)[ \t]*:/imu;
 /** The module's phrases (domain/gates/format.ts): false familiarity, a fake thread, false urgency. */
 export const RED_LINES =
   `as we discussed|as discussed|as promised|as per our conversation|per our conversation|
@@ -64,7 +67,7 @@ const CONSONANT_Y = /[^aeiou]y$/u;
 const SIBILANT = /(?:s|x|z|ch|sh)$/u;
 
 /** A text as the gates compare it, padded: accents gone, lower case, marks but letters spaces. */
-const plain = (text: string) =>
+export const plain = (text: string) =>
   ` ${text
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
@@ -83,6 +86,8 @@ const COLLEAGUE_PHRASES = COLLEAGUE_SIGNAL_PHRASES.flatMap((phrase) => {
   const plurals = [...said.slice(0, -1), plural(said.at(-1) ?? "")];
   return [said, plurals].map((words) => ` ${words.join(" ")} `);
 });
+/** Each act phrase as plain() writes it. */
+const ACT_PHRASES = SIGNAL_ACT_PHRASES.map(plain);
 
 /** The values of the `{ "f_3": "…" }` maps of the blocks, at any depth. */
 function factsOf(value: unknown): string[] {
@@ -97,24 +102,27 @@ const lengthIssues = (text: string, { channel }: Input) =>
   text.length < channel.minCharacters || text.length > channel.maxCharacters
     ? [`${text.length} characters, not ${channel.minCharacters} to ${channel.maxCharacters}`]
     : [];
-const redLines = (text: string) => [
+export const redLines = (text: string) => [
   ...(FAKE_THREAD.test(text) ? ["a subject line"] : []),
   ...RED_LINES.filter((phrase) => plain(text).includes(plain(phrase))),
 ];
-/** The text's names and numbers that no fact holds. */
-function ungrounded(text: string, input: unknown): string[] {
-  const facts = plain(factsOf(input).join(" "));
+/** The text's names and numbers that no fact holds, nor one of `also` (the reply writer's brief). */
+export function ungrounded(text: string, input: unknown, also: readonly string[] = []): string[] {
+  const facts = plain([...factsOf(input), ...also].join(" "));
   const entities = (text.match(ENTITY) ?? []).map((entity) => plain(entity).trim());
   return entities.filter((entity) => !ALWAYS.has(entity) && !facts.includes(` ${entity} `));
 }
 /** The colleague phrases, plurals included, and the colleagues' names that the text holds. */
-function colleagueSignals(text: string, names: readonly string[] = []): string[] {
+export function colleagueSignals(text: string, names: readonly string[] = []): string[] {
   const said = plain(text);
   const named = names.map(plain).filter((name) => name.trim() !== "");
   return [...COLLEAGUE_PHRASES, ...named]
     .filter((phrase) => said.includes(phrase))
     .map((phrase) => phrase.trim());
 }
+/** The act phrases the text holds: the signal named by what the person did, not by its topic. */
+export const actPhrases = (text: string) =>
+  ACT_PHRASES.filter((phrase) => plain(text).includes(phrase)).map((phrase) => phrase.trim());
 /** The text's runs of REPEAT_RUN_WORDS words, as plain() writes them. */
 function runsOf(text: string): string[] {
   const said = plain(text).trim().split(" ");
@@ -127,7 +135,7 @@ function repeats(text: string, { earlier }: Step): boolean {
   return runsOf(text).some((run) => before.has(run));
 }
 
-const issues = (gate: string, found: readonly string[]): GateResult => ({
+export const issues = (gate: string, found: readonly string[]): GateResult => ({
   gate,
   issues: found.map((message) => ({ path: "text", message })),
 });
@@ -135,12 +143,14 @@ export const redLinesGate = (output: Text) => issues("red_lines", redLines(outpu
 /** The phrases only: a colleague's name needs the workspace's persons, so the check reads them. */
 export const colleagueSignalGate = (output: Text) =>
   issues("colleague_signal", colleagueSignals(output.text.trim()));
+export const signalActGate = (output: Text) => issues("signal_act", actPhrases(output.text.trim()));
 export const gates = [
   (output: Text) => issues("placeholders", output.text.match(PLACEHOLDER) ?? []),
   (output: Text, input: Input) => issues("length", lengthIssues(output.text.trim(), input)),
   (output: Text, input: Input) => issues("grounding", ungrounded(output.text.trim(), input)),
   redLinesGate,
   colleagueSignalGate,
+  signalActGate,
 ];
 
 /** Beta's checks of the text shown (null: ai_failed shows none), each where the case sets its input. */
@@ -164,7 +174,7 @@ export function score(evalCase: EvalCase, outcome: EvalOutcome): EvalScore {
   if (outcome.status !== "ok") {
     const last = (outcome.failures.at(-1)?.issues ?? []) as readonly { gate?: string }[];
     const grounding = !last.some((issue) => issue.gate === "grounding");
-    const shown = stepChecks(null, input, expected);
+    const shown = { ...stepChecks(null, input, expected), signal_act: true };
     return { [ending]: failSafe === true, length: true, red_lines: true, grounding, ...shown };
   }
   const text = String(outcome.output.text).trim();
@@ -177,5 +187,6 @@ export function score(evalCase: EvalCase, outcome: EvalOutcome): EvalScore {
     grounding: ungrounded(text, input).length === 0,
     words: words.length === 0 ? 1 : held / words.length,
     ...stepChecks(text, input, expected),
+    signal_act: actPhrases(text).length === 0,
   };
 }

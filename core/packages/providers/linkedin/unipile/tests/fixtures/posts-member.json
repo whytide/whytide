@@ -1,0 +1,84 @@
+{
+  "object": "PostList",
+  "items": [
+    {
+      "provider": "LINKEDIN",
+      "id": "7000000000000000200",
+      "share_url": "https://www.linkedin.com/posts/fixture_post-activity-7000000000000000200-AbCd?rcm=fixture-tracking-id",
+      "date": "1d",
+      "social_id": "urn:li:activity:7000000000000000200",
+      "text": "fixture-body-marker: a pinned post from the summer",
+      "parsed_datetime": "2026-08-01T09:00:00.000Z",
+      "is_repost": false,
+      "author": {
+        "public_identifier": "ada-example",
+        "id": "fixture-member-ada",
+        "name": "Ada Example",
+        "is_company": false,
+        "headline": "Head of Growth at Example Ltd"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000201",
+      "text": "fixture-body-marker: notes from the growth meetup",
+      "parsed_datetime": "2026-10-02T09:00:00.000Z",
+      "author": {
+        "public_identifier": "ada-example",
+        "id": "fixture-member-ada",
+        "name": "Ada Example",
+        "is_company": false,
+        "headline": "Head of Growth at Example Ltd"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000210",
+      "text": "fixture-body-marker: a post Ada reposted",
+      "parsed_datetime": "2026-10-01T12:00:00.000Z",
+      "is_repost": true,
+      "author": {
+        "public_identifier": "dana-specimen",
+        "id": "fixture-member-dana",
+        "name": "Dana Specimen",
+        "is_company": false,
+        "headline": "Founder at Blue Harbor Labs"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000202",
+      "text": "fixture-body-marker: three lessons from our launch",
+      "parsed_datetime": "2026-10-01T09:00:00.000Z",
+      "author": {
+        "public_identifier": "ada-example",
+        "id": "fixture-member-ada",
+        "name": "Ada Example",
+        "is_company": false,
+        "headline": "Head of Growth at Example Ltd"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000203",
+      "text": "fixture-body-marker: hiring a growth lead",
+      "parsed_datetime": "2026-09-27T09:00:00.000Z",
+      "author": {
+        "public_identifier": "ada-example",
+        "id": "fixture-member-ada",
+        "name": "Ada Example",
+        "is_company": false,
+        "headline": "Head of Growth at Example Ltd"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000204",
+      "text": "fixture-body-marker: an older post",
+      "parsed_datetime": "2026-09-21T09:00:00.000Z",
+      "author": {
+        "public_identifier": "ada-example",
+        "id": "fixture-member-ada",
+        "name": "Ada Example",
+        "is_company": false,
+        "headline": "Head of Growth at Example Ltd"
+      }
+    }
+  ],
+  "cursor": "member-page-2"
+}

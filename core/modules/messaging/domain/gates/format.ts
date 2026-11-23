@@ -4,8 +4,15 @@
 import type { GateIssue } from "../../schemas/writer.ts";
 import { words } from "./grounding.ts";
 
-/** The characters a text must have, both counted in. */
-export type Limits = { readonly min: number; readonly max: number };
+/**
+ * The characters a text must have, both counted in; an email's, its words or its characters, which
+ * its issue names (gamma-p3-070). A LinkedIn text's names none.
+ */
+export type Limits = {
+  readonly min: number;
+  readonly max: number;
+  readonly unit?: "characters" | "words";
+};
 
 /** A template's leftovers: `{{first_name}}`, `{company}`, `[Name]`, `<name>`, INSERT. */
 const PLACEHOLDER = /\{\{[^}\n]*\}\}|\{[^{}\n]*\}|\[[^\]\n]*\]|<[^<>\n]*>|\bINSERT\b/gu;
@@ -61,10 +68,16 @@ export function placeholderIssues(text: string): GateIssue[] {
   return [...found].map((placeholder) => ({ gate: "placeholders", placeholder }));
 }
 
-/** The text's characters, as a textarea counts them, outside the limits. */
-export function lengthIssues(text: string, { min, max }: Limits): GateIssue[] {
-  const { length } = text;
-  return length < min || length > max ? [{ gate: "length", length, min, max }] : [];
+/** The text's characters, as a textarea counts them, or its words, outside the limits. */
+export function lengthIssues(text: string, { min, max, unit }: Limits): GateIssue[] {
+  const length = unit === "words" ? wordCount(text) : text.length;
+  if (length >= min && length <= max) return [];
+  return [{ gate: "length", length, min, max, ...(unit && { unit }) }];
+}
+
+/** The words of a text as a reader counts them: its runs of characters between spaces. */
+export function wordCount(text: string): number {
+  return text.split(/\s+/u).filter((word) => word !== "").length;
 }
 
 /** Every red-line phrase the text holds, as the list writes it, and a fake thread's subject. */

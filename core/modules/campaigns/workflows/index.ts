@@ -9,9 +9,12 @@
 // of the profile read before a connection request (workflows/profile.ts) and the checks of its
 // steps left `executing` (beta-p4-040), the plan starting it for those too; the withdrawal job's
 // tick, global, daily, which starts one run per workspace that opens its withdrawals in a tenant
-// run (workflows/withdraw.ts). Inputs carry ids, codes and instants only; results are ids, codes
-// and counts.
+// run (workflows/withdraw.ts); and a reply label's notice (gamma-p4-050), one run per
+// campaigns.reply_notice_due, whose one activity mails the owner through the app-mail port, kind
+// `provider` (domain/replies/notice.ts). Inputs carry ids, codes and instants only; results are ids,
+// codes and counts.
 import type { TenantClient } from "@whytide/db";
+import { SEND_REFUSED_REASONS } from "@whytide/linkedin";
 import {
   type ActivityContext,
   createLogger,
@@ -29,17 +32,21 @@ import { listWorkspaceIds } from "@whytide/tenancy";
 import { z } from "zod";
 import { now } from "../domain/clock.ts";
 import { ID_MAX } from "../domain/constants.ts";
+import { resumeDueEnrollments } from "../domain/pause/enrollment.ts";
 import { placedToday, planAccount, scheduledAccounts } from "../domain/plan/account.ts";
 import { dueStepIds } from "../domain/queue/due.ts";
 import { queueStep } from "../domain/queue/open.ts";
 import { recoverFirstMessages } from "../domain/queue/recover.ts";
+import { REPLY_NOTICE_KINDS } from "../domain/replies/constants.ts";
+import { exitSuppressedDue, publishDueReminders } from "../domain/replies/due.ts";
+import { mailNotice, type NoticeResult } from "../domain/replies/notice.ts";
 import { CLAIM_MODES } from "../domain/send/constants.ts";
 import { nextStep } from "../domain/send/next.ts";
 import { checkAccounts, dueChecks } from "../domain/send/recover.ts";
 import { openWithdrawals } from "../domain/withdraw/open.ts";
 import { FILE_KEY_MAX, TICK_MINUTES, WITHDRAW_CRON, WITHDRAW_ZONE } from "./constants.ts";
 import { prepareProfile, settleProfile } from "./profile.ts";
-import { startQueueRuns } from "./queue.ts";
+import { duePage, startQueueRuns } from "./queue.ts";
 import { claim, gate, prepare, settle } from "./sender.ts";
 import { startWithdrawals } from "./withdraw.ts";
 
@@ -55,13 +62,18 @@ const claimedInput = workflowInput.extend({
   usageId: id.nullable(),
 });
 /**
- * linkedin's send answers (its SendResult): sent, refused before the call, or a port's error; and
- * its check's (CheckSentResult, beta-p4-040): whether a step left `executing` went out.
+ * linkedin's send answers (its SendResult): sent, refused before the call, or a port's error, with
+ * the reason its error map keys a row by (connect-already-connected); and its check's
+ * (CheckSentResult, beta-p4-040): whether a step left `executing` went out.
  */
 const sendAnswer = z.union([
   z.strictObject({ sent: z.literal(true), stepExecutionId: id }),
   z.strictObject({ refused: code, retryAt: instant.nullable() }),
-  z.strictObject({ refused: code, retryAfterSec: z.number().nonnegative().optional() }),
+  z.strictObject({
+    refused: code,
+    reason: z.enum(SEND_REFUSED_REASONS).optional(),
+    retryAfterSec: z.number().nonnegative().optional(),
+  }),
   z.strictObject({ outcome: z.enum(["sent", "not_sent"]), stepExecutionId: id }),
 ]);
 /** linkedin's profile read's answers (its ProfileRead, ProfileRefused): the file's key, or a refusal. */
@@ -71,6 +83,24 @@ const profileAnswer = z.union([
 ]);
 /** A check's step: no reservation, campaigns keeps none; its credits' usage from the claim. */
 const checkedInput = claimedInput.extend({ reservationId: id.nullable() });
+/** A reply label's notice: campaigns.reply_notice_due's ids and kind (domain/replies/notice.ts). */
+const noticeInput = workflowInput.extend({
+  enrollmentId: id,
+  personId: id,
+  kind: z.enum(REPLY_NOTICE_KINDS),
+  threadId: id.nullable(),
+  ownerUserId: id,
+});
+export type NoticeInput = z.output<typeof noticeInput>;
+
+const count = z.int().min(0);
+/** A queue run's input: its workspace; continued as new, its cursor and counts (gamma-p0-085). */
+const queueInput = workflowInput.extend({
+  afterId: id.optional(),
+  counts: z
+    .strictObject({ opened: count, passedOver: count, noSender: count, failed: count })
+    .optional(),
+});
 
 export const workflows = defineWorkflows({
   campaigns_plan: { input: workflowInput, taskQueue: DEFAULT_TASK_QUEUE },
@@ -79,12 +109,13 @@ export const workflows = defineWorkflows({
     taskQueue: DEFAULT_TASK_QUEUE,
     scope: "global",
   },
-  campaigns_queue: { input: workflowInput, taskQueue: DEFAULT_TASK_QUEUE },
+  campaigns_queue: { input: queueInput, taskQueue: DEFAULT_TASK_QUEUE },
   campaigns_queue_tick: {
     input: globalWorkflowInput,
     taskQueue: DEFAULT_TASK_QUEUE,
     scope: "global",
   },
+  campaigns_reply_notice: { input: noticeInput, taskQueue: DEFAULT_TASK_QUEUE },
   campaigns_sender: {
     input: workflowInput.extend({ accountId: id }),
     taskQueue: DEFAULT_TASK_QUEUE,
@@ -145,15 +176,29 @@ export const activities = {
     run: () => startQueueRuns(now()),
   }),
   /**
-   * The workspace's steps due within the queue window, oldest first; first, a first message left
-   * without a due time given one once it can have one (beta-p4-040).
+   * A page of the workspace's steps due within the queue window (gamma-p0-085): after the cursor
+   * `afterId`, in id order, QUEUE_PAGE_SIZE at most, and the next page's cursor, or null after the
+   * last (queue.ts duePage). On a tick's first page only, first, the enrollments paused until a
+   * time that has passed resumed (gamma-p3-060), each under its locks, those of a person suppressed
+   * now exited instead in the same run (gamma-p4-050), the not-now reminders due published
+   * (gamma-p4-050), and a first message left without a due time given one once it can have one
+   * (beta-p4-040).
    */
   campaigns_due_steps: defineActivity({
     kind: "db",
-    input: workflowInput,
-    run: async (_input, context) => {
-      await context.tenant(() => recoverFirstMessages(now()));
-      return { stepIds: await context.tenant(() => dueStepIds(now())) };
+    input: workflowInput.extend({ afterId: id.optional() }),
+    run: async ({ afterId }, context) => {
+      if (afterId === undefined) {
+        // One instant for both: no pause ends between the check and the resume.
+        const at = now();
+        await context.tenant(async () => {
+          await exitSuppressedDue(at);
+          await resumeDueEnrollments(at);
+        });
+        await context.tenant(() => publishDueReminders(now()));
+        await context.tenant(() => recoverFirstMessages(now()));
+      }
+      return duePage(await context.tenant(() => dueStepIds(now())), afterId);
     },
   }),
   /** One step's item opened, in a tenant run of its own; what its turn did. */
@@ -235,6 +280,12 @@ export const activities = {
     run: (_input, context: ActivityContext<TenantClient>) =>
       context.tenant(() => openWithdrawals(now())),
   }),
+  /** A reply label's notice mailed to its user, or why not (domain/replies/notice.ts). */
+  campaigns_reply_notice_mail: defineActivity<typeof noticeInput, NoticeResult, TenantClient>({
+    kind: "provider",
+    input: noticeInput,
+    run: (input, context) => mailNotice(context, input),
+  }),
   /** The profile read of a charged invite reserved, its request file under raw/; or why not. */
   campaigns_profile_prepare: defineActivity({
     kind: "db",
@@ -304,7 +355,9 @@ async function startPlans(): Promise<{ workspaces: number; started: number }> {
  * sender started when it has a step placed for today (a running one starts none). One that fails
  * leaves the others planned, and the activity then fails with its code; Temporal tries it again,
  * and a plan run again keeps the times it placed. An account with an `executing` step due for its
- * check is planned too, and its sender started while it may act (beta-p4-040).
+ * check is planned too, and its sender started while it may act (beta-p4-040). An account another
+ * attempt is still planning, past PLAN_TIMEOUT, is skipped and logged (gamma-p6-040): that attempt
+ * places its steps and starts its sender.
  */
 async function planAccounts(
   context: ActivityContext<TenantClient>,
@@ -320,6 +373,10 @@ async function planAccounts(
         const plan = await planAccount(accountId, now());
         return { plan, today: plan.skipped === null && (await placedToday(accountId, now())) };
       });
+      if (plan.skipped === "busy") {
+        logger().info({ sender_account_id: accountId }, "campaigns: account plan busy");
+        continue;
+      }
       placed += plan.placed;
       const due = today || (plan.skipped === null && checking.has(accountId));
       const start = due && (await startWorkflow(senderStart(context.workspaceId, accountId)));

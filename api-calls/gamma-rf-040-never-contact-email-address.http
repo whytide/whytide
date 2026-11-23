@@ -1,0 +1,16 @@
+# contacts' never-contact add by an email address (gamma-rf-040; core/modules/contacts/README.md
+# "Routes"): a member's session and suppression.write (every role). The route is beta-p2-010's
+# (api-calls/beta-p2-010-suppression-entries.http); a person's value that is no LinkedIn profile is
+# read as an email address, trimmed and in lower case. POST is @Idempotent(): the Idempotency-Key is
+# an example UUID. A write sends the cookie, so it sends Origin: {{appOrigin}} too. The address is
+# an example, no real person's.
+
+### POST /v1/workspaces/{workspaceId}/contacts/suppression: adds a person by an email address, on every channel (or channel email for email alone; layer opt_out for an opt-out by hand); 201 with an email entry, its address in email and the person who holds it in personId and displayName, null when no person of the workspace does; 400 suppression_target_invalid for a value that is neither a profile nor an address
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/suppression
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000040
+
+{ "kind": "person", "value": "jane.doe@example.com", "channel": "all" }

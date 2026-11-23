@@ -8,22 +8,30 @@
 // log row with the counts by module, and prints the counts. A later import or signal run meets the
 // erased hash. The dry run prints the same counts and changes nothing; a failing eraser rolls every
 // row back; another person, and the same person in another workspace, keep their rows.
-// The fixture person has an approval item too (approvals' eraser, beta-p3-030), and a thread with
-// their reply in it (inbox's eraser, beta-p5-010). The run locks the lead after the platform's step
-// and before every other eraser's (beta-p5-030).
+// The fixture person has an approval item too (approvals' eraser, beta-p3-030), a thread with
+// their reply in it (inbox's eraser, beta-p5-010), classified (gamma-p4-040, gone with the message
+// by the cascade), and an enrichment run (enrichment's eraser, gamma-en-050). The run locks the lead after the platform's step
+// and before every other eraser's (beta-p5-030). The script's log row has the reason `request`; the
+// 30-day rule's path (gamma-p7-010) deletes the same rows, writes no erased hash and a log row with
+// none; a guard asked right after the lock that refuses rolls every row back and keeps no log row,
+// and so does a recheck asked after every other eraser, on the person's row read under its lock.
+// A person known by an email address alone (gamma-rf-050) is erased by the address: its hash is the
+// erased hash and the log row's, and the address is in no row before or after; `pnpm erase --email`
+// prints it nowhere, and refuses two keys, an unknown address and a text that is no address.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createApprovalItem } from "@whytide/approvals/testing";
 import {
   createLeadForPerson,
   isHashed,
+  type LockedPerson,
   upsertPersonFromSource,
   upsertPersonsFromSource,
 } from "@whytide/contacts";
 import { useHashSalt } from "@whytide/contacts/testing";
 import { type TenantClient, withTenant } from "@whytide/db";
 import { asRole, withTestDb } from "@whytide/db/testing";
-import { createMessage, createThread } from "@whytide/inbox/testing";
+import { createClassification, createMessage, createThread } from "@whytide/inbox/testing";
 import { servicePrincipal } from "@whytide/platform";
 import { createSignalEvent } from "@whytide/signals/testing";
 import { createOrganizationWithWorkspace, useTenancyClient } from "@whytide/tenancy/testing";
@@ -64,11 +72,19 @@ const OTHER = {
 const NAMES = ["ysolde", "marrowcliffe", SLUG, MEMBER];
 const KEEP_ID = ["cost_events", "credit_usage"];
 const OPERATOR = "dpo@example.com";
+const USAGE =
+  "usage: pnpm erase --workspace <id or slug> (--linkedin-url <url> | --email <address> | --person <id>) --operator <name> [--dry-run]";
+/** A person known by this address alone, with no LinkedIn profile (gamma-rf-050), synthetic. */
+const ADDRESS = "ines.quarrendon@brackwater.example";
 
 const COUNTS = [
   "platform.outbox: 5",
   "platform.idempotency_records: 1",
   "approvals.approval_items: 1",
+  "enrichment.enrichment_runs: 1",
+  "enrichment.contact_points: 0",
+  "enrichment.enrichment_requests: 0",
+  "enrichment.enrichment_cache_entries: 0",
   "inbox.messages: 1",
   "inbox.threads: 1",
   "linkedin.sender_outreach: 1",
@@ -79,9 +95,12 @@ const COUNTS = [
   "qualification.score_snapshots: 1",
   "qualification.criterion_verdicts: 6",
   "qualification.assessment_attempts: 1",
-  "ai.decision_records: 3",
+  "qualification.intent_scores: 0",
   "signals.signal_events: 2",
   "signals.evidence: 2",
+  "signals.decision_records: 0",
+  "ai.decision_records: 3",
+  "contacts.person_email_hashes: 0",
   "contacts.review_decisions: 1",
   "contacts.leads: 1",
   "contacts.persons: 1",
@@ -105,6 +124,16 @@ async function personWithLead(workspaceId: string, profile: typeof PROFILE | typ
     const provider = "providerId" in profile ? "unipile" : "csv";
     const source = "providerId" in profile ? "linkedin" : "import";
     const { person } = await upsertPersonFromSource({ source, provider, profile });
+    await createLeadForPerson({ personId: person.id, source: { kind: "signal", ref: "sig_1" } });
+    return person.id;
+  });
+}
+
+/** A person known by ADDRESS alone, with a lead, through contacts' commands; its id. */
+async function addressOnlyWithLead(workspaceId: string) {
+  return inRun(workspaceId, async () => {
+    const profile = { email: ADDRESS, firstName: "Ines", lastName: "Quarrendon" };
+    const { person } = await upsertPersonFromSource({ source: "import", provider: "csv", profile });
     await createLeadForPerson({ personId: person.id, source: { kind: "signal", ref: "sig_1" } });
     return person.id;
   });
@@ -164,7 +193,7 @@ async function rowsOf(
       })),
     });
     await tx.assessmentAttempt.create({
-      data: { workspaceId, personId, icpVersion: 1, attempt: 2 },
+      data: { workspaceId, personId, icpId: "icp_test", icpVersion: 1, attempt: 2 },
     });
     for (const decisionRecordId of written) {
       await tx.messageDraft.create({
@@ -207,6 +236,8 @@ async function rowsOf(
         ...{ goodReasonText: `${name} runs the team we sell to`, decidedBy: "usr_fixture" },
       },
     });
+    const run = { trigger: "new_lead" as const, requestKey: `new_lead:${personId}` };
+    await tx.enrichmentRun.create({ data: { id: idOf("erun"), workspaceId, personId, ...run } });
     await tx.costEvent.create({
       data: {
         ...{ id: idOf("cst"), workspaceId, feature: "qualification", vendor: "fake" },
@@ -239,7 +270,9 @@ async function rowsOf(
     // The person's reply in the account's thread, as inbox's store writes it.
     const threadId = await createThread({ workspaceId, personId, senderAccountId }, tx);
     const body = `${name} here: next week works`;
-    await createMessage({ workspaceId, threadId, personId, body }, tx);
+    const messageId = await createMessage({ workspaceId, threadId, personId, body }, tx);
+    const classified = { workspaceId, messageId, threadId, personId, label: "interested" };
+    await createClassification(classified, tx);
   });
   for (const at of [1, 2]) {
     const commentText = `${name} here: we rebuilt our pipeline (${at})`;
@@ -347,7 +380,7 @@ test("pnpm erase by URL deletes every row that names the person, keeps the hash 
   const args = ["--workspace", slug, "--linkedin-url", url, "--operator", OPERATOR];
   assert.equal(await runErase(args, (line) => printed.push(line)), 0);
   assert.deepEqual(printed.slice(0, -1), COUNTS);
-  assert.match(printed.at(-1) ?? "", /^erased: era_[0-9A-Z]{26}, 36 rows$/);
+  assert.match(printed.at(-1) ?? "", /^erased: era_[0-9A-Z]{26}, 37 rows$/);
   for (const value of [personId, ...NAMES]) {
     assert.ok(
       !printed.join("\n").toLowerCase().includes(value.toLowerCase()),
@@ -363,10 +396,11 @@ test("pnpm erase by URL deletes every row that names the person, keeps the hash 
   const logs = await inRun(A, (tx) => tx.erasureLog.findMany());
   assert.equal(logs.length, 1);
   const [log] = logs as [(typeof logs)[number]];
-  assert.equal(`erased: ${log.id}, 36 rows`, printed.at(-1));
+  assert.equal(`erased: ${log.id}, 37 rows`, printed.at(-1));
   const hashes = await inRun(A, (tx) => tx.personHash.findMany({ where: { kind: "erased" } }));
   assert.equal(hashes.length, 2, "the URL's hash and the provider id's");
   assert.ok(hashes.some((row) => row.hash === log.personHash));
+  assert.equal(log.reason, "request");
   assert.equal(log.performedBy, OPERATOR);
   assert.ok(log.requestedAt <= log.completedAt);
   // jsonb keeps its own key order: the counts compare as objects.
@@ -429,7 +463,7 @@ test("the dry run prints the same counts and changes nothing", async () => {
   const printed: string[] = [];
   const args = ["--workspace", A, "--person", personId, "--operator", OPERATOR];
   assert.equal(await runErase([...args, "--dry-run"], (line) => printed.push(line)), 0);
-  assert.deepEqual(printed, [...COUNTS, "dry_run: 36 rows counted, all rolled back"]);
+  assert.deepEqual(printed, [...COUNTS, "dry_run: 37 rows counted, all rolled back"]);
   assert.deepEqual(await everyRow(), before);
   const erased: string[] = [];
   assert.equal(await runErase(args, (line) => erased.push(line)), 0);
@@ -473,6 +507,95 @@ test("the run locks the lead after the platform's step and before every other er
   assert.deepEqual(seen, ["platform: free", ...others.map((module) => `${module}: locked`)]);
 });
 
+test("a guard asked right after the lock that refuses rolls every row back, keeps no log row and answers skipped", async () => {
+  const { A, personId } = await fixture();
+  const before = await everyRow();
+  const seen: string[] = [];
+  const locked = async () => {
+    const free = await asRole("owner").$queryRaw<unknown[]>`
+      SELECT 1 FROM leads WHERE person_id = ${personId} FOR UPDATE SKIP LOCKED`;
+    return free.length === 0 ? "locked" : "free";
+  };
+  const probed = registeredErasers().map((eraser) => ({
+    ...eraser,
+    erase: async (id: string) => {
+      seen.push(eraser.module);
+      return eraser.erase(id);
+    },
+  }));
+  const guard = async (id: string) => {
+    seen.push(`guard: ${id === personId ? "the person" : id}, ${await locked()}`);
+    return "touched";
+  };
+  const request = { workspaceId: A, person: { id: personId }, operator: OPERATOR, dryRun: false };
+  const reason = "retention_never_contacted" as const;
+  assert.deepEqual(await erase({ ...request, reason, guard }, probed), { skipped: "touched" });
+  // The platform's step ran, then the guard under the lock; no other eraser; all of it rolled back.
+  assert.deepEqual(seen, ["platform", "guard: the person, locked"]);
+  assert.deepEqual(await everyRow(), before);
+});
+
+test("a recheck asked after every other eraser on the person's row, locked, that refuses rolls every row back, keeps no log row and answers skipped", async () => {
+  const { A, personId } = await fixture();
+  const before = await everyRow();
+  const seen: string[] = [];
+  const probed = registeredErasers().map((eraser) => ({
+    ...eraser,
+    erase: async (id: string) => {
+      seen.push(eraser.module);
+      return eraser.erase(id);
+    },
+  }));
+  // Another transaction may not take the row: SKIP LOCKED skips it while the run holds it.
+  const locked = async () => {
+    const free = await asRole("owner").$queryRaw<unknown[]>`
+      SELECT 1 FROM persons WHERE id = ${personId} FOR UPDATE SKIP LOCKED`;
+    return free.length === 0 ? "locked" : "free";
+  };
+  const recheck = async ({ createdAt, lastTouchAt, locationCountry }: LockedPerson) => {
+    const read = `${createdAt instanceof Date}, ${lastTouchAt}, ${locationCountry}`;
+    seen.push(`recheck: ${read}, ${await locked()}`);
+    return "changed";
+  };
+  const request = { workspaceId: A, person: { id: personId }, operator: OPERATOR, dryRun: false };
+  const reason = "retention_never_contacted" as const;
+  assert.deepEqual(await erase({ ...request, reason, recheck }, probed), { skipped: "changed" });
+  // The platform's step, every other eraser, then the recheck on the row; all of it rolled back.
+  const others = probed.map(({ module }) => module).filter((module) => module !== "platform");
+  assert.deepEqual(seen, ["platform", ...others, "recheck: true, null, PT, locked"]);
+  assert.deepEqual(await everyRow(), before);
+});
+
+test("the 30-day rule's path deletes the same rows, writes no erased hash, and logs its reason with no hash", async () => {
+  const { A, B, personId } = await fixture();
+  const request = {
+    workspaceId: A,
+    person: { id: personId },
+    operator: "retention",
+    dryRun: false,
+  };
+  const reason = "retention_never_contacted" as const;
+  const erased = await erase({ ...request, reason, guard: async () => null });
+  assert.ok(!("skipped" in erased));
+  const lines = Object.entries(erased.counts).flatMap(([module, tables]) =>
+    Object.entries(tables).map(([table, n]) => `${module}.${table}: ${n}`),
+  );
+  assert.deepEqual(lines, COUNTS, "the rows of a request");
+  assert.deepEqual(await tablesHolding(personId, B), KEEP_ID);
+  for (const needle of NAMES) assert.deepEqual(await tablesHolding(needle, B), [], needle);
+  assert.equal(await inRun(A, (tx) => tx.personHash.count({ where: { kind: "erased" } })), 0);
+  const logs = await inRun(A, (tx) => tx.erasureLog.findMany());
+  assert.deepEqual(
+    logs.map((row) => [row.id, row.reason, row.personHash, row.performedBy]),
+    [[erased.logId, reason, null, "retention"]],
+  );
+  // No hash: a later import meets nothing and adds the person again.
+  await inRun(A, async () => {
+    const byUrl = await isHashed({ linkedinUrls: [PROFILE.linkedinUrl] });
+    assert.equal(byUrl.get(PROFILE.linkedinUrl), undefined);
+  });
+});
+
 test("the command refuses a usage error, an unknown workspace or person and a bad URL, printing no input", async () => {
   const { A, slug } = await fixture();
   const printed: string[] = [];
@@ -499,4 +622,85 @@ test("the command refuses a usage error, an unknown workspace or person and a ba
     "linkedin_url_invalid",
   ]);
   assert.equal(await inRun(A, (tx) => tx.erasureLog.count()), 0);
+});
+
+test("erase by email address deletes a person without a LinkedIn profile, keeps the address's erased hash, and writes the address nowhere", async () => {
+  const { workspace } = await createOrganizationWithWorkspace();
+  const A = workspace.id;
+  const personId = await addressOnlyWithLead(A);
+  const otherId = await personWithLead(A, OTHER);
+  // contacts keeps the address's hash, never the address (gamma-rf-040).
+  assert.deepEqual(await tablesHolding(ADDRESS, ""), []);
+  assert.ok((await tablesHolding("quarrendon", "")).includes("persons"));
+
+  // The address as a request gives it: contacts trims it and folds its case.
+  const person = { email: ` ${ADDRESS.toUpperCase()} ` };
+  const request = { workspaceId: A, person, operator: OPERATOR, dryRun: false };
+  const erased = await erase(request);
+  assert.deepEqual(erased.counts.contacts, {
+    person_email_hashes: 1,
+    review_decisions: 0,
+    leads: 1,
+    persons: 1,
+  });
+  for (const needle of [personId, ADDRESS, "quarrendon"]) {
+    assert.deepEqual(await tablesHolding(needle, ""), [], needle);
+  }
+  // The log row's hash is the address's, the one erased hash; the other person keeps their lead.
+  const logs = await inRun(A, (tx) => tx.erasureLog.findMany());
+  assert.deepEqual(
+    logs.map((row) => [row.id, row.reason, row.performedBy]),
+    [[erased.logId, "request", OPERATOR]],
+  );
+  const hashes = await inRun(A, (tx) => tx.personHash.findMany({ where: { kind: "erased" } }));
+  assert.deepEqual(
+    hashes.map((row) => row.hash),
+    [logs[0]?.personHash],
+  );
+  assert.equal(await count(A, (tx) => tx.lead.count({ where: { personId: otherId } })), 1);
+
+  // The address is refused from then on, and finds no one to erase again.
+  await inRun(A, async () => {
+    const profile = { email: ADDRESS, firstName: "Ines" };
+    const input = { source: "import", provider: "csv", profile } as const;
+    await assert.rejects(upsertPersonFromSource(input), { code: "person_erased" });
+  });
+  await assert.rejects(erase(request), { code: "person_not_found" });
+});
+
+test("pnpm erase --email erases by the address and never prints it; two keys, an unknown address and a text that is no address are refused, printing no input", async () => {
+  const { workspace } = await createOrganizationWithWorkspace();
+  const [A, slug] = [workspace.id, workspace.slug];
+  const personId = await addressOnlyWithLead(A);
+  const printed: string[] = [];
+  const run = (args: string[]) => runErase(args, (line) => printed.push(line));
+  const operator = ["--operator", OPERATOR];
+  const url = ["--linkedin-url", PROFILE.linkedinUrl];
+  assert.equal(
+    await run(["--workspace", A, "--email", ADDRESS, "--person", "per_x", ...operator]),
+    2,
+  );
+  assert.equal(await run(["--workspace", A, "--email", ADDRESS, ...url, ...operator]), 2);
+  assert.equal(await run(["--workspace", A, "--email", ADDRESS]), 2, "no operator");
+  assert.deepEqual(new Set(printed), new Set([USAGE]));
+  printed.length = 0;
+  assert.equal(
+    await run(["--workspace", slug, "--email", "nobody@brackwater.example", ...operator]),
+    1,
+  );
+  assert.equal(await run(["--workspace", slug, "--email", "ines.quarrendon", ...operator]), 1);
+  assert.deepEqual(printed, ["person_not_found", "contacts_input_invalid"]);
+  assert.equal(await inRun(A, (tx) => tx.erasureLog.count()), 0);
+  printed.length = 0;
+
+  assert.equal(await run(["--workspace", slug, "--email", ADDRESS.toUpperCase(), ...operator]), 0);
+  assert.ok(printed.includes("contacts.person_email_hashes: 1"));
+  assert.ok(printed.includes("contacts.persons: 1"));
+  const [log] = await inRun(A, (tx) => tx.erasureLog.findMany());
+  assert.match(printed.at(-1) ?? "", new RegExp(`^erased: ${log?.id}, \\d+ rows$`));
+  const text = printed.join("\n").toLowerCase();
+  for (const value of [ADDRESS, "ines.quarrendon", "quarrendon", personId.toLowerCase()]) {
+    assert.ok(!text.includes(value), "prints no person data");
+  }
+  assert.deepEqual(await tablesHolding(ADDRESS, ""), []);
 });

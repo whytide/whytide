@@ -1,9 +1,12 @@
 // The fixed values of `pnpm icp:draft` (README.md "The script").
 
 export const DRAFT_USAGE =
-  "usage: pnpm icp:draft --workspace <id or slug> [--brief <text> | --brief-file <path>] [--dry-run] [--replace]";
+  "usage: pnpm icp:draft --workspace <id or slug> [--icp <id>] [--brief <text> | --brief-file <path>] [--dry-run] [--replace]";
 
-/** The exit codes: shown or saved, refused, a usage error, the draft failed, superseded, timed out. */
+/**
+ * The exit codes: shown or saved, refused, a usage error, the draft failed, superseded, timed out,
+ * ended on the ICP screen (used or discarded there) before the script saved it.
+ */
 export const EXIT = {
   done: 0,
   refused: 1,
@@ -11,14 +14,8 @@ export const EXIT = {
   failed: 3,
   superseded: 4,
   timedOut: 5,
+  ended: 6,
 } as const;
-
-/**
- * How often the script reads the ICP while the worker drafts, and for how long at most: longer than
- * the drafter's three attempts of up to three minutes each (workflows/constants.ts).
- */
-export const POLL_MS = 2_000;
-export const TIMEOUT_MS = 600_000;
 
 /** What re-scoring costs a lead: qualification's price `qualification.assessment` (its prices.ts). */
 export const RESCORE_CREDITS_PER_LEAD = 0.2;

@@ -8,14 +8,9 @@ import type { TenantClient } from "@whytide/db";
 import { type ActivityContext, AppError } from "@whytide/platform";
 import type { draftCompanyKnowledgeTask } from "../agents/draft-company-knowledge/task.ts";
 import { errors } from "../errors.ts";
-import {
-  DRAFT_COMPANY_KNOWLEDGE,
-  DRAFT_PAGE_CHARS,
-  type DraftInput,
-} from "../schemas/draft-company-knowledge.ts";
+import { DRAFT_COMPANY_KNOWLEDGE, type DraftInput } from "../schemas/draft-company-knowledge.ts";
 import {
   type DraftOutcome,
-  type DraftPage,
   type DraftRun,
   draftDocuments,
   draftPages,
@@ -33,6 +28,8 @@ export type DraftContext = Pick<ActivityContext<TenantClient>, "tenant"> & {
  * each one an entry `document:<name>` beside the pages: `drafted` with the pending draft, or `failed`
  * with ai_failed when the answer failed its schema or a gate twice; `superseded`, with no model asked
  * and nothing written, once a later Draft started. Unchanged pages and documents are the cached answer.
+ * With neither a page nor a document (the website removed while the run fetched), fetch_failed, and
+ * no model asked.
  */
 export async function draftFromPages(run: DraftRun, context: DraftContext): Promise<RunResult> {
   const task = registeredTask();
@@ -42,8 +39,12 @@ export async function draftFromPages(run: DraftRun, context: DraftContext): Prom
   });
   if (read === null) return { status: "superseded", pages: 0 };
   const { pages, documents } = read;
-  // Only what the model reads, in the order read: the same pages hash the same (the cache).
-  const input: DraftInput = { pages: [...pages, ...documents].map(cutPage) };
+  if (pages.length + documents.length === 0) {
+    return context.tenant(() => recordDraft(run, { ok: false, code: "fetch_failed" }, 0));
+  }
+  // Only what the model reads, in the order read, each text whole as stored: the same pages and
+  // documents hash the same (the cache).
+  const input: DraftInput = { pages: [...pages, ...documents] };
   const call = { workspaceId: run.workspaceId, subjectRef: run.companyKnowledgeId, input };
   const result = await callAgent(task, call, context.call);
   let outcome: DraftOutcome = { ok: false, code: "ai_failed" };
@@ -54,14 +55,6 @@ export async function draftFromPages(run: DraftRun, context: DraftContext): Prom
     outcome = { ok: true, draft: { ...draft, fields: output } };
   }
   return context.tenant(() => recordDraft(run, outcome, pages.length));
-}
-
-/** A page's text cut to what the drafter reads, never inside a character. */
-export function cutPage(page: DraftPage): DraftPage {
-  if (page.text.length <= DRAFT_PAGE_CHARS) return page;
-  const high = page.text.charCodeAt(DRAFT_PAGE_CHARS - 1);
-  const end = high >= 0xd800 && high <= 0xdbff ? DRAFT_PAGE_CHARS - 1 : DRAFT_PAGE_CHARS;
-  return { ...page, text: page.text.slice(0, end) };
 }
 
 /** The task the host registered at start (loadAgentTasks); never imported here (agents/). */

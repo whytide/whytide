@@ -11,6 +11,7 @@ import { asRole, withTestDb } from "@whytide/db/testing";
 import { reserveSend } from "@whytide/linkedin";
 import { openSending, useClock, useLinkedinClient } from "@whytide/linkedin/testing";
 import { settleSend } from "../domain/send/settle.ts";
+import { linkedinActionType } from "../domain/steps/actions.ts";
 import type { StepKey } from "../domain/template/constants.ts";
 import { fixture } from "./fixtures.ts";
 
@@ -33,7 +34,8 @@ test("a send settled: the next step due in business days in the sender's zone ac
       data: { status: "executing", attempt: 1 },
     });
     useClock(() => at);
-    const { actionType, idempotencyKey } = step;
+    const { idempotencyKey } = step;
+    const actionType = linkedinActionType(step);
     const slot = await run(() =>
       reserveSend({ accountId, actionType, idempotencyKey, withNote: false }),
     );

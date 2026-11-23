@@ -1,8 +1,10 @@
-// The tables of core/modules/approvals (its docs/data.md), beta-p3-030; migration
-// 20261029114318_approvals_initial. An approval item: a step of a sequence that can reach a person,
-// waiting for its sender account's owner (F13 §3); other modules' rows by plain id, no foreign key.
-// The migration's hand-written SQL adds what Prisma cannot say: the partial unique keys (one
-// pending and one approved item per step) and the CHECKs on the hash, the decision and the wait.
+// The tables of core/modules/approvals (its docs/data.md), beta-p3-030; migrations
+// 20261029114318_approvals_initial and 20261112101005_approvals_email_and_mode (gamma-p4-090). An
+// approval item: a step of a sequence that can reach a person, waiting for its sender's owner, the
+// LinkedIn account's or the mailbox's, or for the campaign's mode (F13 §3); other modules' rows by
+// plain id, no foreign key. The migrations' hand-written SQL adds what Prisma cannot say: the
+// partial unique keys (one pending and one approved item per step) and the CHECKs on the hash, the
+// decision, the wait and the sender of each channel.
 
 /// tenant
 model ApprovalItem {
@@ -12,8 +14,10 @@ model ApprovalItem {
   stepExecutionId     String                  @map("step_execution_id")
   /// contacts' `per_` id of the person the step reaches.
   personId            String                  @map("person_id")
-  /// linkedin's sender account the step goes out from; its owner decides.
-  senderAccountId     String                  @map("sender_account_id")
+  /// linkedin's sender account the step goes out from; its owner decides. Null on an email item.
+  senderAccountId     String?                 @map("sender_account_id")
+  /// email's mailbox an email step goes out from, on an email item only; its owner decides.
+  mailboxId           String?                 @map("mailbox_id")
   actionType          ApprovalActionType      @map("action_type")
   /// The sequence template's step key, as campaigns gives it: `connect`, `message_1`, …
   stepKey             String                  @map("step_key")
@@ -24,24 +28,29 @@ model ApprovalItem {
   status              ApprovalItemStatus      @default(pending)
   /// The hex SHA-256 of the text the approval froze: set exactly when the item is `approved`.
   approvedContentHash String?                 @map("approved_content_hash")
-  /// The user who approved or skipped it: the sender account's owner.
+  /// The user who approved or skipped it, the sender's owner; null on the mode's approval.
   decidedBy           String?                 @map("decided_by")
   decidedAt           DateTime?               @map("decided_at") @db.Timestamptz()
   decisionOrigin      ApprovalDecisionOrigin? @map("decision_origin")
-  /// Why an approved step waits, a code (`insufficient_credits`), and until when, if known.
-  waitCode            String?                 @map("wait_code")
+  /// Why an approved step waits, a code (`insufficient_credits`), and until when, if known; on a
+  /// pending item, `mode_declined` alone: the mode left it to a person.
+  waitCode           String?                 @map("wait_code")
   waitUntil           DateTime?               @map("wait_until") @db.Timestamptz()
+  /// Who approves it: a person, or the campaign's mode once its draft is ready (gamma-p4-090).
+  approvalBy          ApprovalBy              @default(person) @map("approval_by")
   createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt           DateTime                @updatedAt @map("updated_at") @db.Timestamptz()
 
   @@index([workspaceId, status, scheduledFor])
   @@index([workspaceId, personId])
+  @@index([workspaceId, stepExecutionId])
   @@map("approval_items")
 }
 
 enum ApprovalActionType {
   invite
   message
+  email
 
   @@map("approval_action_type")
 }
@@ -57,6 +66,14 @@ enum ApprovalItemStatus {
 
 enum ApprovalDecisionOrigin {
   app
+  approval_mode
 
   @@map("approval_decision_origin")
+}
+
+enum ApprovalBy {
+  person
+  mode
+
+  @@map("approval_by")
 }

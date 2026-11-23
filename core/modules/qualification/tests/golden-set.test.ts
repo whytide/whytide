@@ -155,7 +155,7 @@ test("the input as the model saw it: the decision record's while it keeps its ra
   );
   assert.equal(promptOf(kept[0]?.input ?? {}), seen());
   assert.deepEqual(kept[0]?.verdicts, answer().verdicts);
-  assert.deepEqual([kept[0]?.model_id, kept[0]?.prompt_version], ["fake-model", 1]);
+  assert.deepEqual([kept[0]?.model_id, kept[0]?.prompt_version], ["fake-model", 2]);
 
   const later = new Date(Date.now() + 400 * 86_400_000);
   assert.ok((await purgeRawRecords({ client: asRole("app"), now: later })) >= 1);

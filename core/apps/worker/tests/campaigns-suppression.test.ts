@@ -6,8 +6,11 @@
 // with its reason, its pending steps cancelled, a claimed step left to the sender, the lead kept
 // suppressed, a clear person untouched, and a redelivery changing nothing. And the gate, before the
 // event is delivered, skipping a step of a person blocked as a person or through their company.
-// Contacts' and linkedin's code and test helpers come from their builds, as the loader's modules
-// import them. It lives here: a module never imports a host.
+// An address blocked on every channel (gamma-rf-040): the enrollment of the person who holds it
+// exited by the event, or, when the address is recorded after its block, by the gate, with no
+// event. The approver is the workspace's Owner, so the seeded campaign sends from their account
+// (gamma-p6-040). Contacts', linkedin's and tenancy's code and test helpers come from their builds,
+// as the loader's modules import them. It lives here: a module never imports a host.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -30,6 +33,7 @@ const { approveLead } = await import(built("contacts/dist/domain/outreach/status
 const { addSuppression } = await import(built("contacts/dist/domain/suppression/entries.js"));
 const { checkGate } = await import(built("campaigns/dist/domain/gate/gate.js"));
 const linkedin = await import(built("linkedin/dist/testing/index.js"));
+const tenancy = await import(built("tenancy/dist/testing/index.js"));
 
 withTestDb();
 const app = asRole("app");
@@ -51,6 +55,16 @@ const inRun = <T>(principal: Principal, fn: (tx: TenantClient) => Promise<T>) =>
 const asSystem = <T>(fn: (tx: TenantClient) => Promise<T>) =>
   inRun(platform.servicePrincipal("campaigns_test"), fn);
 const asApprover = <T>(fn: () => Promise<T>) => inRun(approver, fn);
+/**
+ * The workspace with the approver its Owner, so the seeded campaign sends from the approver's
+ * connected account (gamma-p6-040).
+ */
+async function ownedAccount(): Promise<void> {
+  await tenancy.createOrganizationWithWorkspace({ workspaceId: WORKSPACE });
+  await app.user.create({ data: { id: APPROVER, email: `${APPROVER}@example.com` } });
+  await tenancy.createMembership({ userId: APPROVER, workspaceId: WORKSPACE, role: "Owner" });
+  await linkedin.createConnectedAccount(WORKSPACE, { ownerUserId: APPROVER });
+}
 
 /** A person with a lead, at a company of the workspace when a domain is given: its id. */
 const leadOf = (slug: string, domain?: string): Promise<string> =>
@@ -119,7 +133,7 @@ const connectOf = async (personId: string) => {
 };
 
 test("contacts.suppression_added, delivered: each affected active enrollment exited with the reason, its pending steps cancelled, a claimed step left; a redelivery changes nothing", async () => {
-  await linkedin.createConnectedAccount(WORKSPACE, { ownerUserId: APPROVER });
+  await ownedAccount();
   const blocked = await leadOf("suppression-person");
   const employee = await leadOf("suppression-company", "brackwater.example");
   const optedOut = await leadOf("suppression-opt-out");
@@ -181,7 +195,7 @@ test("contacts.suppression_added, delivered: each affected active enrollment exi
 });
 
 test("the gate, before the event is delivered: a step of a person blocked as a person or through their company is skipped with the reason", async () => {
-  await linkedin.createConnectedAccount(WORKSPACE, { ownerUserId: APPROVER });
+  await ownedAccount();
   const blocked = await leadOf("gate-person");
   const employee = await leadOf("gate-company", "harrowgate.example");
   await enrolled([blocked, employee]);
@@ -212,4 +226,54 @@ test("the gate, before the event is delivered: a step of a person blocked as a p
   const rows = await app.stepExecution.findMany();
   await deliver();
   assert.deepEqual(await app.stepExecution.findMany(), rows);
+});
+
+test("an address blocked on every channel exits the enrollment of the person who holds it: by the event, or, recorded after its block, by the gate, with no event", async () => {
+  await ownedAccount();
+  const holder = await leadOf("address-holder");
+  const later = await leadOf("address-later");
+  const recorded = (personId: string, address: string) =>
+    asSystem(() => contacts.recordPersonEmail({ personId, address }));
+  assert.deepEqual(await recorded(holder, "noor.holder@brackwater.example"), {
+    ...{ holder: "self", suppressed: false },
+  });
+  await enrolled([holder, later]);
+  for (const personId of [holder, later]) await move(await connectOf(personId), "scheduled");
+
+  await asApprover(async () => {
+    for (const value of [" Noor.Holder@Brackwater.example ", "noor.later@brackwater.example"])
+      await addSuppression({ kind: "person", value, createdBy: APPROVER });
+  });
+  await deliver();
+
+  const reason = "never_contact_person";
+  assert.deepEqual(await enrollmentOf(holder), {
+    ...{ status: "exited", exitReason: "suppressed", exitDetail: reason },
+  });
+  assert.deepEqual(
+    (await stepsOf(holder)).map(({ status, skipReason }) => [status, skipReason]),
+    Array(4).fill(["cancelled", reason]),
+  );
+  assert.equal(await statusOf(holder), "suppressed");
+  // No person held the second address when its entry came: the enrollment goes on, until one does.
+  assert.equal((await enrollmentOf(later)).status, "active");
+  assert.equal(await statusOf(later), "in_campaign");
+  assert.deepEqual(await recorded(later, "noor.later@brackwater.example"), {
+    ...{ holder: "self", suppressed: true },
+  });
+  assert.equal(await statusOf(later), "suppressed");
+  const connect = await connectOf(later);
+  const answer: { pass: boolean; reason?: string } = await asSystem(() =>
+    checkGate(connect, { at: new Date() }),
+  );
+  assert.deepEqual([answer.pass, answer.reason], [false, reason]);
+  assert.deepEqual(
+    (await stepsOf(later)).map(({ status, skipReason }) => [status, skipReason]),
+    [["skipped", reason], ...Array(3).fill(["cancelled", reason])],
+  );
+  assert.deepEqual(await enrollmentOf(later), {
+    ...{ status: "exited", exitReason: "suppressed", exitDetail: reason },
+  });
+  const added = { eventName: "contacts.suppression_added" };
+  assert.equal(await app.outboxEntry.count({ where: added }), 2, "the record published nothing");
 });

@@ -8,6 +8,7 @@ import type { z } from "zod";
 import { errors } from "../../errors.ts";
 import { events } from "../../events.ts";
 import { ids } from "../../ids.ts";
+import { touchSettings } from "../../settings.ts";
 import { parseInput, requireId } from "../rules.ts";
 import { suppressionOf } from "../suppression/checks.ts";
 import { type OutreachStatus, STATUS_CHANGES_LIMIT, type StatusActorType } from "./constants.ts";
@@ -52,7 +53,8 @@ export async function recordLeadStatus(
  * lead was never in a campaign. Publishes contacts.lead_approved in the same transaction; campaigns
  * enrolls the lead. lead_in_outreach from in_campaign, replied or finished, or from suppressed after
  * a campaign; person_suppressed, with the check's reason in details, for a person the check refuses
- * as a new enrollment, recently_contacted included; lead_not_found.
+ * as a new enrollment, recently_contacted included, with `days`, CONTACTS_RECENT_TOUCH_DAYS, which
+ * the screen's words name; lead_not_found.
  */
 export async function approveLead(personId: string): Promise<OutreachStatus> {
   const id = requireId("personId", personId);
@@ -62,7 +64,10 @@ export async function approveLead(personId: string): Promise<OutreachStatus> {
   if (!approvableFrom(from, everInCampaign)) throw new AppError(errors.lead_in_outreach);
   const suppression = await suppressionOf(id, { newEnrollment: true });
   if (suppression.suppressed) {
-    throw new AppError(errors.person_suppressed, { details: { reason: suppression.reason } });
+    const { reason } = suppression;
+    const days = touchSettings.CONTACTS_RECENT_TOUCH_DAYS;
+    const details = reason === "recently_contacted" ? { reason, days } : { reason };
+    throw new AppError(errors.person_suppressed, { details });
   }
   await recordLeadStatus(id, "approved", { actor: actorOf(principal) });
   const payload = { personId: id, approvedBy: principal.userId };

@@ -1,20 +1,17 @@
 // `pnpm inbox:export-labels [--workspace <id or slug>] [--week <ISO week>]` (README.md "The reply
 // golden set"): the operator exports the reply golden set of every workspace, or of the one named, as
 // GET …/inbox/exports/reply-labels.jsonl does, each in its own tenant run as the inbox service, then
-// prints the two numbers beta's "Done when" asks for. Each line starts with a code and holds counts,
+// prints the two numbers beta's "Done when" asks for. Each file holds every member's threads, where
+// the route's holds the caller's own only (gamma-p6-060): no member runs the command. Each line starts with a code and holds counts,
 // keys and codes only. The totals add the workspaces' counts here, never in one query across them.
 import { parseArgs } from "node:util";
 import { isAppError, servicePrincipal } from "@whytide/platform";
-import {
-  findWorkspace,
-  findWorkspaceBySlug,
-  listWorkspaceIds,
-  errors as tenancyErrors,
-} from "@whytide/tenancy";
+import { listWorkspaceIds, errors as tenancyErrors } from "@whytide/tenancy";
 import { exportReplyLabels, type ReplyLabelsFile } from "../domain/export/reply-labels.ts";
 import { weekRange } from "../domain/export/week.ts";
 import { errors } from "../errors.ts";
-import { EXIT, ID_MARK, OPTIONS, SERVER_ERROR, SERVICE, USAGE } from "./constants.ts";
+import { EXIT, OPTIONS, SERVER_ERROR, SERVICE, USAGE } from "./constants.ts";
+import { workspaceNamed } from "./workspace.ts";
 
 export type Print = (line: string) => void;
 
@@ -86,22 +83,6 @@ function isWeek(week: string, now: Date): boolean {
     return true;
   } catch (error) {
     if (isAppError(error) && error.code === errors.week_invalid) return false;
-    throw error;
-  }
-}
-
-/**
- * The workspace --workspace names, as a list of its id: by id, which has an underscore, else by slug;
- * null for none, a value that is neither, or a slug two organizations share.
- */
-async function workspaceNamed(named: string): Promise<string[] | null> {
-  try {
-    const workspace = named.includes(ID_MARK)
-      ? await findWorkspace(named)
-      : await findWorkspaceBySlug(named);
-    return workspace === null ? null : [workspace.id];
-  } catch (error) {
-    if (isAppError(error) && error.code === tenancyErrors.tenancy_input_invalid) return null;
     throw error;
   }
 }

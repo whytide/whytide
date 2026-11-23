@@ -1,6 +1,6 @@
 // The lead list (README "Screens"): the workspace's qualified leads by descending fit, twenty a
 // page, or the view the URL names (query.ts: the list's own address, the lead page's way back), and
-// how many leads are in each status, read as the member while the loading state shows; list.tsx
+// how many leads, or how many of the view's source, are in each status, read as the member while the loading state shows; list.tsx
 // filters, sorts and pages from the browser. React puts the <title> in the document's head: the
 // generated route re-exports the page alone, so a `metadata` export would not reach Next.js.
 import { PageHeader } from "@whytide/ui";
@@ -43,9 +43,15 @@ export default async function Leads({ params, searchParams }: Props) {
 async function FirstPage({ workspace, start }: { workspace: string; start: View }) {
   const api = await serverApi();
   const path = { workspaceId: workspace };
-  const query = { status: start.status, sort: start.sort, ...filtersOf(start), limit: LIMIT };
+  const status = start.status || undefined;
+  const query = { status, sort: start.sort, ...filtersOf(start), limit: LIMIT };
+  const of = { source: filtersOf(start).source };
   const [{ counts }, first] = await Promise.all([
-    data(api.GET("/v1/workspaces/{workspaceId}/contacts/leads/counts", { params: { path } })),
+    data(
+      api.GET("/v1/workspaces/{workspaceId}/contacts/leads/counts", {
+        params: { path, query: of },
+      }),
+    ),
     data(api.GET("/v1/workspaces/{workspaceId}/contacts/leads", { params: { path, query } })),
   ]);
   return (

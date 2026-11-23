@@ -1,6 +1,7 @@
 // The requests and answers of contacts' lead routes (README.md "Routes"), from which the api
 // builds its OpenAPI document: the lead's fields with the person's, never a provider's id.
 import { z } from "zod";
+import { SOURCE_REF } from "../domain/constants.ts";
 import {
   CONFIDENCES,
   LEAD_SORTS,
@@ -19,8 +20,9 @@ const lead = {
   /** The first source's kind. */
   sourceLabel: z.enum(SOURCE_KINDS),
   /**
-   * Every source, in the order they came: `ref` is the id of the import job or the signal source;
-   * `label` and `url`, a signal source's label and post, where its module gave them.
+   * Every source, in the order they came: `ref` is the id of the import job, the signal source or,
+   * for `manual`, the member who added the lead by hand; `label` and `url`, a signal source's label
+   * and post, where its module gave them.
    */
   sources: z.array(
     z.strictObject({
@@ -45,6 +47,8 @@ const lead = {
   ),
   hardFilterReason: z.string().nullable(),
   statusReason: z.string().nullable(),
+  /** The audience the decision was judged against (an ICP's id); null before audiences, or none. */
+  icpIdScored: z.string().nullable(),
   icpVersionScored: z.int().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -88,6 +92,29 @@ export const leadResponse = z.strictObject({
   suppression: z.strictObject({ reason: z.enum(SUPPRESSION_REASONS) }).nullable(),
 });
 export type LeadResponse = z.infer<typeof leadResponse>;
+/**
+ * A member's edit of the lead's person (lead-fields-edit): any of the six profile fields, an empty
+ * one to clear it. Their rules (trimmed, the source's limits, the first name kept) are the command's
+ * (domain/rules.ts), so that a refusal is contacts_input_invalid naming the fields.
+ */
+export const leadFieldsBody = z.strictObject({
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  headline: z.string().optional(),
+  title: z.string().optional(),
+  companyName: z.string().optional(),
+  locationText: z.string().optional(),
+});
+export type LeadFieldsBody = z.infer<typeof leadFieldsBody>;
+/**
+ * A member's lead by hand (lead-manual-create): the LinkedIn profile URL and the six profile
+ * fields, the first name required. Their rules (the URL normalized, each value trimmed and within
+ * the source's limit, an empty optional one none) are the command's (domain/rules.ts), so that a
+ * refusal is linkedin_url_invalid, or contacts_input_invalid naming the fields, a first name left
+ * out too.
+ */
+export const leadCreateBody = leadFieldsBody.extend({ linkedinUrl: z.string() });
+export type LeadCreateBody = z.infer<typeof leadCreateBody>;
 
 const count = z.int().min(0);
 /** How many of the workspace's leads are in each status. */
@@ -104,6 +131,8 @@ export const leadCounts = z.strictObject({
 export type LeadCounts = z.infer<typeof leadCounts>;
 
 export const leadListQuery = z.strictObject({
+  /** A source's `ref`, an import job's id or a signal source's: the leads with a source of it. */
+  source: z.string().regex(SOURCE_REF, "a source's id").optional(),
   status: z.enum(QUALIFICATION_STATUSES).optional(),
   tier: z.enum(TIERS).optional(),
   /** `unreviewed`: the leads without a review decision. */
@@ -118,8 +147,12 @@ export const leadListQuery = z.strictObject({
 });
 export type LeadListQuery = z.infer<typeof leadListQuery>;
 export const leadParams = z.strictObject({ personId: z.string().min(1).max(64) });
+/** The counts of the leads of one source, as the list's `source`; every lead without it. */
+export const leadCountsQuery = leadListQuery.pick({ source: true });
+export type LeadCountsQuery = z.infer<typeof leadCountsQuery>;
 /** The list's view the neighbours are read in: its filters and its sort. */
 export const neighboursQuery = leadListQuery.pick({
+  source: true,
   status: true,
   tier: true,
   review: true,

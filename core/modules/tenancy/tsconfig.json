@@ -13,6 +13,7 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true
   },
+  // The screens (ui/**/*.tsx) are the web host's to compile and check (core/apps/web/docs/screens.md).
   "include": ["**/*.ts"],
   "exclude": ["dist", "node_modules"],
   "references": [{ "path": "../../packages/platform" }, { "path": "../../packages/db" }]

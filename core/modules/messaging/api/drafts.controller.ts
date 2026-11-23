@@ -4,6 +4,7 @@
 // cannot import the host, so each route sets the host's metadata itself: its permission and its
 // @ApiRoute (core/apps/api/README.md "Permissions", "OpenAPI and the client").
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, SetMetadata } from "@nestjs/common";
+import { writtenKindOf } from "../domain/drafts/kinds.ts";
 import {
   type Draft,
   editDraft,
@@ -40,17 +41,17 @@ export class DraftsController {
   @idempotent
   @route({
     summary:
-      "Asks for a draft of the lead on the channel: 202 with the draft, drafting; publishes messaging.draft_requested, from which the worker writes it",
+      "Asks for a draft of the lead on the channel, as the kind given (which fits the channel; none for a note): 202 with the draft, drafting; publishes messaging.draft_requested, from which the worker writes it",
     params: leadParams,
     body: createDraftBody,
     response: draftResponse,
-    errors: [errors.dossier_lead_not_found],
+    errors: [errors.dossier_lead_not_found, errors.messaging_input_invalid],
   })
   async create(
     @Param("personId") personId: string,
     @Body() body: CreateDraftBody,
   ): Promise<DraftResponse> {
-    return toResponse(await requestDraft({ personId, channel: body.channel }));
+    return toResponse(await requestDraft({ personId, ...body }));
   }
 
   @Get("leads/:personId/drafts")
@@ -80,7 +81,7 @@ export class DraftsController {
   @write
   @route({
     summary:
-      "Saves the member's own text, at most the channel's limit and passing the gates (no placeholder, red line or colleague's signal): the draft becomes edited, which no later write changes; a sequence step's draft is refused",
+      "Saves the member's own text, and a first email's subject, at most the channel's limit and passing the gates (no placeholder, red line, colleague's signal, signal's act, or a first email's link): the draft becomes edited, which no later write changes; a sequence step's draft is refused, and a subject on any draft but a first email",
     params: draftParams,
     body: editDraftBody,
     response: draftResponse,
@@ -90,6 +91,7 @@ export class DraftsController {
       errors.step_draft_not_editable,
       errors.messaging_input_invalid,
       errors.draft_text_refused,
+      errors.draft_subject_not_allowed,
     ],
   })
   async edit(@Param("id") id: string, @Body() body: EditDraftBody): Promise<DraftResponse> {
@@ -102,7 +104,7 @@ export class DraftsController {
   @idempotent
   @route({
     summary:
-      "Asks for a new draft of the same lead and channel, unlike this one, which is kept: 202 with the new draft, drafting; publishes messaging.draft_requested; a sequence step's draft is refused",
+      "Asks for a new draft of the same lead, channel and kind, unlike this one, which is kept: 202 with the new draft, drafting; publishes messaging.draft_requested; a sequence step's draft is refused",
     params: draftParams,
     response: draftResponse,
     errors: [
@@ -127,6 +129,9 @@ function toResponse(draft: Draft): DraftResponse {
   const plan = draft.plan as DraftResponse["plan"];
   return {
     ...{ id, personId, channel, kind, status, text, editedText, modelId, promptVersion },
+    subject: draft.subject,
+    editedSubject: draft.editedSubject,
+    stepKind: writtenKindOf(draft),
     dossierHash,
     plan: plan && { angle: plan.angle, factIds: plan.factIds, cta: plan.cta },
     gates: draft.gates as DraftResponse["gates"],

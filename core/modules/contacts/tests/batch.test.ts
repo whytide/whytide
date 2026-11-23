@@ -84,7 +84,10 @@ const LEADS = (personIds: readonly string[]) => [
   { personId: personIds[1] ?? "", source: { kind: "signal" as const, ref: "sig_1", ...NAMED } },
 ];
 
-/** A row without what differs between two workspaces: the id, the workspace and the times. */
+/**
+ * A row without what differs between two workspaces: the id, the workspace and the times, the
+ * enrichment hold's among them (enrichment-hold.test.ts proves each command sets it).
+ */
 function comparable(row: Record<string, unknown>) {
   const {
     id: _id,
@@ -92,6 +95,7 @@ function comparable(row: Record<string, unknown>) {
     workspaceId: _ws,
     createdAt: _c,
     updatedAt: _u,
+    enrichmentHoldUntil: _hold,
     ...rest
   } = row;
   return rest;

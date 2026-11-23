@@ -1,0 +1,16 @@
+{
+  "error": false,
+  "free_enrichment": false,
+  "person": {
+    "first_name": "Ada",
+    "last_name": "Example",
+    "current_job_title": "Synthetic",
+    "email": {
+      "status": "VERIFIED",
+      "revealed": true,
+      "email": "ada@copper-harbor.example",
+      "verification_method": "BOUNCEBAN",
+      "email_mx_provider": "Google"
+    }
+  }
+}

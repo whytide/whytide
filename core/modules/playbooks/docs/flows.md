@@ -1,0 +1,12 @@
+# playbooks: flows
+
+- **Create:** `POST …/playbooks` in the request's tenant run takes the workspace's advisory lock (`playbooks.create:<workspace>`), checks the audience through icp's `findAudience` and that no live agent has it, counts the live agents, inserts the row and publishes `playbooks.playbook_created { playbookId, ownerUserId, icpId }`, once per agent. Campaigns makes the agent's campaign from it (gamma-p3-065).
+- **Update:** `PATCH …/playbooks/{id}` locks the agent's row (`FOR UPDATE`), refuses an archived agent, refuses the resume of one paused `member_removed` to anyone but its owner (`playbook_owner_removed`), checks a new audience as a create does, writes the row, a pause with `paused_reason` `user` unless the agent was paused already, and, when archived, deletes the agent's links. Publishes `playbooks.playbook_updated { playbookId, status }` when the name, the audience or the status changed; a patch that changes none of them stops after the lock, with nothing written or published.
+- **Sources:** `PUT …/sources` refuses more than `PLAYBOOKS_MAX_SOURCES_PER_AGENT` distinct ids (`playbook_sources_limit`, 10 unset) before anything is read, locks the agent's row, asks the source checker once for the whole set, refuses the set on any refused id, deletes the links not wanted and inserts the new ones in id order. Publishes `playbooks.sources_changed { playbookId }` when the set changed. `GET …/sources/check` asks the same checker and writes nothing.
+- The unique indexes catch a race the locks do not cover, and the command answers it as `playbook_icp_in_use` or `playbook_source_in_use`.
+
+The events go through the outbox in the command's transaction; their payloads are ids and a status only.
+
+## A removed member
+
+tenancy's `removeMember` publishes `tenancy.member_removed { workspaceId, membershipId, userId }` (gamma-p6-030). The worker delivers it in a tenant run of the workspace, and playbooks' subscriber (`events.ts`, `domain/removed.ts`, gamma-p6-075), in that run's transaction, reads the user's agents that are active or paused `user`, oldest id first, and moves each with an update conditioned on the same, to `paused` with `member_removed`, publishing `playbooks.playbook_updated { playbookId, status: "paused" }` for each it moved. An archived agent, one paused for the removal already and a teammate's are not read; a redelivery moves nothing and publishes nothing. The agent's owner, invited again, resumes it through the PATCH; an Owner's resume is refused (409 `playbook_owner_removed`), nothing written.

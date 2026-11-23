@@ -1,6 +1,6 @@
 // callAgent's reads and writes of decision_records (README.md "Decision records"), on the client of
 // the tenant run it opens (core/packages/db README "The tenant transaction and the scoped client"),
-// and, in the caller's run, the raw prompts' read and a subject's erasure.
+// and, in the caller's run, the raw prompts' read and the erasure by subject or by id.
 import { type Prisma, type TenantClient, tenantClient } from "@whytide/db";
 import { AppError } from "@whytide/platform";
 import { aiErrors } from "../errors.ts";
@@ -72,5 +72,19 @@ export async function eraseDecisionRecords(
     throw new AppError(aiErrors.ai_input_invalid, { details: { fields: ["subjectRef"] } });
   }
   const { count } = await tenantClient.decisionRecord.deleteMany({ where: { subjectRef } });
+  return { decision_records: count };
+}
+
+/**
+ * Deletes the records named, in the caller's tenant run: one of another subject that a person's
+ * rows name (signals' rating batch, its subject the source) goes with those rows
+ * (docs/rules/security.md §2). The rows deleted, by table; none for no id.
+ */
+export async function eraseDecisionRecordsById(
+  ids: readonly string[],
+): Promise<{ decision_records: number }> {
+  if (ids.length === 0) return { decision_records: 0 };
+  const where = { id: { in: [...ids] } };
+  const { count } = await tenantClient.decisionRecord.deleteMany({ where });
   return { decision_records: count };
 }

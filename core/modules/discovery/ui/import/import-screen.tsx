@@ -1,8 +1,8 @@
 // The import screen in the browser (page.tsx; README.md "The screen"): a card with the file picker,
 // a drop zone, beside the expected columns and the sample file; the upload, its size checked first;
 // the report of the job it made, with the run under it, which the worker does: the job read every two
-// seconds until it ends, or until it looks stuck, when the poll stops; then the counts with the link
-// to the lead list. And the past imports, read here so that their loading and error states show,
+// seconds until it ends, or until it looks stuck, when the poll stops; then the counts with View
+// leads, the lead list of the job. And the past imports, read here so that their loading and error states show,
 // which each answer updates. A failure shows its code in words, with a retry unless the file itself
 // must change: in the report once there is a job, else under the picker.
 "use client";
@@ -229,7 +229,13 @@ export function ImportScreen({ workspace }: { workspace: string }) {
       {job?.counts && job.status !== "running" ? (
         <Result job={job} counts={job.counts} workspace={workspace} />
       ) : null}
-      <History jobs={jobs} problem={listProblem} onRetry={load} viewer={viewer} />
+      <History
+        jobs={jobs}
+        problem={listProblem}
+        onRetry={load}
+        viewer={viewer}
+        workspace={workspace}
+      />
     </div>
   );
 }

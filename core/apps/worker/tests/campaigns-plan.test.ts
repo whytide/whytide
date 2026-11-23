@@ -7,7 +7,9 @@
 // due ahead and a disconnected account's step alone; a second run keeps every time and gap; an
 // account with a step placed today has its sender started (beta-p4-020), recorded. Through the host,
 // a tick while a plan runs starts none for its workspace, and the schedule campaigns.plan starts the
-// tick every 15 minutes, overlap skip; the sender the plan starts is terminated after. Contacts',
+// tick every 15 minutes, overlap skip; the sender the plan starts is terminated after. Two attempts
+// of the plan's activity at once on one account (gamma-p6-040): the second skips it busy and logs
+// campaigns: account plan busy, and the first places its step once. Contacts',
 // linkedin's, tenancy's and campaigns' code and test helpers come from their builds, the files the
 // loader's modules import. It lives here: a module never imports a host. The replay of the recorded
 // histories is `pnpm -F worker test:replay`.
@@ -25,7 +27,7 @@ const { asRole, withTestDb } = await import("@whytide/db/testing");
 const platform = await import("@whytide/platform");
 const { hostActivity } = await import("../src/activities.ts");
 const { moduleLoaders } = await import("../src/modules.generated.ts");
-const { loadModules } = await import("../src/modules.ts");
+const { loadModules, startModules } = await import("../src/modules.ts");
 const { start } = await import("../src/start.ts");
 const { runWorkflow, withTestWorkflowEnvironment } = await import("../testing/index.ts");
 const built = (file: string) => new URL(`../../../modules/${file}`, import.meta.url).href;
@@ -44,9 +46,12 @@ const app = asRole("app");
 useHashSalt("test-salt-".repeat(4));
 linkedin.useLinkedinClient(app);
 tenancy.useTenancyClient(app);
-const log = platform.createLogger({ destination: platform.collectLogs().destination });
+const logs = platform.collectLogs();
+const log = platform.createLogger({ destination: logs.destination });
 const modules = moduleLoaders.filter(({ name }) => name === "campaigns");
 const loaded = await loadModules(modules);
+// campaigns' own lines, the plan's per account, to the collector, as the host binds them.
+await startModules(loaded, log);
 const activities = Object.fromEntries(
   [...loaded.activities].map(([name, definition]) => {
     return [name, hostActivity(name, definition, { client: app, log })];
@@ -357,4 +362,92 @@ test("through the host: a tick while a workspace's plan runs starts none for it,
       .delete()
       .catch(() => undefined);
   }
+});
+
+/**
+ * One attempt of the plan's activity, its body run as the host's wrapper runs it, with no Temporal:
+ * an attempt past PLAN_TIMEOUT that Temporal has given up on still runs so.
+ */
+function planAttempt(workspaceId: string, attempt: number): Promise<unknown> {
+  const definition = loaded.activities.get("campaigns_plan_accounts");
+  if (definition === undefined || definition.scope === "global")
+    throw new Error("no plan activity");
+  return definition.run(
+    { workspaceId },
+    {
+      workspaceId,
+      workflowId: `campaigns.plan:${workspaceId}:current`,
+      attempt,
+      tenant: (fn) => withTenant({ workspaceId, principal }, fn, { client: app }),
+    },
+  );
+}
+
+test("two plan attempts on one account at once: the second skips it busy, logs campaigns: account plan busy with the account and starts no sender; the first places the step once and starts the sender", async () => {
+  const [a] = await tenancy.createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const sender = await account(workspaceId);
+  setClocks(THURSDAY);
+  const step = await stepOf(workspaceId, sender, "plan-busy", {
+    actionType: "message",
+    status: "scheduled",
+    dueAt: new Date(THURSDAY.getTime() - HOUR_MS),
+  });
+  const starts: WorkflowStart[] = [];
+  const unbind = platform.bindWorkflowStarter({
+    start: async (request) => {
+      starts.push(request);
+      return { started: true };
+    },
+  });
+  after(unbind);
+  const linesOf = (msg: string) =>
+    logs.lines().filter((line) => line.msg === msg && line.sender_account_id === sender);
+  // The step's row held by a transaction of the test: the first attempt takes the account's lock,
+  // then waits on the row to place its time.
+  const locked = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  const holding = withTenant(
+    { workspaceId, principal },
+    async (tx) => {
+      await tx.stepExecution.update({ where: { id: step }, data: { attempt: 0 } });
+      locked.resolve();
+      await released.promise;
+    },
+    { client: app, timeout: 20_000 },
+  );
+  try {
+    await Promise.race([locked.promise, holding]);
+    const first = planAttempt(workspaceId, 1);
+    // The first attempt past its lock: its write of the step waits on the test's row.
+    const deadline = Date.now() + 20_000;
+    for (;;) {
+      const [row] = await app.$queryRaw<{ waiting: number }[]>`
+        SELECT count(*)::int AS waiting FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND query LIKE '%UPDATE%step_executions%'`;
+      if ((row?.waiting ?? 0) > 0) break;
+      if (Date.now() > deadline) throw new Error("the first attempt never waited on the step");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    assert.deepEqual(await planAttempt(workspaceId, 2), { accounts: 1, placed: 0 });
+    assert.equal(linesOf("campaigns: account plan busy").length, 1);
+    assert.deepEqual(linesOf("campaigns: account planned"), []);
+    assert.deepEqual(starts, [], "the busy attempt starts no sender");
+    released.resolve();
+    await holding;
+    assert.deepEqual(await first, { accounts: 1, placed: 1 });
+  } finally {
+    released.resolve();
+    await holding.catch(() => undefined);
+  }
+  const placed = await app.stepExecution.findUniqueOrThrow({ where: { id: step } });
+  assert.ok(
+    placed.scheduledFor && placed.scheduledFor >= THURSDAY && placed.scheduledFor < WINDOW_END,
+  );
+  assert.equal(placed.quotaDay, TODAY);
+  assert.deepEqual(starts, [senderStart(workspaceId, sender)]);
+  assert.equal(linesOf("campaigns: account planned").length, 1);
+  assert.equal(linesOf("campaigns: account plan busy").length, 1);
 });

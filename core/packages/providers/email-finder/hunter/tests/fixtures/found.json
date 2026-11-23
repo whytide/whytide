@@ -1,0 +1,16 @@
+{
+  "data": {
+    "first_name": "Ada",
+    "last_name": "Example",
+    "email": "ada@copper-harbor.example",
+    "score": 97,
+    "domain": "copper-harbor.example",
+    "accept_all": false,
+    "company": "Copper Harbor Labs",
+    "sources": [],
+    "verification": {
+      "date": "2026-11-01",
+      "status": null
+    }
+  }
+}

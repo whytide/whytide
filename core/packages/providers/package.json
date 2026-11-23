@@ -9,6 +9,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./mailbox/constants": {
+      "types": "./dist/mailbox/constants.d.ts",
+      "default": "./dist/mailbox/constants.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
@@ -23,12 +27,14 @@
     "typecheck": "node ../db/src/cli.ts generate && node _pattern/generate.ts && tsc -b",
     "lint": "node ../../../tools/lint/lint.ts .",
     "test": "node ../db/src/cli.ts generate && node _pattern/generate.ts && tsc -b && APP_ENV=test node --test tests/*.test.ts",
+    "test:browser": "node ../db/src/cli.ts generate && node _pattern/generate.ts && tsc -b && APP_ENV=test node --test \"browser/playwright/tests/*.test.ts\"",
     "test:contract": "node ../db/src/cli.ts generate && node _pattern/generate.ts && tsc -b && APP_ENV=test node --test \"*/tests/*.test.ts\" \"*/*/tests/*.test.ts\"",
     "test:safety": "node ../db/src/cli.ts generate && node _pattern/generate.ts && tsc -b && APP_ENV=test node --test \"tests/safety/*.test.ts\"",
     "generate": "node _pattern/generate.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.79",
+    "@ai-sdk/openai": "4.0.93",
     "@ai-sdk/provider": "4.0.27",
     "@aws-sdk/client-s3": "3.1151.0",
     "@aws-sdk/s3-request-presigner": "3.1151.0",
@@ -37,6 +43,7 @@
     "ai": "7.0.139",
     "better-auth": "1.7.8",
     "nodemailer": "10.1.7",
+    "playwright-core": "1.64.1",
     "zod": "4.6.7"
   }
 }

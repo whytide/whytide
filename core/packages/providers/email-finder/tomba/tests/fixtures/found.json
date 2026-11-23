@@ -1,0 +1,17 @@
+{
+  "data": {
+    "email": "ada@copper-harbor.example",
+    "first_name": "Ada",
+    "last_name": "Example",
+    "company": "Copper Harbor Labs",
+    "position": "Synthetic",
+    "country": "GB",
+    "score": 100,
+    "accept_all": false,
+    "verification": {
+      "date": "2026-11-01",
+      "status": null
+    },
+    "sources": []
+  }
+}

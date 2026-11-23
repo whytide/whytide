@@ -2,13 +2,15 @@
 // through its tenantClient, so another workspace's rows never come: newest first, at most
 // ENROLLMENTS_SHOWN, each with its steps by position and its sender account's time zone, which
 // linkedin's findSenderAccount answers: null without a sender, and for an account linkedin no longer
-// holds. Ids, codes and instants only: no message text, no provider reference.
+// holds; and its campaign's name, empty for the seeded campaign, and its pause (gamma-p3-060). Ids,
+// codes and instants only, and the campaign's name: no message text, no provider reference.
 import { tenantClient } from "@whytide/db";
 import { findSenderAccount, errors as linkedinErrors } from "@whytide/linkedin";
 import { isAppError } from "@whytide/platform";
 import {
   type ActionType,
   ENROLLMENTS_SHOWN,
+  type EnrollmentPauseReason,
   type EnrollmentStatus,
   type ExitReason,
   type StepStatus,
@@ -36,6 +38,9 @@ export type PersonEnrollment = {
   readonly endedAt: Date | null;
   readonly templateId: string;
   readonly templateVersion: number;
+  readonly campaignName: string;
+  readonly pausedReason: EnrollmentPauseReason | null;
+  readonly pausedUntil: Date | null;
   readonly timeZone: string | null;
   readonly steps: readonly EnrolledStep[];
 };
@@ -68,9 +73,17 @@ export async function enrollmentsOf(personId: string): Promise<PersonEnrollment[
       endedAt: true,
       templateId: true,
       templateVersion: true,
+      pausedReason: true,
+      pausedUntil: true,
       senderAccountId: true,
     },
   });
+  // Their campaigns' names in a query of their own; none for the seeded one before its row.
+  const campaigns = await tenantClient.campaign.findMany({
+    where: { keyRef: { in: [...new Set(rows.map(({ templateId }) => templateId))] } },
+    select: { keyRef: true, name: true },
+  });
+  const names = new Map(campaigns.map(({ keyRef, name }) => [keyRef, name]));
   // Their steps in a query of their own: the tenant client refuses a relation in a query.
   const stepRows = await tenantClient.stepExecution.findMany({
     where: { enrollmentId: { in: rows.map(({ id }) => id) } },
@@ -87,6 +100,7 @@ export async function enrollmentsOf(personId: string): Promise<PersonEnrollment[
   }
   return rows.map(({ senderAccountId, ...enrollment }) => ({
     ...enrollment,
+    campaignName: names.get(enrollment.templateId) ?? "",
     timeZone: senderAccountId === null ? null : (zones.get(senderAccountId) ?? null),
     steps: steps.get(enrollment.id) ?? [],
   }));

@@ -2,7 +2,9 @@
 // on the tenant client alone: a requested draft and its event, the reads, a member's edit, a
 // regeneration, the workflow's failure mark and the person's erasure; writeDraft writes the rest
 // (write.ts). A draft is `drafting` only until its writer ends, and never again. The routes read
-// and change a lead's drafts only: a sequence step's (step.ts) changes through approvals' path.
+// and change a lead's drafts only: a sequence step's (step.ts) changes through approvals' path. A
+// lead's draft may be asked as a kind (gamma-p3-070), an email's first or follow-up among them,
+// which its regeneration keeps; a first email's edit may change its subject.
 import { errors as contactsErrors, getLead } from "@whytide/contacts";
 import { outboxWriter, tenantClient } from "@whytide/db";
 import {
@@ -21,7 +23,8 @@ import type { DRAFT_KINDS } from "../../schemas/drafts.ts";
 import { CHANNELS, type Channel } from "../../schemas/writer.ts";
 import { requirePassingText } from "../gates/check-text.ts";
 import { hardLimitOf } from "../gates/index.ts";
-import type { StepDraftEnd } from "./constants.ts";
+import { APPROVAL_TEXT_MAX, type StepDraftEnd, WRITTEN_STEP_KINDS } from "./constants.ts";
+import { kindFits, writtenKindOf } from "./kinds.ts";
 import type { DraftStatus } from "./write.ts";
 
 /** A draft as the routes read it (schemas/drafts.ts); the JSON columns as stored. */
@@ -31,10 +34,14 @@ export type Draft = {
   readonly channel: Channel;
   readonly kind: (typeof DRAFT_KINDS)[number];
   readonly status: DraftStatus;
+  readonly stepKey: string | null;
+  readonly stepKind: string | null;
   readonly plan: unknown;
   readonly text: string | null;
   readonly editedText: string | null;
   readonly editedAt: Date | null;
+  readonly subject: string | null;
+  readonly editedSubject: string | null;
   readonly modelId: string | null;
   readonly promptVersion: number | null;
   readonly dossierHash: string | null;
@@ -46,15 +53,27 @@ export type Draft = {
 };
 
 const id = z.string().min(1).max(64);
-const createDraftInput = z.object({ personId: id, channel: z.enum(CHANNELS) });
-const requestDraftInput = createDraftInput.extend({ replacesId: id.optional() });
-const editDraftInput = z.object({ editedText: z.string().trim().min(1).max(4_000) });
+/** The kind fits the channel (kinds.ts): none for a note. */
+const createDraftInput = z
+  .object({
+    personId: id,
+    channel: z.enum(CHANNELS),
+    stepKind: z.enum(WRITTEN_STEP_KINDS).optional(),
+  })
+  .refine(({ channel, stepKind }) => stepKind === undefined || kindFits(stepKind, channel), {
+    path: ["stepKind"],
+  });
+const requestDraftInput = createDraftInput.safeExtend({ replacesId: id.optional() });
+const editDraftInput = z.object({
+  editedText: z.string().trim().min(1).max(APPROVAL_TEXT_MAX),
+  editedSubject: z.string().trim().max(APPROVAL_TEXT_MAX).optional(),
+});
 
-/** A new `drafting` draft of the person on the channel, for writeDraft to write. */
+/** A new `drafting` draft of the person on the channel, as the kind when given, for writeDraft. */
 export async function createDraft(input: z.input<typeof createDraftInput>): Promise<Draft> {
-  const { personId, channel } = parse(createDraftInput, input);
+  const { personId, channel, stepKind = null } = parse(createDraftInput, input);
   const { workspaceId } = currentTenant();
-  const data = { id: newId(ids.message_draft), workspaceId, personId, channel };
+  const data = { id: newId(ids.message_draft), workspaceId, personId, channel, stepKind };
   return tenantClient.messageDraft.create({ data });
 }
 
@@ -64,9 +83,9 @@ export async function createDraft(input: z.input<typeof createDraftInput>): Prom
  * qualified or not; dossier_lead_not_found for a person without one.
  */
 export async function requestDraft(input: z.input<typeof requestDraftInput>): Promise<Draft> {
-  const { personId, channel, replacesId } = parse(requestDraftInput, input);
+  const { personId, channel, stepKind, replacesId } = parse(requestDraftInput, input);
   await requireLead(personId);
-  const draft = await createDraft({ personId, channel });
+  const draft = await createDraft({ personId, channel, ...(stepKind && { stepKind }) });
   const { workspaceId, principal } = currentTenant();
   const payload = { workspaceId, draftId: draft.id, personId, userId: principal.userId };
   const event = replacesId === undefined ? payload : { ...payload, replacesId };
@@ -95,20 +114,36 @@ export async function listDrafts(personId: string): Promise<Draft[]> {
 }
 
 /**
- * The member's own text: the draft becomes `edited`, which no write or regeneration changes.
- * draft_not_editable while it is being written; messaging_input_invalid for an empty text or one
- * above the channel's hard limit (hardLimitOf); draft_text_refused, with the gates' issues, for a
- * text checkText refuses (beta-p3-020): a placeholder, a red line or a colleague's signal.
+ * The member's own text, and a first email's subject: the draft becomes `edited`, which no write or
+ * regeneration changes. draft_not_editable while it is being written; messaging_input_invalid for
+ * an empty text or one above the channel's hard limit (hardLimitOf); draft_subject_not_allowed for
+ * a subject on any draft but a first email; draft_text_refused, with the gates' issues, for a text
+ * or subject checkText refuses (beta-p3-020, gamma-p3-070).
  */
-export async function editDraft(draftId: string, input: { editedText: string }): Promise<Draft> {
-  const { editedText } = parse(editDraftInput, input);
+export async function editDraft(
+  draftId: string,
+  input: { editedText: string; editedSubject?: string },
+): Promise<Draft> {
+  const { editedText, editedSubject } = parse(editDraftInput, input);
   const draft = await editable(draftId);
   if (editedText.length > hardLimitOf(draft.channel)) {
     throw new AppError(errors.messaging_input_invalid, { details: { fields: ["editedText"] } });
   }
+  const stepKind = writtenKindOf(draft) ?? undefined;
+  const first = draft.channel === "email" && stepKind === "email_first";
+  if (editedSubject !== undefined && !first) throw new AppError(errors.draft_subject_not_allowed);
+  const subject = first ? (editedSubject ?? draft.editedSubject ?? draft.subject ?? "") : null;
   const { personId, channel, kind } = draft;
-  await requirePassingText(editedText, { personId, channel, kind });
-  const data = { status: "edited" as const, editedText, editedAt: new Date() };
+  const email = channel === "email" ? { subject, draftId: draft.id } : {};
+  await requirePassingText(editedText, {
+    personId,
+    channel,
+    kind,
+    ...(stepKind && { stepKind }),
+    ...email,
+  });
+  const subjectEdit = first ? { editedSubject: subject === draft.subject ? null : subject } : {};
+  const data = { status: "edited" as const, editedText, editedAt: new Date(), ...subjectEdit };
   return tenantClient.messageDraft.update({ where: { id: draft.id }, data });
 }
 
@@ -117,8 +152,9 @@ export async function editDraft(draftId: string, input: { editedText: string }):
  * (requestDraft). draft_not_editable while this one is being written.
  */
 export async function regenerateDraft(draftId: string): Promise<Draft> {
-  const { id: replacesId, personId, channel } = await editable(draftId);
-  return requestDraft({ personId, channel, replacesId });
+  const { id: replacesId, personId, channel, stepKind } = await editable(draftId);
+  const kind = WRITTEN_STEP_KINDS.find((written) => written === stepKind);
+  return requestDraft({ personId, channel, ...(kind && { stepKind: kind }), replacesId });
 }
 
 /**

@@ -7,7 +7,9 @@
 // moves both clocks to WAIT_RUN_MS before its end, and the workflow's own timer runs the rest. A lead
 // is written as an enrollment leaves it, its steps as the queue, the owner's approval (the item and
 // the frozen draft) and the plan leave them; credits' price list as the api's start writes it, from
-// campaigns' prices in a process of its own, and the organization's allowance.
+// campaigns' prices in a process of its own, and the organization's allowance. The workspace's
+// Owner, OWNER, owns the seeded campaign and the connected account it sends from (gamma-p6-040);
+// member() adds another member with an account of their own.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -196,22 +198,36 @@ export async function writePrices(variables: Record<string, string>): Promise<vo
 
 export type Sender = Awaited<ReturnType<typeof sender>>;
 
-/**
- * A workspace with `allowance` credits at the prices `variables` set, its owner's connected account
- * the fake knows, sending open, and its leads, steps and runs.
- */
-export async function sender(allowance = 100, variables: Record<string, string> = {}) {
-  await writePrices(variables);
-  const [{ organization, workspace }] = await tenancy.createTwoWorkspaces();
-  const workspaceId: string = workspace.id;
-  await credits.grantAllowance([organization.id], allowance);
+/** A connected account of `ownerUserId` the fake knows, in the workspace, with room in its limits. */
+async function connectedAccount(workspaceId: string, ownerUserId: string) {
   const ref = `fake-account-${randomUUID()}`;
   fake.emitWebhook("account.connected", ref);
-  const options = { ownerUserId: OWNER, providerAccountRef: ref, workingHours: ALWAYS };
+  const options = { ownerUserId, providerAccountRef: ref, workingHours: ALWAYS };
   const { id: accountId } = await linkedin.createConnectedAccount(workspaceId, options);
   // The highest targets: room for a test's steps in the day's limits.
   const targets = { inviteTarget: 15, messageTarget: 40 };
   await app.senderAccount.update({ where: { id: accountId }, data: targets });
+  return { accountId: accountId as string, ref };
+}
+
+/**
+ * A workspace with `allowance` credits at the prices `variables` set, OWNER its Owner (an account
+ * sends while its owner is an active member, gamma-p6-040), OWNER's connected account the fake
+ * knows, sending open, and its leads, steps and runs; another organization's workspace beside it.
+ */
+export async function sender(allowance = 100, variables: Record<string, string> = {}) {
+  await writePrices(variables);
+  const { organization, workspace } = await tenancy.createOrganizationWithWorkspace();
+  const workspaceId: string = workspace.id;
+  const user = { id: OWNER, email: `${OWNER}@example.com`, displayName: "Sender Owner" };
+  await app.user.upsert({ where: { id: OWNER }, create: user, update: {} });
+  await tenancy.createMembership({ userId: OWNER, workspaceId, role: "Owner" });
+  // The other workspace with its own Owner, as createTwoWorkspaces made them: the ticks count both.
+  const other = await tenancy.createOrganizationWithWorkspace();
+  const { id: otherOwner } = await tenancy.createUser();
+  await tenancy.createMembership({ userId: otherOwner, workspaceId: other.workspace.id });
+  await credits.grantAllowance([organization.id], allowance);
+  const { accountId, ref } = await connectedAccount(workspaceId, OWNER);
   await linkedin.openSending();
   const run: Tenant = (fn) => withTenant({ workspaceId, principal }, fn, { client: app });
 
@@ -253,15 +269,21 @@ export async function sender(allowance = 100, variables: Record<string, string> 
     return { personId, memberRef, enrollmentId: enrollment.id, steps };
   }
 
-  /** The step approved by the owner with `text` (a connection request's note), `scheduled`. */
+  /**
+   * The step approved by its account's owner with `text` (a connection request's note), `scheduled`.
+   */
   async function approve(id: string, approved: string): Promise<void> {
     const step = await app.stepExecution.findUniqueOrThrow({ where: { id } });
-    const { personId, stepKey } = step;
+    const { personId, stepKey, senderAccountId } = step;
+    const { ownerUserId } = await app.senderAccount.findUniqueOrThrow({
+      where: { id: senderAccountId ?? "" },
+    });
     const draft = { workspaceId, personId, stepExecutionId: id, stepKey, status: "approved" };
     const draftId = await createStepDraft({ ...draft, text: approved });
     const approvalItemId = await createApprovalItem({
-      ...{ workspaceId, personId, senderAccountId: accountId, stepExecutionId: id, stepKey },
-      ...{ status: "approved", draftId, approvedContentHash: sha256(approved), decidedBy: OWNER },
+      ...{ workspaceId, personId, senderAccountId, stepExecutionId: id, stepKey },
+      ...{ status: "approved", draftId, approvedContentHash: sha256(approved) },
+      decidedBy: ownerUserId,
     });
     const dueAt = step.dueAt ?? new Date(now().getTime() - DAY_MS);
     const data = { status: "scheduled", approvalItemId, draftId, dueAt } as const;
@@ -295,18 +317,28 @@ export async function sender(allowance = 100, variables: Record<string, string> 
     return { ...enrolled, id };
   }
 
-  /** The sender's run to its end, `wrap` replacing activities' runs; its result and workflow id. */
-  async function send(wrap: Record<string, Wrap> = {}) {
-    const input = { workspaceId, accountId };
+  /**
+   * The sender's run of the account (OWNER's unless given) to its end, `wrap` replacing activities'
+   * runs; its result and workflow id.
+   */
+  async function send(wrap: Record<string, Wrap> = {}, account = accountId) {
+    const input = { workspaceId, accountId: account };
     const result = await runWorkflow<SenderRun>("campaigns_sender", input, {
       activities: activities(wrap),
     });
     return { result, workflowId };
   }
 
+  /** Another member of the workspace, a Member unless given, with a connected account. */
+  async function member(role: "Owner" | "Member" = "Member") {
+    const { id: userId } = await tenancy.createUser();
+    await tenancy.createMembership({ userId, workspaceId, role });
+    return { userId: userId as string, ...(await connectedAccount(workspaceId, userId)) };
+  }
+
   return {
     ...{ workspaceId, organizationId: organization.id as string, accountId, ref, run },
-    ...{ lead, approve, place, ready, send },
+    ...{ lead, approve, place, ready, send, member },
     plan: () => runWorkflow("campaigns_plan", { workspaceId }, { activities: activities({}) }),
     /** Activity `name` called directly, in a context of the test's. */
     call(name: string, input: object, tenant: Tenant = run): Promise<unknown> {

@@ -5,7 +5,9 @@
 // ever spent. The page opened from the header's balance: the balance and its period's end, the
 // week's numbers, by action and by vendor, and its usage; loading while its read is held, a read the
 // api fails with the code in words and a retry, the empty week; the cost line, loading while its
-// read is held, and a lead that cost nothing. Every text from its key; axe on each state.
+// read is held, and a lead that cost nothing; the prices card (gamma-p2-060), every priced action's
+// code and its PriceTag, a rise of e2e.batch announced by the e2e api's price-notice with its date,
+// in the light and the dark theme, then withdrawn. Every text from its key; axe on each state.
 import { AxeBuilder } from "@axe-core/playwright";
 import type { BrowserContext, Page } from "@playwright/test";
 import credits from "../../../modules/credits/messages/en.json" with { type: "json" };
@@ -97,6 +99,12 @@ const number = (page: Page, key: string) =>
     .locator("dl > div")
     .filter({ has: page.getByText(say(key), { exact: true }) })
     .locator("dd");
+
+/** A price as GET …/credits/prices answers it. */
+type Price = {
+  action: string;
+  next: { credits: string; unit: string; effectiveFrom: string } | null;
+};
 
 async function axe(page: Page) {
   const { violations } = await new AxeBuilder({ page }).analyze();
@@ -196,4 +204,66 @@ test("the lead page's cost line: loading while its read is held, then the lead's
   await page.goto(`/w/${WORKSPACE}/leads/${free}`);
   await expect(cost).toHaveText(say("credits.lead_cost.none"));
   await axe(page);
+});
+
+test("the prices card: every priced action's code and its PriceTag; during a notice, the coming price and its date, and a rise to another unit in the kit's words; withdrawn, none; axe in the light and the dark theme", async ({
+  page,
+  signInAs,
+  baseURL,
+}) => {
+  await signInAs();
+  const card = page.getByRole("table", { name: say("credits.costs.prices.caption") });
+  const batch = card.locator("tbody tr").filter({ hasText: "e2e.batch" });
+  const coming = batch.getByText(/^From /);
+  const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  /** The route's prices, and the day e2e.batch's coming price applies from, as the page shows it. */
+  const read = async () => {
+    const answer = await page.request.get(`/api/v1/workspaces/${WORKSPACE}/credits/prices`);
+    expect(answer.status()).toBe(200);
+    const { prices } = (await answer.json()) as { prices: Price[] };
+    const next = prices.find(({ action }) => action === "e2e.batch")?.next;
+    // In the zone of the web and the browser, this machine's.
+    const day = new Intl.DateTimeFormat("en", { dateStyle: "medium" });
+    return { prices, next, from: day.format(new Date(next?.effectiveFrom ?? "")) };
+  };
+  // A rise of e2e.batch, declared at 5 credits a lead, announced now for 30 days on; the declared
+  // list again withdraws it, as the e2e api's next start would.
+  await post(page, baseURL, "price-notice", { credits: "7.5" });
+  try {
+    const { prices, next, from } = await read();
+    expect(next?.credits).toBe("7.5");
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.goto(`/w/${WORKSPACE}/credits`);
+    const title = say("credits.costs.prices.title");
+    await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
+    await expect(card.getByRole("columnheader")).toHaveText([
+      say("credits.costs.prices.column_action"),
+      say("credits.costs.prices.column_price"),
+    ]);
+    await expect(card.locator("tbody code")).toHaveText(prices.map(({ action }) => action));
+    await expect(batch.getByText("5 credits per lead", { exact: true })).toBeVisible();
+    await expect(coming).toHaveText(`From ${from}: 7.5 credits per lead`);
+    await axe(page);
+    const light = await background();
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect.poll(background).not.toBe(light);
+    await axe(page);
+
+    // Another unit counts as a rise: a new notice, its unit named in the kit's words.
+    await page.emulateMedia({ colorScheme: "light" });
+    await post(page, baseURL, "price-notice", { credits: "2", unit: "batch" });
+    const other = await read();
+    expect(other.next).toMatchObject({ credits: "2", unit: "batch" });
+    const later = (instant?: string) => Date.parse(instant ?? "");
+    expect(later(other.next?.effectiveFrom)).toBeGreaterThan(later(next?.effectiveFrom));
+    await page.reload();
+    await expect(batch.getByText("5 credits per lead", { exact: true })).toBeVisible();
+    await expect(coming).toHaveText(`From ${other.from}: 2 credits per batch`);
+  } finally {
+    await post(page, baseURL, "price-notice", {});
+  }
+
+  await page.reload();
+  await expect(batch.getByText("5 credits per lead", { exact: true })).toBeVisible();
+  await expect(coming).toHaveCount(0);
 });

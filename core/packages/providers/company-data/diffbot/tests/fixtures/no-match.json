@@ -1,0 +1,11 @@
+{
+  "version": 3,
+  "hits": 0,
+  "kgversion": "477",
+  "request_ctx": {
+    "query": { "type": "Organization", "name": "Nobody Seeded" },
+    "query_ctx": { "search": "OFF" }
+  },
+  "data": [],
+  "errors": []
+}

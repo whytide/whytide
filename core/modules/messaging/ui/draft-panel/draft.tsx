@@ -8,7 +8,7 @@
 // their sources, loading while the browser reads them, and the gates, pass or fail with their
 // reasons, which belong to the generated text, an edit being unchecked. In the history, on a
 // timeline: its channel, time, mark and text, and its model and prompt version while it is hovered
-// or its time has the keyboard's focus.
+// or its time has the keyboard's focus. An email's subject above its body (gamma-p3-070).
 "use client";
 
 import { Badge, type BadgeTone, Button, Meter, Skeleton, TextArea } from "@whytide/ui";
@@ -19,6 +19,7 @@ import {
   Flag,
   History,
   type LucideIcon,
+  Mail,
   MessageCircleQuestion,
   MessageSquare,
   PenLine,
@@ -48,10 +49,11 @@ type Props = {
   onRegenerate: () => void;
 };
 
-/** Each channel's icon, beside its words: an invitation's note, or a message. */
+/** Each channel's icon, beside its words: an invitation's note, a message, or an email. */
 export const CHANNEL_ICON: Record<Draft["channel"], LucideIcon> = {
   linkedin_note: UserPlus,
   linkedin_message: MessageSquare,
+  email: Mail,
 };
 /** A mark's colour and icon, beside its words: being written, flagged, failed or edited. */
 const MARK: Record<Draft["status"], [tone: BadgeTone, Icon: LucideIcon | undefined]> = {
@@ -68,6 +70,8 @@ const HEADING = "text-sm font-semibold text-ink";
 
 /** A text's length as the api counts it: UTF-16 units, as a textarea counts them, trimmed. */
 const lengthOf = (text: string) => text.trim().length;
+/** An email's subject, the member's else the writer's; null for none. */
+const subjectOf = (draft: Draft) => draft.editedSubject ?? draft.subject;
 
 /** A draft's mark as a badge in its colour, with its icon; none for a ready one. */
 function Mark({ status }: { status: Draft["status"] }) {
@@ -92,6 +96,7 @@ export function CurrentDraft(props: Props) {
   const [editing, setEditing] = useState<string>();
   const [saving, setSaving] = useState(false);
   const shown = draft.editedText ?? draft.text;
+  const subject = subjectOf(draft);
   const max = draft.maxCharacters;
   /** The count against the limit; a message's with the range its writer aims for. */
   const counter = (text: string) =>
@@ -171,6 +176,11 @@ export function CurrentDraft(props: Props) {
               </div>
             ) : (
               <>
+                {subject !== null && (
+                  <p className="max-w-prose font-semibold wrap-break-word text-ink">
+                    {t("subject", { subject })}
+                  </p>
+                )}
                 <p className="max-w-prose rounded-2xl rounded-es-md bg-surface px-4 py-3 text-[0.9375rem] leading-relaxed wrap-break-word whitespace-pre-wrap text-ink shadow-xs ring-1 ring-line">
                   {shown}
                 </p>
@@ -334,6 +344,7 @@ export function HistoryItem({ draft }: { draft: Draft }) {
   const format = useFormatter();
   const hint = useId();
   const shown = draft.editedText ?? draft.text;
+  const subject = subjectOf(draft);
   const { modelId, promptVersion } = draft;
   const Channel = CHANNEL_ICON[draft.channel];
   const at = format.dateTime(new Date(draft.createdAt), {
@@ -374,6 +385,9 @@ export function HistoryItem({ draft }: { draft: Draft }) {
         )}
         <Mark status={draft.status} />
       </p>
+      {subject !== null && (
+        <p className="font-medium wrap-break-word text-ink">{t("subject", { subject })}</p>
+      )}
       {shown !== null && (
         <p className="wrap-break-word whitespace-pre-wrap text-pretty text-ink-muted">{shown}</p>
       )}

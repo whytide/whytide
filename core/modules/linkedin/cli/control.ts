@@ -116,8 +116,9 @@ async function pauseOrUnpause(command: WorkspaceChange, print: Print): Promise<n
     print(`sender_account_not_found: ${account} in ${workspace.id}`);
     return EXIT.refused;
   }
-  if (result === "paused_by_tester") {
-    print(`paused_by_tester: ${what}`);
+  // A tester's pause and a removed member's are theirs to lift (gamma-p6-070): left as they are.
+  if (result === "paused_by_tester" || result === "paused_by_member_removed") {
+    print(`${result}: ${what}`);
     return EXIT.refused;
   }
   print(`${result}: ${what} ${on ? "paused" : "unpaused"}`);

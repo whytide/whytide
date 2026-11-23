@@ -5,7 +5,7 @@
 // and the save bar, which stays in view while the form has changes, with the line that says when the
 // fields last changed and by what, and Save, which PUTs every field and shows what the api answered:
 // the saved record, the fields at fault, or the failure with a retry. A pending draft's review is
-// draft-review.tsx.
+// draft-review.tsx; the documents' card, below the website's, documents-card.tsx.
 "use client";
 
 import {
@@ -31,6 +31,7 @@ import type {
   CompanyKnowledgeBody,
   CompanyKnowledgeResponse,
 } from "../../schemas/company-knowledge.ts";
+import { DocumentsCard } from "./documents-card.tsx";
 import { DraftReview } from "./draft-review.tsx";
 import { WebsiteFetch } from "./website-fetch.tsx";
 
@@ -166,6 +167,7 @@ export function CompanyForm({ workspace, initial }: { workspace: string; initial
           }
         />
       </div>
+      <DocumentsCard workspace={workspace} record={record} prepare={prepare} onRecord={setRecord} />
       {record.pendingDraft ? (
         <DraftReview
           workspace={workspace}

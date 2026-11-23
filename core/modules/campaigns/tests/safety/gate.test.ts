@@ -19,6 +19,7 @@ import {
 } from "@whytide/linkedin/testing";
 import { checkGate } from "../../domain/gate/gate.ts";
 import { holdForReply } from "../../domain/hold.ts";
+import { linkedinActionType } from "../../domain/steps/actions.ts";
 import { fixture } from "../fixtures.ts";
 
 withTestDb();
@@ -45,7 +46,8 @@ const sendThroughGate = (accountId: string, stepId: string) =>
         where: { id: stepId },
         select: { actionType: true, idempotencyKey: true },
       });
-      const reservation = await reserveSend({ accountId, actionType, idempotencyKey });
+      const action = linkedinActionType({ id: stepId, actionType });
+      const reservation = await reserveSend({ accountId, actionType: action, idempotencyKey });
       assert.ok("reservationId" in reservation, "a passed step is reserved");
     }
     return answer;

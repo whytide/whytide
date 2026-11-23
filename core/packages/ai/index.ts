@@ -6,7 +6,7 @@ import "./run/guard.ts";
 
 export * from "./call/call-agent.ts";
 export * from "./call/purge.ts";
-export { eraseDecisionRecords, rawPrompts } from "./call/records.ts";
+export { eraseDecisionRecords, eraseDecisionRecordsById, rawPrompts } from "./call/records.ts";
 export * from "./errors.ts";
 export * from "./grounding-sample/sample.ts";
 export { aiIds } from "./ids.ts";

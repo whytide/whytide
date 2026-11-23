@@ -68,7 +68,8 @@ async function fixtureOf(workspace: string, cookie: string) {
 test("the first sign-in of an invited email accepts the invite with an Owner membership; a second creates nothing", async () => {
   const app = asRole("app");
   const [a] = await createTwoWorkspaces();
-  await createInvite({ workspaceId: a.workspace.id, email: "new@example.test" });
+  const invite = { email: "new@example.test", role: "Owner", invitedBy: null } as const;
+  await createInvite({ workspaceId: a.workspace.id, ...invite });
   assert.equal((await signIn("New@Example.test")).status, 204);
   const user = await app.user.findUniqueOrThrow({ where: { email: "new@example.test" } });
   const memberships = await app.membership.findMany({ where: { userId: user.id } });

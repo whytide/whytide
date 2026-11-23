@@ -2,12 +2,14 @@
 // steps keep their times, which are placed again, which due steps get a time today within the
 // capacity and one touch per person a day, and the times, drawn at random over the free parts of
 // the window and kept a gap from each other and from every kept time. account.ts reads the rows and
-// writes the answers.
+// writes the answers. The candidates' order inside a type is byPriority (gamma-p5-070), the one
+// comparison of both plans: the mailbox's plan (gamma-p4-010) takes it after its own type order.
 import { randomTimesInWindow } from "@whytide/platform";
 import {
   ACTION_ORDER,
   MIN_ACTION_GAP_MS,
   type PlanAction,
+  PRIORITY_ACTIONS,
   TOUCHES_PER_PERSON_PER_DAY,
 } from "./constants.ts";
 
@@ -21,6 +23,15 @@ export type PlanStep = {
   readonly scheduledFor: Date | null;
   readonly quotaDay: string | null;
 };
+
+/** A due step as both plans rank it inside a type: its person, due time, position and id. */
+export type RankedStep = Pick<PlanStep, "id" | "personId" | "position" | "dueAt">;
+
+/**
+ * Each person's priority, qualification's leadPriorities (gamma-p5-070), by person id; a person
+ * missing has none.
+ */
+export type Priorities = ReadonlyMap<string, number>;
 
 /** What the account may still send today (linkedin's remainingToday), all within `actions`. */
 export type Capacity = {
@@ -56,8 +67,17 @@ const CAPACITY_OF = {
   invite: "invites",
 } as const satisfies Record<PlanAction, keyof Capacity>;
 
-/** Step 4: kept, stale and candidates; a step not due yet, or with no due time, is no candidate. */
-export function sortSteps(steps: readonly PlanStep[], at: Date, today: string): SortedSteps {
+/**
+ * Step 4: kept, stale and candidates; a step not due yet, or with no due time, is no candidate. The
+ * candidates by byOrder: `priorities` changes their order inside messages and inside invites only,
+ * never which steps keep, lose or may get a time.
+ */
+export function sortSteps(
+  steps: readonly PlanStep[],
+  at: Date,
+  today: string,
+  priorities: Priorities,
+): SortedSteps {
   const kept: PlanStep[] = [];
   const stale: PlanStep[] = [];
   const unplaced: PlanStep[] = [];
@@ -66,10 +86,30 @@ export function sortSteps(steps: readonly PlanStep[], at: Date, today: string): 
     else if (isKept(step, at, today)) kept.push(step);
     else stale.push(step);
   }
-  const due = (step: PlanStep) => step.dueAt !== null && step.dueAt <= at;
-  const candidates = [...unplaced, ...stale].filter(due).sort(byOrder);
+  const due = (step: PlanStep) => isDue(step, at);
+  const candidates = [...unplaced, ...stale].filter(due).sort(byOrder(priorities));
   return { kept, stale, candidates };
 }
+
+/** Whether the step is due at `at`: it has a due time, and that time has come. */
+export const isDue = (step: Pick<PlanStep, "dueAt">, at: Date): boolean =>
+  step.dueAt !== null && step.dueAt <= at;
+
+/**
+ * The order inside one type, the same on both plans (gamma-p5-070, RB-5.3.2): the higher priority
+ * first, a person with none after every person with one; then, as beta's, byDue. Equal priorities
+ * keep the old order, so a plan stays the same for the same rows.
+ */
+export function byPriority(priorities: Priorities): (a: RankedStep, b: RankedStep) => number {
+  return (a, b) =>
+    comparePriorities(priorities.get(a.personId), priorities.get(b.personId)) || byDue(a, b);
+}
+
+/** Beta's order inside a type: by due time, then position, then id. */
+export const byDue = (a: RankedStep, b: RankedStep): number =>
+  (a.dueAt?.getTime() ?? 0) - (b.dueAt?.getTime() ?? 0) ||
+  a.position - b.position ||
+  compareIds(a.id, b.id);
 
 /**
  * Steps 5 to 7: the kept steps within each type's capacity and the actions left, the latest past
@@ -179,11 +219,24 @@ function isKept(step: PlanStep, at: Date, today: string): boolean {
   return step.quotaDay === today && behind < MIN_ACTION_GAP_MS;
 }
 
-/** Messages, then withdrawals, then invites; within a type by due time, position, then id. */
-function byOrder(a: PlanStep, b: PlanStep): number {
-  const action = ACTION_ORDER.indexOf(a.actionType) - ACTION_ORDER.indexOf(b.actionType);
-  const due = (a.dueAt?.getTime() ?? 0) - (b.dueAt?.getTime() ?? 0);
-  return action || due || a.position - b.position || compareIds(a.id, b.id);
+/**
+ * Messages, then withdrawals, then invites (ACTION_ORDER); inside messages and inside invites by
+ * byPriority, inside withdrawals by byDue (PRIORITY_ACTIONS).
+ */
+function byOrder(priorities: Priorities): (a: PlanStep, b: PlanStep) => number {
+  const ranked = byPriority(priorities);
+  return (a, b) => {
+    const action = ACTION_ORDER.indexOf(a.actionType) - ACTION_ORDER.indexOf(b.actionType);
+    if (action !== 0) return action;
+    return PRIORITY_ACTIONS.has(a.actionType) ? ranked(a, b) : byDue(a, b);
+  };
+}
+
+/** The higher priority first; none after any; two of none, or two equal, tie. */
+function comparePriorities(a: number | undefined, b: number | undefined): number {
+  if (a === undefined) return b === undefined ? 0 : 1;
+  if (b === undefined) return -1;
+  return b - a;
 }
 
 const byTime = (a: PlanStep, b: PlanStep) =>

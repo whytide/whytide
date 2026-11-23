@@ -10,12 +10,84 @@ Origin: {{appOrigin}}
 
 { "kind": "post_engagers", "config": { "postUrl": "https://www.linkedin.com/feed/update/urn:li:activity:7250000000000000000" }, "label": "Launch post", "senderAccountId": "{{senderAccountId}}" }
 
-### GET /v1/workspaces/{workspaceId}/signals/sources: the workspace's sources, newest first, each with its next fire times (alpha-p8-040), runOpen, one of its runs running or waiting (alpha-p10-110), and openRun, that run's { id, status } or null (fix-run-wait)
+### POST …/signals/sources, a topic (gamma-p5-020): the posts that hold the phrase, and their author, commenters and reactors as roles keeps them; stored canonical, roles in order; 201
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "kind": "topic_engagement", "config": { "phrase": "revenue operations", "roles": ["commenter", "author"] }, "label": "RevOps topic", "senderAccountId": "{{senderAccountId}}" }
+
+### POST …/signals/sources, the sender account's own posts (gamma-p5-020): an empty config; 201
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "kind": "my_post_engagement", "config": {}, "label": "My posts", "senderAccountId": "{{senderAccountId}}" }
+
+### POST …/signals/sources, a competitor's page (gamma-p5-025): its posts' engagers; the page stored as https://www.linkedin.com/company/<id>, the name's words one space apart; 201
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "kind": "competitor_engagement", "config": { "companyUrl": "https://linkedin.com/company/example-rival/", "companyName": "Example Rival" }, "label": "Rival's page", "senderAccountId": "{{senderAccountId}}" }
+
+### POST …/signals/sources, a creator (gamma-p5-025): their posts' engagers; the profile stored as https://www.linkedin.com/in/<id>; 201
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "kind": "creator_engagement", "config": { "profileUrl": "https://www.linkedin.com/in/example-creator" }, "label": "A creator", "senderAccountId": "{{senderAccountId}}" }
+
+### POST …/signals/sources, a competitor or creator source once the sender account has SIGNALS_MAX_TRACKED_PER_ACCOUNT (10) enabled: 400 signal_tracked_limit, details.limit 10
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "kind": "creator_engagement", "config": { "profileUrl": "https://www.linkedin.com/in/eleventh-creator" }, "label": "One too many", "senderAccountId": "{{senderAccountId}}" }
+
+### POST …/signals/sources once SIGNALS_MAX_ENABLED_SOURCES (10) sources in no agent are enabled (gamma-p5-045): 400 signal_sources_limit, details.limit 10; a new source is in no agent, so an agent's enabled sources do not count
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "kind": "topic_engagement", "config": { "phrase": "sales engagement" }, "label": "One too many in no agent", "senderAccountId": "{{senderAccountId}}" }
+
+### POST …/signals/sources, a phrase of 6 words: 400 signal_config_invalid, details.fields ["config.phrase"]
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "kind": "topic_engagement", "config": { "phrase": "one two three four five six" }, "label": "Too long", "senderAccountId": "{{senderAccountId}}" }
+
+### POST …/signals/sources, a phrase on a special-category theme: 400 signal_topic_blocked, details.fields ["config.phrase"]; nothing stored
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "kind": "topic_engagement", "config": { "phrase": "mental health" }, "label": "Refused", "senderAccountId": "{{senderAccountId}}" }
+
+### POST …/signals/sources, a Web research source (gamma-wr-030): what to look for on the web, with no senderAccountId, which this kind refuses (400 signal_sender_account_invalid, details.fields ["senderAccountId"]); focus 3 to 300 characters, region up to 100, up to 3 distinct ISO 639-1 languages, up to 5 https start pages (not LinkedIn's, not a social network's); 201 with senderAccountId null, cadence research and everyDays
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "kind": "web_research", "config": { "focus": "makers of packaging for food", "region": "the northern coast", "languages": ["en", "pt"], "startPages": ["https://directory.example/members"] }, "label": "Packaging makers" }
+
+### GET /v1/workspaces/{workspaceId}/signals/sources: the workspace's sources, newest first, each with its next fire times (alpha-p8-040), runOpen, one of its runs running or waiting (alpha-p10-110), openRun, that run's { id, status } or null (fix-run-wait), and playbook, its agent { id, name }, or null for a source in no agent (gamma-p5-045; link one with gamma-p3-040-playbooks.http's PUT …/playbooks/{playbookId}/sources)
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources
 Accept: application/json
 Cookie: {{sessionCookie}}
 
-### PATCH /v1/workspaces/{workspaceId}/signals/sources/{id}: enables, disables or relabels a source
+### PATCH /v1/workspaces/{workspaceId}/signals/sources/{id}: enables, disables or relabels a source, or changes the config of a Web research source (below)
 PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}
 Content-Type: application/json
 Cookie: {{sessionCookie}}
@@ -23,12 +95,33 @@ Origin: {{appOrigin}}
 
 { "enabled": false, "label": "Launch post, paused" }
 
+### PATCH …/signals/sources/{id}, a new config for a Web research source (gamma-wr-030): the kind's schema reads it, the result is stored and answered; any other kind's config is 400 signal_config_invalid, details.fields ["config"]
+PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "config": { "focus": "brokers of shipping", "languages": ["es"] } }
+
+### PATCH …/signals/sources/{id}, enabling a source once its group, its agent's sources or those in no agent, has SIGNALS_MAX_ENABLED_SOURCES (10) enabled (gamma-p5-045): 400 signal_sources_limit, details.limit 10; the other groups do not count
+PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "enabled": true }
+
 ### GET /v1/workspaces/{workspaceId}/signals/sources/{id}/runs: the source's runs, newest first
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}/runs
 Accept: application/json
 Cookie: {{sessionCookie}}
 
-### DELETE /v1/workspaces/{workspaceId}/signals/sources/{id}: deletes the source and its runs; 204
+### GET /v1/workspaces/{workspaceId}/signals/sources/{id}/research-plan: the last plan of a Web research source (gamma-wr-041): its words by language, its source types' ids and when it was made; {"plan": null} before the first plan; 404 signal_source_not_found for another workspace's source
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}/research-plan
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### DELETE /v1/workspaces/{workspaceId}/signals/sources/{id}: deletes the source and its runs, and its agent's link (gamma-p5-045); 204
 DELETE {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}
 Cookie: {{sessionCookie}}
 Origin: {{appOrigin}}

@@ -1,0 +1,54 @@
+{
+  "rate-limited": {
+    "type": "ErrorResponse",
+    "error": {
+      "id": "00000000-0000-4000-8000-000000000000",
+      "status": 429,
+      "code": "RATE_LIMITED",
+      "detail": "Request rate limit exceeded for plan.",
+      "meta": {
+        "component": "rate_limiter"
+      }
+    },
+    "time": 1790000000
+  },
+  "quota-limited": {
+    "type": "ErrorResponse",
+    "error": {
+      "id": "00000000-0000-4000-8000-000000000000",
+      "status": 429,
+      "code": "QUOTA_LIMITED",
+      "detail": "Request quota limit exceeded for plan.",
+      "meta": {
+        "component": "rate_limiter"
+      }
+    },
+    "time": 1790000000
+  },
+  "token-invalid": {
+    "type": "ErrorResponse",
+    "error": {
+      "id": "00000000-0000-4000-8000-000000000000",
+      "status": 422,
+      "code": "SUBSCRIPTION_TOKEN_INVALID",
+      "detail": "The provided subscription token is invalid.",
+      "meta": {
+        "component": "authentication"
+      }
+    },
+    "time": 1790000000
+  },
+  "validation": {
+    "type": "ErrorResponse",
+    "error": {
+      "id": "00000000-0000-4000-8000-000000000000",
+      "status": 422,
+      "code": "VALIDATION",
+      "detail": "Unable to validate request parameter(s).",
+      "meta": {
+        "component": "validation"
+      }
+    },
+    "time": 1790000000
+  }
+}

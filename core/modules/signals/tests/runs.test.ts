@@ -18,8 +18,10 @@ import {
 import {
   blocksOf,
   cutOf,
+  reserveCompanyCredit,
   reserveCredits,
   reserveEngagerCredit,
+  settleCompanyCredit,
   settleEngagerCredit,
 } from "../domain/runs.ts";
 import { prices } from "../prices.ts";
@@ -188,4 +190,67 @@ test("a run started before beta-p1-090 still reserves its blocks: signals.engage
   ]);
   recordingCredits(new AppError(creditsCodes.insufficient_credits));
   assert.deepEqual(await reserveCredits(ref, 3, 4, 8), { refused: "insufficient_credits" });
+});
+
+test("a company's credit (gamma-wr-051): one signals.researched_company, keyed sigco:<runId>:<candidateId>, its subject the candidate, on the 24-hour lease; committed with the verdict, released otherwise, and a release of a settled usage left alone; a short balance refused, any other error thrown", async () => {
+  const ref = { workspaceId: "wsp_runs", sourceId: "src_runs", runId: "run_runs" };
+  const calls = recordingCredits();
+  assert.deepEqual(await reserveCompanyCredit(ref, "cand_one"), { usageId: "cus_1" });
+  await settleCompanyCredit("cus_1", true);
+  assert.deepEqual(await reserveCompanyCredit(ref, "cand_two"), { usageId: "cus_3" });
+  await settleCompanyCredit("cus_3", false);
+  const reserve = { workspaceId: "wsp_runs", action: "signals.researched_company", quantity: 1 };
+  const of = { lease: "async" };
+  assert.deepEqual(calls, [
+    [
+      "reserve",
+      { ...reserve, idempotencyKey: "sigco:run_runs:cand_one", subjectRef: "cand_one", ...of },
+    ],
+    ["commit", "cus_1"],
+    [
+      "reserve",
+      { ...reserve, idempotencyKey: "sigco:run_runs:cand_two", subjectRef: "cand_two", ...of },
+    ],
+    ["release", "cus_3"],
+  ]);
+  const settled = new AppError(creditsCodes.usage_not_open);
+  const client = {
+    reserve: async () => assert.fail("not reserved"),
+    commit: async () => assert.fail("not committed"),
+    release: async () => {
+      throw settled;
+    },
+    balance: async () => assert.fail("balance is not a run's"),
+    priceOf: async () => assert.fail("priceOf is not a run's"),
+  };
+  bindCreditsClient(client as unknown as CreditsClient);
+  await settleCompanyCredit("cus_1", false);
+  recordingCredits(new AppError(creditsCodes.insufficient_credits));
+  assert.deepEqual(await reserveCompanyCredit(ref, "cand_three"), {
+    refused: "insufficient_credits",
+  });
+  const down = new AppError("credits_down");
+  recordingCredits(down);
+  await assert.rejects(reserveCompanyCredit(ref, "cand_three"), down);
+});
+
+test("SIGNALS_CREDITS_PER_RESEARCHED_COMPANY: an integer from 0 to 100, signals.researched_company's credits per company, 1 unset", () => {
+  const read = (value: string) => {
+    const script = [
+      `await import(${JSON.stringify(new URL("../prices.ts", import.meta.url).href)});`,
+      '  const { registeredPrices } = await import("@whytide/platform");',
+      '  const { credits, unit } = registeredPrices().get("signals.researched_company");',
+      "  console.log(JSON.stringify([credits, unit]));",
+    ].join("\n");
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+      cwd: import.meta.dirname,
+      env: { APP_ENV: "test", SIGNALS_CREDITS_PER_RESEARCHED_COMPANY: value },
+      encoding: "utf8",
+    });
+    return child.status === 0 ? JSON.parse(child.stdout) : "config_invalid";
+  };
+  assert.deepEqual(read("3"), [3, "company"]);
+  assert.deepEqual(read("0"), [0, "company"]);
+  assert.deepEqual(read(""), [1, "company"]);
+  for (const value of ["101", "-1", "1.5"]) assert.equal(read(value), "config_invalid", value);
 });

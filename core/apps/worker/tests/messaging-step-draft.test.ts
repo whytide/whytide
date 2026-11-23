@@ -3,11 +3,15 @@
 // loaded from its build by the worker's own loader, its activities through the host's wrapper, its
 // writer calling the model as the test's app role. A step's draft asked in a service's run, as
 // campaigns asks it, written by messaging_draft_message as the sender account's owner; its failures;
-// messaging_sweep over every workspace; last, the host's hourly schedule messaging.sweep. The replay
-// of the recorded histories is `pnpm -F worker test:replay`.
+// messaging_sweep over every workspace; last, the host's hourly schedule messaging.sweep. An email
+// step's draft (gamma-p3-070) by the email writer, from the mailbox asked. With pages of two
+// workspaces (useSweepPageSize, under APP_ENV=test only), the sweep continues as new after each
+// page but the last (gamma-p0-085). The replay of the recorded histories is
+// `pnpm -F worker test:replay`.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { beforeEach, test } from "node:test";
+import { Context } from "@temporalio/activity";
 import { Client, Connection } from "@temporalio/client";
 import type { ActivityContext, ActivityDefinition } from "@whytide/platform";
 import type { LlmFake } from "@whytide/providers";
@@ -37,6 +41,7 @@ const { createMessageDraft, createStepDraft, useMessagingClient } = await import
   built("messaging/dist/testing/index.js")
 );
 const tenancy = await import(built("tenancy/dist/testing/index.js"));
+const { useSweepPageSize } = await import(built("messaging/dist/workflows/pages.js"));
 
 withTestDb();
 withTestWorkflowEnvironment();
@@ -129,6 +134,7 @@ async function requested(
   stepExecutionId: string,
   stepKey: string,
   earlier: string[] = [],
+  mailboxId?: string,
 ) {
   const { workspaceId, personId, userId } = seeded;
   const request = {
@@ -137,6 +143,7 @@ async function requested(
     stepKey,
     senderUserId: userId,
     earlierDraftIds: earlier,
+    ...(mailboxId && { mailboxId }),
   };
   const { draftId } = (await asService(workspaceId, () => requestStepDraft(request))) as {
     draftId: string;
@@ -175,6 +182,9 @@ const sized = (start: string, length: number) => `${start.padEnd(length - 1, " s
 const FIRST = sized("Ines, how does your team follow up on warm leads", 180);
 const FOLLOW_UP = sized("Ines, what slows your team down when warm leads go cold", 200);
 const MINUTE = 60_000;
+/** An email's bodies of 60 and 66 words, grounded in the lead's first name alone. */
+const EMAIL = `Ines, ${"how does your team follow up on warm leads today and ".repeat(5)}what helps?`;
+const EMAIL_FOLLOW_UP = `Ines, ${"what slows your team down when warm leads go cold and ".repeat(5)}is it worth a look?`;
 
 test("a message_1 and a follow_up_1 written through messaging_draft_message as the sender's owner: each call's <step>, one decision record and one cost event per call, each draft's step_draft_ready", async () => {
   const seeded = await seed();
@@ -194,7 +204,7 @@ test("a message_1 and a follow_up_1 written through messaging_draft_message as t
   const written = await rowOf(first.draftId);
   assert.deepEqual(
     [written.kind, written.channel, written.status, written.text, written.promptVersion],
-    ["outbound_step", "linkedin_message", "ready", FIRST, 2],
+    ["outbound_step", "linkedin_message", "ready", FIRST, 3],
   );
 
   // Approved as approvals' path leaves it (beta-p3-020): the follow-up builds on its text.
@@ -222,6 +232,48 @@ test("a message_1 and a follow_up_1 written through messaging_draft_message as t
       { draftId: second.draftId, stepExecutionId: "sx_2", status: "ready" },
     ].sort((a, b) => a.draftId.localeCompare(b.draftId)),
   );
+});
+
+test("an email_1 and an email_2 written through messaging_draft_message by the email writer: a first email's subject and <step>, a follow-up's none and the earlier email's text, both from the mailbox asked", async () => {
+  const seeded = await seed();
+  const first = await requested(seeded, "sx_e1", "email_1", [], "mbx_1");
+  fake.script(PLAN, { subject: "Warm leads", body: EMAIL });
+  assert.deepEqual(await draft(first.input), { status: "ready" });
+  const channel = blockOf(1, "channel") as { subject: unknown };
+  assert.deepEqual(
+    [blockOf(1, "step"), channel.subject],
+    [
+      { kind: "email_first", earlier: [] },
+      { maxWords: 6, maxCharacters: 60 },
+    ],
+  );
+  const written = await rowOf(first.draftId);
+  assert.deepEqual(
+    [written.channel, written.mailboxId, written.subject, written.text, written.promptVersion],
+    ["email", "mbx_1", "Warm leads", EMAIL, 1],
+  );
+
+  const approvedAt = new Date();
+  await app().messageDraft.update({
+    where: { id: first.draftId },
+    data: { status: "approved", approvedAt },
+  });
+  const second = await requested(seeded, "sx_e2", "email_2", [first.draftId], "mbx_1");
+  fake.reset();
+  fake.script(PLAN, { subject: null, body: EMAIL_FOLLOW_UP });
+  assert.deepEqual(await draft(second.input), { status: "ready" });
+  const following = { kind: "email_follow_up", earlier: [{ stepKey: "email_1", text: EMAIL }] };
+  assert.deepEqual(
+    [blockOf(1, "step"), blockOf(1, "channel")],
+    [following, { ...channel, subject: null }],
+  );
+  const followed = await rowOf(second.draftId);
+  assert.deepEqual(
+    [followed.subject, followed.text, followed.mailboxId],
+    [null, EMAIL_FOLLOW_UP, "mbx_1"],
+  );
+  const statuses = (await ends(seeded.workspaceId)).map(({ status }) => status);
+  assert.deepEqual(statuses, ["ready", "ready"]);
 });
 
 test("a model that fails twice ends the step's draft failed with no text, one record and one cost; a writer failed past its attempts marks it write_failed; each publishes `failed`", async () => {
@@ -331,4 +383,47 @@ test("the host's schedule messaging.sweep starts messaging_sweep hourly, paused 
     await schedule.delete().catch(() => undefined);
     await connection.close();
   }
+});
+
+test("over three pages of two workspaces, messaging_sweep continues as new after the first two, under the one id with the cursor: every workspace swept once in id order, the last run answering the totals", async (t) => {
+  const seeded: Seeded[] = [];
+  for (let n = 0; n < 5; n += 1) seeded.push(await seed());
+  const workspaceIds = seeded.map(({ workspaceId }) => workspaceId).sort();
+  const drafting = { status: "drafting", text: "a text no failed draft keeps" };
+  const created = new Date(Date.now() - 60 * MINUTE);
+  for (const one of seeded.filter(({ workspaceId }) => workspaceId !== workspaceIds[2])) {
+    await createMessageDraft({ ...one, ...drafting, createdAt: created });
+  }
+  const runs: { workflowId: string; runId: string; afterId?: string }[] = [];
+  const swept: string[] = [];
+  const messaging_list_workspaces = async (input: { afterId?: string }) => {
+    const { workflowId = "", runId = "" } = Context.current().info.workflowExecution ?? {};
+    runs.push({
+      workflowId,
+      runId,
+      ...(input.afterId !== undefined && { afterId: input.afterId }),
+    });
+    return activities.messaging_list_workspaces?.(input);
+  };
+  const messaging_sweep_workspace = async (input: { workspaceId: string }) => {
+    swept.push(input.workspaceId);
+    return activities.messaging_sweep_workspace?.(input);
+  };
+  const replaced = { ...activities, messaging_list_workspaces, messaging_sweep_workspace };
+  useSweepPageSize(2);
+  try {
+    const counts = await runWorkflow("messaging_sweep", {}, { activities: replaced });
+    assert.deepEqual(counts, { stuck: 4, unswept: 0 });
+  } finally {
+    useSweepPageSize(undefined);
+  }
+  // The run whose history is workflows/__histories__/messaging_sweep_pages.json.
+  t.diagnostic(`first run: ${runs[0]?.workflowId} ${runs[0]?.runId}`);
+  assert.deepEqual(swept, workspaceIds, "every workspace swept once, in id order");
+  assert.deepEqual(
+    runs.map(({ afterId }) => afterId),
+    [undefined, workspaceIds[1], workspaceIds[3]],
+  );
+  assert.equal(new Set(runs.map(({ runId }) => runId)).size, 3, "three runs");
+  assert.equal(new Set(runs.map(({ workflowId }) => workflowId)).size, 1, "of one id");
 });

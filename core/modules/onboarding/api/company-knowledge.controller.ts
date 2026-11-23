@@ -10,6 +10,7 @@ import {
   getCompanyKnowledge,
   saveCompanyKnowledge,
 } from "../domain/commands.ts";
+import { DRAFT_BODY_BYTES } from "../domain/constants.ts";
 import { listWebsitePages, requestDraft } from "../domain/draft.ts";
 import { acceptDraft, discardDraft } from "../domain/review.ts";
 import { errors } from "../errors.ts";
@@ -21,7 +22,10 @@ import {
   type CompanyKnowledgeResponse,
   companyKnowledgeBody,
   companyKnowledgeResponse,
+  type DraftBody,
+  draftBody,
 } from "../schemas/company-knowledge.ts";
+import { settings } from "../settings.ts";
 
 @Controller("company-knowledge")
 export class CompanyKnowledgeController {
@@ -51,13 +55,19 @@ export class CompanyKnowledgeController {
   @HttpCode(202)
   @SetMetadata("whytide:permission", permissions["company_knowledge.write"])
   @SetMetadata("whytide:idempotent", true)
+  // The documents' texts: 10 MB, in place of the api's 1 MB, for this route alone.
+  @SetMetadata("whytide:body-limit", DRAFT_BODY_BYTES)
   @SetMetadata("whytide:api-route", {
-    summary: "Drafts from the saved website: fetchStatus becomes fetching and the worker reads it",
+    summary:
+      "Drafts from the saved website and the documents given: fetchStatus becomes fetching and the worker reads them",
+    body: draftBody,
     response: companyKnowledgeResponse,
-    errors: [errors.company_knowledge_no_website],
+    errors: [errors.company_knowledge_no_website, errors.documents_too_many],
   })
-  async draft(): Promise<CompanyKnowledgeResponse> {
-    return answer(await requestDraft(currentTenant().workspaceId));
+  async draft(@Body() body: DraftBody): Promise<CompanyKnowledgeResponse> {
+    const autoAccept = body?.autoAccept ?? false;
+    const { workspaceId } = currentTenant();
+    return answer(await requestDraft(workspaceId, body?.documents ?? [], { autoAccept }));
   }
 
   @Post("draft/accept")
@@ -91,12 +101,19 @@ export class CompanyKnowledgeController {
 @Module({ controllers: [CompanyKnowledgeController] })
 export class OnboardingApi {}
 
-/** The record with the pages its last fetch read, as the routes answer it. */
+/**
+ * The record with the pages its last fetch read, as the routes answer it, and the documents' limits
+ * the screen reads files by (README "Settings").
+ */
 async function answer(record: CompanyKnowledge): Promise<CompanyKnowledgeResponse> {
   const fetchedAt = record.fetchedAt?.toISOString() ?? null;
   const pages = (await listWebsitePages(record.id)).map((page) => ({
     ...page,
     fetchedAt: page.fetchedAt.toISOString(),
   }));
-  return { ...record, fetchedAt, updatedAt: record.updatedAt.toISOString(), pages };
+  const documentLimits = {
+    files: settings.ONBOARDING_MAX_FILES,
+    bytes: settings.ONBOARDING_MAX_FILE_BYTES,
+  };
+  return { ...record, fetchedAt, updatedAt: record.updatedAt.toISOString(), pages, documentLimits };
 }

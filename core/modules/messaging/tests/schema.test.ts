@@ -69,7 +69,7 @@ test("the dossier holds the listed fields only, every object strict: no email, p
   assert.deepEqual(dossierSchema.parse(dossier), dossier);
 });
 
-test("alpha's eval cases of the planner and the writer validate unchanged with version 2's inputs, with no <step>; a step's block takes a written step's kind and three earlier texts at most", () => {
+test("the planner's and the writer's eval cases validate unchanged with version 2's inputs, alpha's without a <step> and beta-p7-040's with theirs; a step's block takes a written step's kind and six earlier texts at most", () => {
   const evals = new URL("../../../packages/ai/evals/", import.meta.url);
   const tasks = [
     ["messaging.plan-message", planInput],
@@ -82,7 +82,9 @@ test("alpha's eval cases of the planner and the writer validate unchanged with v
     for (const { name, input } of cases) {
       const parsed = schema.safeParse(input);
       assert.ok(parsed.success, `${task} ${name}: ${parsed.error?.message}`);
-      assert.equal(parsed.data.step, undefined, `${task} ${name}`);
+      // beta-p7-040's step cases hold a <step>; alpha's none.
+      const given = (input as { step?: unknown }).step;
+      assert.deepEqual(parsed.data.step, given, `${task} ${name}`);
     }
   }
 
@@ -93,14 +95,17 @@ test("alpha's eval cases of the planner and the writer validate unchanged with v
     Array.from({ length: count }, () => ({ stepKey: "message_1", text: "Hi Mira." }));
   const withStep = (step: unknown) => planInput.safeParse({ ...first?.input, step }).success;
   assert.deepEqual(
-    [null, { kind: "first_message", earlier: [] }, { kind: "follow_up", earlier: earlier(3) }].map(
-      withStep,
-    ),
-    [true, true, true],
+    [
+      null,
+      { kind: "first_message", earlier: [] },
+      { kind: "follow_up", earlier: earlier(6) },
+      { kind: "email_follow_up", earlier: earlier(1) },
+    ].map(withStep),
+    [true, true, true, true],
   );
   const refused = [
     { kind: "note", earlier: [] },
-    { kind: "follow_up", earlier: earlier(4) },
+    { kind: "follow_up", earlier: earlier(7) },
     { kind: "follow_up", earlier: [{ stepKey: "follow_up_3", text: "Hi Mira." }] },
     { kind: "follow_up", earlier: [{ stepKey: "message_1", text: "" }] },
   ];

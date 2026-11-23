@@ -26,7 +26,10 @@ import {
   Menu,
   MenuItem,
   Meter,
+  NumberField,
   PageHeader,
+  PriceTag,
+  ReorderableList,
   SaveBar,
   Select,
   Skeleton,
@@ -60,6 +63,7 @@ const STACKED = new Set([
   "Meter",
   "Skeleton",
   "SaveBar",
+  "ReorderableList",
 ]);
 
 // Meter's samples: a share in each tone, then none; then three parts of a whole.
@@ -76,12 +80,28 @@ const PARTS = [
   { value: 15, tone: "warm" },
 ] as const;
 
+// ReorderableList's steps, each named by its own number wherever it moves.
+const STEPS = [
+  { key: "step-1", number: 1, days: 0 },
+  { key: "step-2", number: 2, days: 3 },
+  { key: "step-3", number: 3, days: 5 },
+];
+// NumberField's bounds, in business days.
+const DELAY = { min: 0, max: 30 };
+// PriceTag's coming change: an instant at noon UTC, the same day in all but the farthest zones.
+const PRICE_RISE = "2026-12-01T12:00:00Z";
+
 // Countries for ChipInput's closed list, named in the browser's language as a module names them.
 const regions = new Intl.DisplayNames(undefined, { type: "region" });
 const countries = ["AT", "CH", "DE", "ES", "FR", "GB", "IT", "NL", "US"].map((code) => ({
   value: code,
   label: regions.of(code) ?? code,
 }));
+// Languages, named the same way, for a list longer than the list's height: it scrolls.
+const languageNames = new Intl.DisplayNames(undefined, { type: "language" });
+const languages = "ar da de el en es fi fr hi id it ja ko nl pl pt ru sv tr zh"
+  .split(" ")
+  .map((code) => ({ value: code, label: languageNames.of(code) ?? code }));
 
 export function Gallery() {
   const t = useTranslations("ui");
@@ -204,7 +224,8 @@ export function Gallery() {
         <ServerTable />
       </>
     ),
-    // Closed, then open from its button: a modal cannot stay open in the page.
+    // Closed, then open from its button: a modal cannot stay open in the page. The second case is
+    // rendered only while open, its footer ending in controls Tab passes over.
     Dialog: (
       <>
         <Button variant="danger" onClick={() => setConfirming(true)}>
@@ -222,8 +243,10 @@ export function Gallery() {
         >
           <p>{t("gallery.delete_body")}</p>
         </Dialog>
+        <StepDialog />
       </>
     ),
+    ReorderableList: <Steps />,
     // Each form field: with its hint, with an error, then disabled with a value.
     TextField: (
       <>
@@ -255,6 +278,7 @@ export function Gallery() {
         <Select label={t("gallery.role")} options={roles} disabled />
       </>
     ),
+    NumberField: <NumberFields />,
     ChipInput: (
       <>
         <ChipInput
@@ -274,6 +298,7 @@ export function Gallery() {
           defaultValue={[t("gallery.sample_title")]}
           disabled
         />
+        <ChipInput label={t("gallery.languages")} options={languages} />
       </>
     ),
     Checkbox: (
@@ -321,6 +346,17 @@ export function Gallery() {
           label={t("tier.hot")}
           value={t("gallery.count", { count: 36 })}
           hint={t("gallery.this_week")}
+        />
+      </>
+    ),
+    PriceTag: (
+      <>
+        <PriceTag credits="0.25" unit={t("gallery.unit_lead")} />
+        <PriceTag credits="0" unit={t("gallery.unit_lookup")} />
+        <PriceTag
+          credits="1"
+          unit={t("gallery.unit_lookup")}
+          next={{ credits: "1.5", effectiveFrom: PRICE_RISE }}
         />
       </>
     ),
@@ -446,5 +482,107 @@ function ServerTable() {
         onNext: (page + 1) * 5 < LEADS.length ? () => setPage(page + 1) : undefined,
       }}
     />
+  );
+}
+
+/**
+ * Dialog's second case: rendered only while it is in use, so that Save and Cancel unmount it while
+ * it is open. Its footer ends in a disabled and a hidden control, which Tab passes over.
+ */
+function StepDialog() {
+  const t = useTranslations("ui");
+  const [editing, setEditing] = useState(false);
+  const [delay, setDelay] = useState<number | null>(3);
+  return (
+    <>
+      <Button onClick={() => setEditing(true)}>{t("gallery.edit_step")}</Button>
+      {editing ? (
+        <Dialog
+          open
+          onClose={() => setEditing(false)}
+          title={t("gallery.edit_step")}
+          actions={
+            <>
+              <Button variant="primary" onClick={() => setEditing(false)}>
+                {t("action.save")}
+              </Button>
+              <Button variant="danger" disabled>
+                {t("action.delete")}
+              </Button>
+              <Button hidden>{t("action.retry")}</Button>
+            </>
+          }
+        >
+          <NumberField
+            label={t("gallery.delay")}
+            unit={t("gallery.business_days")}
+            value={delay}
+            onChange={setDelay}
+            {...DELAY}
+          />
+        </Dialog>
+      ) : null}
+    </>
+  );
+}
+
+/** ReorderableList with Remove: three steps the person moves or removes. */
+function Steps() {
+  const t = useTranslations("ui");
+  const [steps, setSteps] = useState(STEPS);
+  const items = steps.map((step) => {
+    const name = t("gallery.step_name", { number: step.number });
+    return {
+      key: step.key,
+      name,
+      content: (
+        <div className="grid gap-0.5">
+          <span className="font-medium text-ink">{name}</span>
+          <span className="text-xs text-ink-muted">
+            {t("gallery.step_delay", { days: step.days })}
+          </span>
+        </div>
+      ),
+    };
+  });
+  const move = (from: number, to: number) => {
+    const step = steps[from];
+    if (step) setSteps(steps.toSpliced(from, 1).toSpliced(to, 0, step));
+  };
+  return (
+    <ReorderableList
+      items={items}
+      onMove={move}
+      onRemove={(index) => setSteps(steps.toSpliced(index, 1))}
+    />
+  );
+}
+
+/**
+ * NumberField: a delay with its hint and unit, which shows the module's error while it holds no
+ * whole number within its bounds; then one with an error and no unit.
+ */
+function NumberFields() {
+  const t = useTranslations("ui");
+  const [delay, setDelay] = useState<number | null>(3);
+  return (
+    <>
+      <NumberField
+        label={t("gallery.delay")}
+        hint={t("gallery.hint")}
+        error={delay === null ? t("gallery.whole_number", DELAY) : undefined}
+        unit={t("gallery.business_days")}
+        value={delay}
+        onChange={setDelay}
+        {...DELAY}
+      />
+      <NumberField
+        label={t("gallery.delay")}
+        error={t("gallery.error")}
+        value={null}
+        onChange={() => {}}
+        {...DELAY}
+      />
+    </>
   );
 }

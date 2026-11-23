@@ -1,5 +1,5 @@
 {
-  "about": "The title rule of the hard filters in fifty pairs (docs/concepts.md, Titles): [a person's title, an ICP title, whether the person passes]. Each group shows one part of the rule; tests/hard-filters.test.ts runs every pair.",
+  "about": "The title rule of signals' read order in fifty-four pairs (docs/concepts.md, Titles): [a person's title, an ICP title, whether the person fits]. Each group shows one part of the rule; tests/hard-filters.test.ts runs every pair.",
   "groups": [
     {
       "rule": "vice president, v.p., svp and evp are vp",
@@ -17,6 +17,15 @@
         ["Director of Sales", "Head of Sales", true],
         ["Sales Director, EMEA", "Head of Sales", true],
         ["Dir. of Sales Ops", "Head of Sales Operations", true]
+      ]
+    },
+    {
+      "rule": "vp, director and head are one role (gamma-p5-050): a VP of Sales fits Head of Sales, and the reverse",
+      "pairs": [
+        ["VP Sales", "Head of Sales", true],
+        ["Head of Sales", "VP of Sales", true],
+        ["SVP, Sales", "Head of Sales", true],
+        ["Sales Director", "VP Sales", true]
       ]
     },
     {
@@ -74,13 +83,13 @@
       "pairs": [["Senior", "Head of Sales", true]]
     },
     {
-      "rule": "a missing token is a miss: functions and levels are never merged (RB-3.1.2)",
+      "rule": "a missing token is a miss: functions are never merged, nor levels but vp and head (RB-3.1.2)",
       "pairs": [
         ["Sales Development Representative", "Head of Sales", false],
         ["Account Executive", "Head of Sales", false],
         ["Account Manager", "Account Executive", false],
         ["VP Marketing", "VP Sales", false],
-        ["VP Sales", "Head of Sales", false],
+        ["VP Marketing", "Head of Sales", false],
         ["Sales Manager", "Head of Sales", false],
         ["Vice President", "President", false],
         ["CTO", "CEO", false],

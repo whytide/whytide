@@ -3,9 +3,16 @@
 // here, one `export * from "./<port>/port.ts";` line per port, in alphabetical order. The contract
 // harness is `@whytide/providers/testing`, never imported by a host.
 export * from "./_pattern/index.ts";
+export * from "./alerts/port.ts";
 export * from "./app-mail/port.ts";
 export * from "./auth/port.ts";
+export * from "./browser/port.ts";
+export * from "./company-data/port.ts";
+export * from "./email-finder/port.ts";
+export * from "./email-verifier/port.ts";
 export * from "./files/port.ts";
 export * from "./linkedin/port.ts";
 export * from "./llm/port.ts";
+export * from "./mailbox/port.ts";
 export * from "./registry.ts";
+export * from "./web-search/port.ts";

@@ -1,8 +1,9 @@
-// The hard filters of alpha-p6-010 (docs/concepts.md), one test per criterion: the fifty title pairs
-// of fixtures/titles.json; the country and size rules with the balanced rule for unknowns, and the
-// size parser over fixtures/sizes.json; purity, and the speed of the filters prepared for a
-// fifty-title ICP; the compared values in the detail; and contacts' and icp's records taken as they
-// are. Pure: no database.
+// The hard filters of alpha-p6-010 (docs/concepts.md), one test per criterion: the fifty-four title
+// pairs of fixtures/titles.json, the title rule signals' read order keeps, and any title passing
+// the filters (title-check-ai); the country and size rules with the balanced rule for unknowns, and
+// the size parser over fixtures/sizes.json; purity, and the speed of the filters and the title rule
+// prepared for a fifty-title ICP; the compared values in the detail; and contacts' and icp's
+// records taken as they are. Pure: no database.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
@@ -16,10 +17,13 @@ import {
   prepareHardFilters,
 } from "../domain/hard-filters/index.ts";
 import { sizeRangesOf } from "../domain/hard-filters/size.ts";
+import { icpTitleTokens, titleFits } from "../domain/hard-filters/titles.ts";
 
 const fixture = <T>(name: string): T =>
   JSON.parse(readFileSync(new URL(`fixtures/${name}`, import.meta.url), "utf8")) as T;
-const open: HardFilterIcp = { titles: [], countries: [], sizeRanges: [] };
+const open: HardFilterIcp = { countries: [], sizeRanges: [] };
+/** An ICP as icp's records hold it, its titles too, which the filters do not read. */
+type TitledIcp = HardFilterIcp & { readonly titles: readonly string[] };
 
 /** The value, frozen through: a write anywhere in it throws (ES modules are strict). */
 function frozen<T>(value: T): T {
@@ -27,14 +31,34 @@ function frozen<T>(value: T): T {
   return Object.freeze(value);
 }
 
-test("titles: each of the fifty pairs of fixtures/titles.json yields its outcome", () => {
+test("titles: each of the fifty-four pairs of fixtures/titles.json yields its outcome under titleFits, the rule of signals' read order; vp and head are one role (gamma-p5-050)", () => {
   type Groups = { groups: { rule: string; pairs: [string, string, boolean][] }[] };
   const pairs = fixture<Groups>("titles.json").groups.flatMap((group) => group.pairs);
-  assert.equal(pairs.length, 50);
+  assert.equal(pairs.length, 54);
   for (const [title, icpTitle, passes] of pairs) {
-    const result = applyHardFilters({ title }, null, { ...open, titles: [icpTitle] });
-    assert.equal(result.passed, passes, `${title} / ${icpTitle}`);
+    assert.equal(titleFits(title, icpTitleTokens([icpTitle])), passes, `${title} / ${icpTitle}`);
   }
+});
+
+test("title-check-ai: any title passes the filters, the title is the assessment's; a country or a size miss still fails", () => {
+  type Groups = { groups: { rule: string; pairs: [string, string, boolean][] }[] };
+  const pairs = fixture<Groups>("titles.json").groups.flatMap((group) => group.pairs);
+  const icp: TitledIcp = {
+    titles: ["Revenue Operations Manager"],
+    countries: ["DE"],
+    sizeRanges: ["51-200"],
+  };
+  const filters = prepareHardFilters(icp);
+  const titles = ["RevOps & GTM Lead", "Barista", "", ...pairs.map(([title]) => title)];
+  for (const title of titles) {
+    const person = { title, locationCountry: "DE" };
+    assert.deepEqual(filters(person, { sizeRange: "51-200" }), { passed: true }, title);
+  }
+  const lead = { title: "RevOps & GTM Lead", locationCountry: "FR" };
+  const abroad = filters(lead, null);
+  assert.equal(abroad.passed || abroad.reason, "country_mismatch");
+  const small = filters({ ...lead, locationCountry: "DE" }, { sizeRange: "11-50" });
+  assert.equal(small.passed || small.reason, "size_mismatch");
 });
 
 test("countries and sizes: a known mismatch fails; no value, or an ICP list left empty, passes", () => {
@@ -58,7 +82,7 @@ test("countries and sizes: a known mismatch fails; no value, or an ICP list left
   }
 });
 
-test("pure: no import outside domain/, frozen inputs, the same answer twice; 1,000 runs under 50 ms, prepared for fifty titles", () => {
+test("pure: no import outside domain/, frozen inputs, the same answer twice; 1,000 runs of the filters and the title rule under 50 ms, prepared for fifty titles", () => {
   const folder = new URL("../domain/hard-filters/", import.meta.url);
   for (const file of readdirSync(folder)) {
     const source = readFileSync(new URL(file, folder), "utf8");
@@ -69,7 +93,7 @@ test("pure: no import outside domain/, frozen inputs, the same answer twice; 1,0
   // Fifty titles, icp's limit (its LIMITS.titles), most of them missed by most persons.
   const areas = ["Sales", "Marketing", "Revenue Operations", "Business Development", "Growth"];
   const more = ["Customer Success", "Partnerships", "Demand Generation", "Product Marketing", "IT"];
-  const icp = frozen<HardFilterIcp>({
+  const icp = frozen<TitledIcp>({
     titles: [...areas, ...more].flatMap((area) => [
       `Head of ${area}`,
       `VP ${area}`,
@@ -91,10 +115,17 @@ test("pure: no import outside domain/, frozen inputs, the same answer twice; 1,0
     }),
   );
   const filters = prepareHardFilters(icp);
-  const run = () => inputs.map(({ person, company }) => filters(person, company));
+  const targets = icpTitleTokens(icp.titles);
+  const run = () =>
+    inputs.map(({ person, company }) => {
+      return [filters(person, company), titleFits(person.title ?? "", targets)] as const;
+    });
   const first = run();
   assert.deepEqual(run(), first);
-  const unprepared = inputs.map(({ person, company }) => applyHardFilters(person, company, icp));
+  const unprepared = inputs.map(({ person, company }) => {
+    const fits = titleFits(person.title ?? "", icpTitleTokens(icp.titles));
+    return [applyHardFilters(person, company, icp), fits] as const;
+  });
   assert.deepEqual(unprepared, first);
   const timings = [1, 2, 3].map(() => {
     const start = performance.now();
@@ -105,17 +136,13 @@ test("pure: no import outside domain/, frozen inputs, the same answer twice; 1,0
   assert.ok(best < 50, `a thousand evaluations took ${best.toFixed(1)} ms at best of three`);
 });
 
-test("detail: the reason with the compared values, for the lead page; title, country, size in order", () => {
-  const icp: HardFilterIcp = {
-    titles: ["Head of Sales"],
-    countries: ["DE", "AT", "CH"],
-    sizeRanges: ["201-500"],
-  };
+test("detail: the reason with the compared values, for the lead page; country, then size, whatever the title", () => {
+  const icp: HardFilterIcp = { countries: ["DE", "AT", "CH"], sizeRanges: ["201-500"] };
   const sdr = { title: " Sales Development Representative ", locationCountry: "FR" };
   assert.deepEqual(applyHardFilters(sdr, { sizeRange: "11 to 50" }, icp), {
     passed: false,
-    reason: "title_mismatch",
-    detail: { value: "Sales Development Representative", icp: ["Head of Sales"] },
+    reason: "country_mismatch",
+    detail: { value: "FR", icp: ["DE", "AT", "CH"] },
   });
   const head = { title: "Director of Sales", locationCountry: "fr" };
   assert.deepEqual(applyHardFilters(head, { sizeRange: "11 to 50" }, icp), {
@@ -159,6 +186,8 @@ test("inputs: contacts' Person and WorkspaceCompany and icp's Icp go in as they 
     industry: null,
     sizeRange: "51-200 employees",
     country: "AT",
+    employeeCount: null,
+    description: null,
     providerRefs: null,
     fieldProvenance: {},
     createdAt: at,

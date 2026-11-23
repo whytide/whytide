@@ -23,8 +23,11 @@ import {
   type WorkingHours,
 } from "./working-hours.ts";
 
-/** Who holds a stop: the tester, through the screen, or the operator, through the command. */
-export type SwitchSource = "tester" | "operator";
+/**
+ * Who holds a stop: the tester, through the screen, or the operator, through the command; an
+ * account's alone, a member's removal (domain/removed.ts), which only the account's owner lifts.
+ */
+export type SwitchSource = "tester" | "operator" | "member_removed";
 export type SenderAccountStatus =
   | "pending"
   | "connected"

@@ -83,10 +83,13 @@ test("the usage panel fails with a retry, then shows the reads left; the disclos
     ).json();
     expect((await page.request.get(url, { maxRedirects: 0 })).status()).toBe(303);
   }
-  expect((await mine())?.status).toBe("connected");
+  const own = await mine();
+  expect(own?.status).toBe("connected");
   const usageHeld = Promise.withResolvers<void>();
   let usageCalls = 0;
-  await page.route(`**${accounts}/*/usage`, async (route) => {
+  // The user's own account's usage alone: the e2e users are Owners of the fixture's workspace, whose
+  // teammates' accounts, and their usage, follow their own (gamma-p6-070).
+  await page.route(`**${accounts}/${own?.id}/usage`, async (route) => {
     usageCalls += 1;
     if (usageCalls === 1) {
       return route.fulfill({ status: 404, json: { code: "sender_account_not_found" } });
@@ -105,7 +108,9 @@ test("the usage panel fails with a retry, then shows the reads left; the disclos
   });
 
   await page.goto(`/w/${WORKSPACE}/linkedin`);
-  const usage = page.getByRole("region", { name: say("linkedin.usage.title"), exact: true });
+  const usage = page
+    .getByRole("region", { name: say("linkedin.usage.title"), exact: true })
+    .first();
   const usageError = usage.getByRole("alert");
   await expect(usageError).toContainText(say("linkedin.errors.sender_account_not_found"));
   await usageError.getByRole("button", { name: say("ui.action.retry") }).click();

@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
     }
   },
   "scripts": {
@@ -17,20 +21,25 @@
     "lint": "node ../../../tools/lint/lint.ts .",
     "test": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test tests/*.test.ts",
     "test:tenancy": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test tests/tenancy.test.ts",
-    "erase": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/erase.js"
+    "erase": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/erase.js",
+    "lead:delete": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/lead-delete.js",
+    "retention:check": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/retention.js"
   },
   "dependencies": {
+    "@temporalio/workflow": "1.24.0",
     "@whytide/ai": "workspace:*",
     "@whytide/approvals": "workspace:*",
     "@whytide/campaigns": "workspace:*",
     "@whytide/contacts": "workspace:*",
     "@whytide/db": "workspace:*",
+    "@whytide/enrichment": "workspace:*",
     "@whytide/inbox": "workspace:*",
     "@whytide/linkedin": "workspace:*",
     "@whytide/messaging": "workspace:*",
     "@whytide/platform": "workspace:*",
     "@whytide/qualification": "workspace:*",
     "@whytide/signals": "workspace:*",
-    "@whytide/tenancy": "workspace:*"
+    "@whytide/tenancy": "workspace:*",
+    "zod": "4.6.7"
   }
 }

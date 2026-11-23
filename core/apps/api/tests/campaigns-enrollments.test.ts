@@ -132,9 +132,11 @@ test("GET …/campaigns/enrollments?personId= answers the person's enrollments n
     ...{ stepKey, actionType, status, dueAt: null, scheduledFor: null, executedAt: null },
     ...{ skipReason: null, errorCode: null },
   });
+  // The seeded campaign's name is empty (gamma-p3-061's panel names it); none is paused.
   const enrollment = (id: string, status: string) => ({
     ...{ id, status, exitReason: null, exitDetail: null, startedAt: null, endedAt: null },
-    ...{ ...TEMPLATE, timeZone: null, steps: [] },
+    ...{ ...TEMPLATE, campaignName: "", pausedReason: null, pausedUntil: null },
+    ...{ timeZone: null, steps: [] },
   });
   assert.deepEqual(await read(a.user.id, workspaceId, `?personId=${personId}`), {
     status: 200,

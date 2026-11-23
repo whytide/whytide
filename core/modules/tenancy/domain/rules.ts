@@ -1,8 +1,11 @@
 // The rules of tenancy's inputs (docs/concepts.md): a slug, an email as it is stored, a name. The
 // commands parse their input with these, and settings.ts checks WORKSPACE_SLUG with the same slug.
-import { AppError } from "@whytide/platform";
+// Also the members' order and who stays an Owner after a change (gamma-p6-030).
+import { AppError, type Role } from "@whytide/platform";
 import { z } from "zod";
 import { errors } from "../errors.ts";
+import type { Member } from "./commands.ts";
+import { MEMBER_ROLES, NAME_ORDER_LOCALE } from "./constants.ts";
 
 const SLUG = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 
@@ -34,6 +37,44 @@ export const createWorkspaceInput = z.strictObject({
 export const findOrganizationBySlugInput = z.strictObject({ slug });
 export const addMemberInput = z.strictObject({ userId: id, workspaceId: id, role });
 export const resolveMembershipInput = z.strictObject({ userId: id, workspaceIdOrSlug: id });
+/** A role change: Owner or Member, never Admin (zeta). */
+export const changeRoleInput = z.strictObject({
+  membershipId: id,
+  role: z.enum(MEMBER_ROLES),
+  changedBy: id,
+});
+export const removeMemberInput = z.strictObject({ membershipId: id, removedBy: id });
+
+const byName = new Intl.Collator(NAME_ORDER_LOCALE, { sensitivity: "base", numeric: true });
+const nameOf = (member: Member) => member.displayName ?? member.email;
+
+/** The member list's order: Owners first, then by name (the display name, else the email), then id. */
+export function memberOrder(a: Member, b: Member): number {
+  const owner = Number(b.role === "Owner") - Number(a.role === "Owner");
+  if (owner !== 0) return owner;
+  const name = byName.compare(nameOf(a), nameOf(b));
+  if (name !== 0) return name;
+  return a.membershipId < b.membershipId ? -1 : a.membershipId > b.membershipId ? 1 : 0;
+}
+
+/**
+ * A change to one membership: `owners`, the membership ids of the workspace's active Owners as the
+ * lock read them; `role`, the membership's role after the change, null once removed.
+ */
+export type OwnerChange = {
+  readonly owners: readonly string[];
+  readonly membershipId: string;
+  readonly role: Role | null;
+};
+
+/**
+ * False when the change takes the workspace's last active Owner away (last_owner): the membership is
+ * an active Owner, is no Owner after it, and no other active Owner is left.
+ */
+export function keepsAnOwner({ owners, membershipId, role }: OwnerChange): boolean {
+  if (role === "Owner" || !owners.includes(membershipId)) return true;
+  return owners.some((owner) => owner !== membershipId);
+}
 
 /** An id argument, a non-empty string, or tenancy_input_invalid naming `field`. */
 export function requireId(field: string, value: unknown): string {

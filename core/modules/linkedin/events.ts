@@ -5,9 +5,12 @@
 // and the owner's mail about a paused account. The receiver (domain/receiver/) publishes a person's
 // acceptance and message, the message's text in the file `file_key` names, never in the event
 // (beta-p5-010's subscriber reads the file and deletes it). The fleet breaker publishes
-// linkedin.invites_paused (domain/health/breaker.ts), whose subscriber mails the operator.
+// linkedin.invites_paused (domain/health/breaker.ts), whose subscriber mails the operator. tenancy's
+// tenancy.member_removed pauses the removed member's accounts (domain/removed.ts, gamma-p6-070).
 import { currentTenant, defineEvents, startWorkflow, subscribe } from "@whytide/platform";
+import { events as tenancyEvents } from "@whytide/tenancy";
 import { z } from "zod";
+import { pauseRemovedMember } from "./domain/removed.ts";
 
 export const events = defineEvents({
   "linkedin.sender_account_connected": z.strictObject({ sender_account_id: z.string() }),
@@ -89,4 +92,10 @@ subscribe(events["linkedin.invites_paused"], async ({ health_event_id }) => {
     input: { workspaceId, healthEventId: health_event_id, recipient: "operator" },
     workflowId: `linkedin.notify:${workspaceId}:${health_event_id}:operator`,
   });
+});
+
+// A member's removal pauses their accounts of the workspace, the delivery's run, in its transaction
+// (domain/removed.ts); a redelivery finds them paused and writes nothing.
+subscribe(tenancyEvents["tenancy.member_removed"], async ({ userId }) => {
+  await pauseRemovedMember(userId);
 });

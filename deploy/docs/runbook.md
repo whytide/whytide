@@ -54,17 +54,15 @@ A new password or key goes in `.env`, then `docker compose up -d`: `postgres-set
 
 Once per Unipile account, at the first install and again after every new `UNIPILE_WEBHOOK_SECRET`, Unipile's three sources are registered: `messaging` (`message_received`), `users` (`new_relation`) and `account_status` (every event). Unipile calls each at `UNIPILE_NOTIFY_URL`, `https://<domain>/v1/linkedin/webhooks/unipile`, which Caddy's `/v1/*/webhooks/*` route passes to the api, with the header `Unipile-Auth` set to `UNIPILE_WEBHOOK_SECRET`.
 
-1. In a new shell on the server, from `deploy/`, read the four values from `.env` as text, never run as shell code, and without typing the key or the secret, so that neither shows in the history or the process list. Each value is in double quotes, as `.env.production.example` writes it, or bare; one with a space or a quote reads as empty, and the last line stops with its name:
+From the repository root on the server, `pnpm unipile:webhooks <command>` does it from `deploy/.env` (`deploy/scripts/unipile-webhooks.ts`; `--env-file <path>` names another file, and a `.env.local` at the root comes before `deploy/.env`). It reads the file as text, never as shell code, and prints its path, never a value: the key, the two secrets, a webhook's headers and Unipile's answers show neither in the output nor in the history or the process list. A server without Node runs each command in deploy:check's form ([README.md](../README.md) "Install", step 4), with the network on, since it calls Unipile:
 
-   ```sh
-   value() { sed -n -E "s/^$1=\"?([^\" ]*)\"?( +#.*)?\$/\1/p" .env | tail -n 1; }
-   UNIPILE_BASE_URL="$(value UNIPILE_BASE_URL)" UNIPILE_NOTIFY_URL="$(value UNIPILE_NOTIFY_URL)"
-   UNIPILE_API_KEY="$(value UNIPILE_API_KEY)" UNIPILE_WEBHOOK_SECRET="$(value UNIPILE_WEBHOOK_SECRET)"
-   : "${UNIPILE_BASE_URL:?}" "${UNIPILE_NOTIFY_URL:?}" "${UNIPILE_API_KEY:?}" "${UNIPILE_WEBHOOK_SECRET:?}"
-   ```
+```sh
+docker run --rm --user "$(id -u)" -v "$PWD/deploy:/deploy:ro" -w /deploy localhost/whytide/api:<tag> node scripts/unipile-webhooks.ts check
+```
 
-2. Run the `register` function and its three calls from the Unipile adapter's README ([core/packages/providers/linkedin/unipile/README.md](../../core/packages/providers/linkedin/unipile/README.md) "Webhooks"), then its `listed`, which shows each webhook's id, source and URL. Never print `GET /api/v1/webhooks`'s answer whole: it may hold each webhook's headers, the secret among them. A Unipile account registered under alpha deletes its old `account_status` webhook first.
-3. `exit` the shell.
+1. `pnpm unipile:webhooks check`: a line per variable, fine or wrong: all five set, `UNIPILE_BASE_URL` https, both secrets 32 characters or more, `UNIPILE_NOTIFY_URL` https with its path ending in `/v1/linkedin/webhooks/unipile`, and a warning when `PROVIDER_LINKEDIN` is not `unipile`. Then one listing at Unipile, which proves the key, with the `whytide-*` webhooks and their URLs. A wrong value stops it before any call, with exit 1.
+2. `pnpm unipile:webhooks register`: removes the webhooks named `whytide-messaging`, `whytide-users` and `whytide-account_status`, never one of another name, creates the three, then lists them. Safe to run again, after a new address or a new secret. A Unipile account registered under alpha deletes its old `account_status` webhook by hand unless it has that name (the adapter's README, [core/packages/providers/linkedin/unipile/README.md](../../core/packages/providers/linkedin/unipile/README.md) "Webhooks", gives the API's calls).
+3. `list` shows every webhook's id, name and URL, never its headers; `remove` removes the three and no other. A Unipile error prints its HTTP status and short error type only, with exit 1; a usage error exits 2.
 
 - The body limit is the api's, 64 KiB (413 `payload_too_large`); Caddy sets none.
 - A new secret means registering again: the README's "Variables" gives the order.

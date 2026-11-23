@@ -24,7 +24,7 @@ export {
   type TablePager,
   type TableSort,
 } from "./components/data-table.tsx";
-export { Dialog } from "./components/dialog.tsx";
+export { Dialog, type DialogProps } from "./components/dialog.tsx";
 export { EmptyState } from "./components/empty-state.tsx";
 export { ErrorState } from "./components/error-state.tsx";
 export { Kbd } from "./components/kbd.tsx";
@@ -33,8 +33,15 @@ export { LoadingState } from "./components/loading-state.tsx";
 export { Logo, LogoMark } from "./components/logo.tsx";
 export { Menu, MenuItem } from "./components/menu.tsx";
 export { Meter, type MeterSegment, type MeterTone } from "./components/meter.tsx";
+export { NumberField, type NumberFieldProps } from "./components/number-field.tsx";
 export { PageHeader } from "./components/page-header.tsx";
+export { PriceTag, type PriceTagProps } from "./components/price-tag.tsx";
 export { PublicPage } from "./components/public-page.tsx";
+export {
+  type ReorderableItem,
+  ReorderableList,
+  type ReorderableListProps,
+} from "./components/reorderable-list.tsx";
 export { SaveBar } from "./components/save-bar.tsx";
 export { Select, type SelectOption, type SelectProps } from "./components/select.tsx";
 export { Skeleton } from "./components/skeleton.tsx";

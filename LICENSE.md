@@ -8,7 +8,7 @@
 
 **Additional Use Grant:** You may make production use of the Licensed Work, provided that:
 
-1. you and your affiliates together have no more than 3 employees and contractors, counted per person, whether full-time or part-time; and
+1. you and your affiliates together have no more than 5 employees and contractors, counted per person, whether full-time or part-time; and
 2. your use does not include offering the Licensed Work, or a derivative work of it, to third parties as a hosted or managed service.
 
 In this grant:
@@ -18,7 +18,7 @@ In this grant:
 - An "affiliate" is any entity that controls, is controlled by, or is under common control with you. Control means owning more than 50% of the voting interests of an entity, or having the power to direct its management.
 - A "hosted or managed service" is any offering in which you, or someone acting for you, run the Licensed Work, in whole or in part, so that third parties can use its features, for example software as a service or managed hosting. Third parties are anyone other than you, your affiliates, and your and their employees and contractors.
 
-If you and your affiliates together have more than 3 employees and contractors, production use needs a commercial license.
+If you and your affiliates together have more than 5 employees and contractors, production use needs a commercial license.
 
 **Change Date:** Two years from the date the Licensed Work is published.
 

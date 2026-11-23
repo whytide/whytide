@@ -31,6 +31,8 @@ import { DEFAULT_WORKING_HOURS, type WorkingHours } from "../domain/working-hour
 import { ids } from "../ids.ts";
 
 export { useClock, useRandom } from "../domain/clock.ts";
+export { useCompanyReadShare } from "../domain/company/share.ts";
+export { useContactInfoEnabled } from "../domain/contact/switch.ts";
 export { useHashKey } from "../domain/hash.ts";
 export { useAlertEmail } from "../domain/health/mail.ts";
 export { useSecretKeys } from "../domain/provider.ts";
@@ -118,7 +120,8 @@ async function seal(workspaceId: string, providerAccountRef: string) {
 
 /**
  * An outreach row written straight to the table, as beta-p1-050's send will leave one: the person
- * (an id made up for it unless given) whom the account invited or messaged, with the refs given.
+ * (an id made up for it unless given) whom the account invited or messaged, with the refs given,
+ * and accepted at `acceptedAt` when given (gamma-en-087).
  */
 export async function createOutreach(
   workspaceId: string,
@@ -127,6 +130,7 @@ export async function createOutreach(
     personId?: string;
     providerMemberRef?: string;
     providerChatRef?: string;
+    acceptedAt?: Date;
   },
 ): Promise<{ id: string; personId: string }> {
   const id = newId(ids.sender_outreach);

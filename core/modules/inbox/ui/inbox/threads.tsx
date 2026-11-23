@@ -1,21 +1,36 @@
-// The inbox's list in the browser (page.tsx gives it the first read): a table of the threads, newest
-// first, each row the lead's name with their title and company, the time of the last message, who
-// wrote last and a "to label" badge with the replies that wait for a label; a row opens the thread.
-// "Load more" reads the next page (GET …/inbox/threads after the last page's cursor) and adds its
-// rows under the others. The states: empty, no replies yet; a failed read in words, its module's
-// (src/api/errors.ts errorOwner), with Try again, which reads that page again.
+// The inbox's list in the browser (page.tsx gives it the first read): a table of the member's own
+// threads (gamma-p6-060), newest first, each row the lead's name with their title and company, the
+// time of the last message, who wrote last and a "to label" badge with the replies that wait for a
+// label; a row opens the thread. "Load more" reads the next page (GET …/inbox/threads after the last
+// page's cursor) and adds its rows under the others. The states: empty, no replies yet, or, for a
+// member without a connected account of their own, a prompt to connect one; a failed read in words,
+// its module's (src/api/errors.ts errorOwner), with Try again, which reads that page again.
 "use client";
 
-import { Badge, Button, type Column, DataTable, EmptyState, ErrorState } from "@whytide/ui";
+import {
+  Badge,
+  Button,
+  ButtonLink,
+  type Column,
+  DataTable,
+  EmptyState,
+  ErrorState,
+} from "@whytide/ui";
 import { ApiError, browserApi, data, errorOwner } from "@whytide/web/api/browser";
 import { useFormatter, useMessages, useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import type { ThreadPage, ThreadSummaryResponse } from "../../schemas/threads.ts";
-import { PAGE_SIZE, TIME_FORMAT } from "./constants.ts";
+import { LINKEDIN_SCREEN, PAGE_SIZE, TIME_FORMAT } from "./constants.ts";
 import { usePersonWords } from "./person.ts";
 
-/** The first read's answer, or the digest of its refusal (`api:<code>`, src/api/errors.ts). */
-type Props = { workspace: string } & ({ first: ThreadPage } | { failed: string });
+/**
+ * The first read's answer, with whether the member has a connected account of their own, or the
+ * digest of its refusal (`api:<code>`, src/api/errors.ts).
+ */
+type Props = { workspace: string } & (
+  | { first: ThreadPage; hasSender: boolean }
+  | { failed: string }
+);
 type Row = ThreadSummaryResponse;
 /** The rows read so far, and the next page's cursor: null after the last page. */
 type Shown = { readonly threads: Row[]; readonly next: string | null };
@@ -28,6 +43,7 @@ const digestOf = (error: unknown) =>
 export function Threads(props: Props) {
   const { workspace } = props;
   const t = useTranslations("inbox.list");
+  const empty = useTranslations("inbox.empty");
   const format = useFormatter();
   const messages = useMessages();
   const person = usePersonWords();
@@ -121,6 +137,11 @@ export function Threads(props: Props) {
     },
   ];
   const { next } = shown;
+  // A failed first read says nothing of the accounts: the plain empty state.
+  const hasSender = "hasSender" in props ? props.hasSender : true;
+  const connect = (
+    <ButtonLink href={`/w/${workspace}/${LINKEDIN_SCREEN}`}>{empty("connect")}</ButtonLink>
+  );
 
   return (
     <div className="grid gap-4">
@@ -130,7 +151,13 @@ export function Threads(props: Props) {
         rows={shown.threads}
         rowHref={(thread) => `/w/${workspace}/inbox/${thread.id}`}
         pager={{}}
-        empty={<EmptyState message={t("empty")} />}
+        empty={
+          hasSender ? (
+            <EmptyState message={t("empty")} />
+          ) : (
+            <EmptyState message={empty("no_sender")} action={connect} />
+          )
+        }
       />
       {owner && (
         <ErrorState

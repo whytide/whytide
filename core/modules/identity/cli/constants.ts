@@ -1,5 +1,5 @@
-// The fixed values of `pnpm tenant:create` and `pnpm workspace:create` (README.md "The tenant
-// commands").
+// The fixed values of identity's commands (README.md "The invite command", "The tenant commands"):
+// `pnpm invite`, `pnpm tenant:create` and `pnpm workspace:create`.
 
 /** The web's sign-in page, after APP_PUBLIC_ORIGIN, as `pnpm invite` prints it. */
 export const SIGN_IN_PATH = "/sign-in";

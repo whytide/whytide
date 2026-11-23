@@ -1,18 +1,22 @@
 // The end-to-end test of @whytide/ui (alpha-p1-150): the gallery, bundled by esbuild and loaded into
 // Playwright's Chromium without Next.js, shows every component in its states with the text of its
-// message keys, translates an error code, copies by keyboard, and passes axe.
+// message keys, translates an error code, copies by keyboard, shows prices in the locale's formats
+// (gamma-p2-070), and passes axe.
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { galleryMessages, keysOnly, openGallery } from "./gallery-page.ts";
 
 const COMPONENTS = [
   "PageHeader Button Link Badge Tooltip EmptyState ErrorState LoadingState Toast CopyButton",
-  "DataTable Dialog",
-  "TextField TextArea Select ChipInput Checkbox Switch SaveBar",
-  "Card StatCard Meter Skeleton Avatar Kbd Menu ThemeToggle Logo",
+  "DataTable Dialog ReorderableList",
+  "TextField TextArea Select NumberField ChipInput Checkbox Switch SaveBar",
+  "Card StatCard PriceTag Meter Skeleton Avatar Kbd Menu ThemeToggle Logo",
 ].flatMap((line) => line.split(" "));
 const text = galleryMessages();
 const entry = (page: Page, name: string) => page.getByRole("region", { name, exact: true });
+
+// PriceTag's coming change is an instant: its day here is UTC's.
+test.use({ timezoneId: "UTC" });
 
 /** The text of a key in the gallery's messages; a key missing there fails the test. */
 function say(key: string): string {
@@ -131,6 +135,33 @@ test("ErrorState shows the translated text of insufficient_credits, never the co
   await expect(alerts.first()).toContainText(say("credits.errors.insufficient_credits"));
   await expect(alerts.last()).toContainText(say("platform.error.generic"));
   await expect(page.locator("body")).not.toContainText("insufficient_credits");
+});
+
+test("PriceTag shows a price, a free action and a coming change, in the locale's number and date formats", async ({
+  page,
+}) => {
+  // The words of en.json, with each number and date in the locale's own format.
+  const shown = {
+    en: [
+      "0.25 credits per lead",
+      "Free",
+      "1 credit per lookup",
+      "From Dec 1, 2026: 1.5 credits per lookup",
+    ],
+    de: [
+      "0,25 credits per lead",
+      "Free",
+      "1 credit per lookup",
+      "From 1. Dez. 2026: 1,5 credits per lookup",
+    ],
+  };
+  for (const [locale, words] of Object.entries(shown)) {
+    await openGallery(page, text, locale);
+    const tags = entry(page, "PriceTag");
+    for (const line of words) {
+      await expect(tags.getByText(line, { exact: true }), locale).toBeVisible();
+    }
+  }
 });
 
 test("CopyButton copies by keyboard and says so in its live region", async ({ page, context }) => {

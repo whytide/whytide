@@ -5,3 +5,4 @@
 3. Commands, from the repository root: `pnpm -F icp build`, `typecheck`, `test`, `test:tenancy`, `lint`; `pnpm -F api test` for the routes (`core/apps/api/tests/icp-api.test.ts`); `pnpm -F web test` and `pnpm -F web typecheck` for the screen (`core/apps/web/tests/icp-screen.spec.ts`), `pnpm -F platform messages:check` for its keys.
 4. Every query goes through `tenantClient`, inside the caller's tenant run; no command opens a run or keeps a client. A new closed-list value or label changes `domain/lists.ts`, `ui/labels.ts` and `messages/en.json` together.
 5. Tests import `domain/`, never `index.ts`, `api/` or a host. Stay inside this folder and `icp.prisma`; a change to a shared package is its own task.
+6. A write of an audience goes through `lockedIcpId`, which asks platform's `canWriteOwned` with the row's owner (`domain/owner.ts`) and `icp.manage`; a new write of an audience calls it too (README "Decided here", gamma-p6-015).

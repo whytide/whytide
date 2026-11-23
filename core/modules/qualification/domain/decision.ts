@@ -1,6 +1,6 @@
 // qualification.lead_qualified (README "The batch", "The re-score"): the lead's decision as stored,
 // read after the write, published in the caller's tenant run that wrote it; none for a lead left
-// pending. The batch's and the re-score's.
+// pending. The batch's, the re-score's and a member's verdict's (member-verdict.ts).
 import { getLead } from "@whytide/contacts";
 import { outboxWriter, tenantClient } from "@whytide/db";
 import { currentTenant, publish } from "@whytide/platform";

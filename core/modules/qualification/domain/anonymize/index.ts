@@ -33,7 +33,8 @@ export type Anonymized = {
 export const PLACEHOLDERS = /\[(?:name|link|email)\]/g;
 /** Characters read of any text, which bounds the expressions' work; an excerpt keeps fewer. */
 const READ = 1000;
-const EXCERPTS = 5;
+/** The excerpts of the person's own words the model reads at most (the batch asks for as many). */
+export const EXCERPTS = 5;
 const EXCERPT = 500;
 const EDGE = String.raw`(?<![\p{L}\p{N}])`;
 const END = String.raw`(?![\p{L}\p{N}])`;

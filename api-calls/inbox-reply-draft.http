@@ -1,0 +1,26 @@
+# inbox's reply draft routes (core/modules/inbox/README.md "The reply draft", "API"): a member's
+# session and inbox.reply, on a thread of their own whose channel sends now. The POST asks the AI
+# for a draft of the reply, from the conversation, the lead's dossier and an optional brief: 202
+# with the thread's draft, drafting; the worker writes it, and the GET then answers it ready with
+# its text, or failed with its code. A draft still drafting is answered as it is; a later request
+# replaces the thread's draft. Nothing is sent: the reply route sends, on the member's press. The
+# Idempotency-Key is an example UUID: the same one answers the first answer again for a day. A
+# write sends the cookie, so it sends Origin: {{appOrigin}} too. Put in http-client.private.env.json,
+# with your workspaceId: `threadId`, a thread of yours. Refusals: 404 thread_not_found (another
+# member's thread, another workspace's), 409 reply_channel_unavailable, 409 person_suppressed with
+# details.reason, 400 reply_brief_too_long with details.max (2,000 characters).
+
+### POST /v1/workspaces/{workspaceId}/inbox/threads/{id}/reply-draft: asks the AI for a draft of your reply; 202, drafting
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/threads/{{threadId}}/reply-draft
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000470
+
+{ "brief": "Say yes and offer a 20 minute call on Tuesday or Thursday." }
+
+### GET /v1/workspaces/{workspaceId}/inbox/threads/{id}/reply-draft: the thread's draft, none, drafting, ready with its text or failed with its code
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/threads/{{threadId}}/reply-draft
+Accept: application/json
+Cookie: {{sessionCookie}}

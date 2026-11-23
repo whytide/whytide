@@ -2,8 +2,8 @@
 // [--replace-edited]]` (README "The script"): an engineer drafts a workspace's Company Knowledge from
 // its website and up to five of its documents. The script never calls a model: it reads the files,
 // then starts the Draft the Company screen starts (the website saved first with --url), its documents
-// with it, and waits for the worker's run, reading the record every two seconds, ten minutes at most.
-// Then it prints the pages and documents read and each drafted field, accepts the draft with
+// with it, and waits for the worker's run, reading the record every two seconds, twenty minutes at
+// most. Then it prints the pages and documents read and each drafted field, accepts the draft with
 // --accept, or says where to review it. Each line starts with a code; a refusal writes nothing. No
 // line carries a page's or a document's text.
 import { setTimeout as sleep } from "node:timers/promises";

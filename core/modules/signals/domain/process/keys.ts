@@ -1,5 +1,6 @@
-// The run's files under the workspace's raw/ (docs/data.md): its pages, and for each candidate kept
-// for a read, the request linkedin_read_profile reads and the profile it writes; the size of a
+// The run's files under the workspace's raw/ (docs/data.md): its pages, a posts kind's pages of posts
+// with their requests and its posts' pages of engagers, and for each candidate kept for a read, the
+// request linkedin_read_profile reads and the profile it writes; the size of a
 // processing step, and when profiles the provider cannot read stop the reading. Plain values, which
 // the workflow imports too.
 
@@ -27,8 +28,21 @@ export const READING_ENDS: readonly string[] = Object.freeze([
   "account_stopped",
 ]);
 
+/** The key of the member id in contacts' providerRefs: campaigns' MEMBER_REF_KEY, the vendor's. */
+export const MEMBER_REF_KEY = "unipile";
+
 /** The run's folder: every end deletes what is under it. */
 export const runFolder = (runId: string): string => `raw/signals/${runId}/`;
+
+/** A page of posts' request file and page file, as linkedin_read_posts's input names them. */
+export const postsKeys = (runId: string, page: number) => ({
+  requestKey: `${runFolder(runId)}posts/${page}.request.json`,
+  rawKey: `${runFolder(runId)}posts/${page}.json`,
+});
+
+/** A page of the engagers of the run's `post`th post, from 1. */
+export const engagersKey = (runId: string, post: number, page: number): string =>
+  `${runFolder(runId)}posts/${post}/${page}.json`;
 
 /** A candidate's request file and profile file, as linkedin_read_profile's input names them. */
 export const profileKeys = (runId: string, candidateId: string) => ({

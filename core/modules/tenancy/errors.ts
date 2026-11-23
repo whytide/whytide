@@ -14,4 +14,10 @@ export const errors = defineErrors({
   user_not_found: {},
   /** A command's input off its rule (domain/rules.ts); `details.fields` names the fields. 400. */
   tenancy_input_invalid: {},
+  /** changeRole, removeMember: the workspace holds no membership with the id; changeRole, a removed one. 404. */
+  membership_not_found: {},
+  /** changeRole, removeMember: the caller's own membership; another Owner changes it. 409. */
+  member_is_self: { status: 409 },
+  /** changeRole, removeMember: the change would leave the workspace with no active Owner. 409. */
+  last_owner: { status: 409 },
 });

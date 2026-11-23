@@ -8,9 +8,12 @@
 // tick at most at once, and the minutes after a profile read before the connection request it is
 // for (beta-p4-030). beta-p4-040, behind patched(CHECK_EXECUTING): the sender checks its steps
 // left `executing` before its first claim, asks the gate again when its pass is stale, and goes on
-// after invites_paused; a send activity is never retried by Temporal.
+// after invites_paused; a send activity is never retried by Temporal. gamma-p4-050: a reply label's
+// notice, its one activity. gamma-p0-085, behind patched(QUEUE_PAGES_PATCH): a queue run asks for
+// one page of its due steps and continues as new with its cursor and counts until the last page.
 import {
   ActivityCancellationType,
+  continueAsNew,
   isCancellation,
   patched,
   proxyActivities,
@@ -30,9 +33,11 @@ import { ACTION_REFUSALS, RUN_ENDING_REFUSALS } from "../domain/send/constants.t
 import {
   CHECK_EXECUTING,
   MEMBER_REFERENCE_PATCH,
+  NOTICE_TIMEOUT,
   PLAN_TIMEOUT,
   PROFILE_READ_ATTEMPTS,
   PROFILE_READ_TIMEOUT,
+  QUEUE_PAGES_PATCH,
   QUEUE_TIMEOUT,
   SEND_ACTIVITY_TIMEOUT,
   SEND_ATTEMPTS,
@@ -41,7 +46,7 @@ import {
   SENDER_TIMEOUT,
   WITHDRAW_TIMEOUT,
 } from "./constants.ts";
-import type { activities } from "./index.ts";
+import type { activities, NoticeInput } from "./index.ts";
 
 const steps = proxyActivities<ActivityFunctions<typeof activities>>({
   startToCloseTimeout: PLAN_TIMEOUT,
@@ -127,10 +132,22 @@ export async function campaigns_queue_tick(
   return queueing.campaigns_start_queue_runs(input);
 }
 
-export async function campaigns_queue(input: { workspaceId: string }): Promise<QueueCounts> {
+/** A queue run's input: its workspace; continued as new, its cursor and its counts so far. */
+export type QueueInput = {
+  readonly workspaceId: string;
+  readonly afterId?: string;
+  readonly counts?: QueueCounts;
+};
+
+export async function campaigns_queue(input: QueueInput): Promise<QueueCounts> {
+  // Asked once, here, as linkedin_status_refresh asks its own: a run started before the patch
+  // replays without its marker, asks for its due steps once, as before, and never continues as new
+  // (gamma-p0-085).
+  const paged = patched(QUEUE_PAGES_PATCH);
   const { workspaceId } = input;
-  const { stepIds } = await queueing.campaigns_due_steps(input);
-  const counts = { opened: 0, passedOver: 0, noSender: 0, failed: 0 };
+  const due = paged ? { workspaceId, afterId: input.afterId } : input;
+  const { stepIds, next } = await queueing.campaigns_due_steps(due);
+  const counts = { opened: 0, passedOver: 0, noSender: 0, failed: 0, ...input.counts };
   for (const stepExecutionId of stepIds) {
     try {
       const { outcome } = await queueing.campaigns_queue_step({ workspaceId, stepExecutionId });
@@ -143,7 +160,21 @@ export async function campaigns_queue(input: { workspaceId: string }): Promise<Q
       counts.failed += 1;
     }
   }
+  // After a page that is not the last, the next run of the same id goes on after its last step, a
+  // failed one's too, so that no run's history grows with the due steps.
+  if (paged && typeof next === "string") {
+    return continueAsNew<typeof campaigns_queue>({ workspaceId, afterId: next, counts });
+  }
   return counts;
+}
+
+const noticing = proxyActivities<ActivityFunctions<typeof activities>>({
+  startToCloseTimeout: NOTICE_TIMEOUT,
+});
+
+/** A reply label's notice (README.md "Reply actions"): its one mail, sent or skipped by its activity. */
+export async function campaigns_reply_notice(input: NoticeInput) {
+  return noticing.campaigns_reply_notice_mail(input);
 }
 
 /**

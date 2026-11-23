@@ -5,7 +5,7 @@
 # the Idempotency-Key is an example UUID; another one asks again, the same one answers the first answer
 # again for a day. A write sends the cookie, so it sends Origin: {{appOrigin}} too.
 
-### POST /v1/workspaces/{workspaceId}/signals/sources/{id}/run: runs a source now; 202 with the run; 409 signal_run_open while one of its runs is running or waiting (alpha-p10-110)
+### POST /v1/workspaces/{workspaceId}/signals/sources/{id}/run: runs a source now; 202 with the run; 409 signal_run_open while one of its runs is running or waiting (alpha-p10-110); 409 signal_agent_paused while its agent is paused (paused-agent-sources)
 POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/{{sourceId}}/run
 Accept: application/json
 Cookie: {{sessionCookie}}

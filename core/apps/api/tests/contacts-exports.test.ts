@@ -252,3 +252,35 @@ test("two workspaces: each one's CSV holds its own leads only, and a member of o
   const refused = await fetch(url, { headers: { cookie } });
   assert.deepEqual([refused.status, await refused.json()], [403, { code: "forbidden" }]);
 });
+
+test("a lead added by hand (lead-manual-create): its row, pending, names its source manual, with the values typed and none for the rest", async () => {
+  const [a] = await createTwoWorkspaces();
+  const body = {
+    linkedinUrl: "linkedin.com/in/hana-hand/",
+    firstName: "Hana",
+    lastName: "Hand",
+    title: "Head of Data",
+  };
+  assert.equal((await call(a, "POST", "leads", body)).status, 201);
+  const { rows } = await csv(a);
+  assert.deepEqual(rows, [
+    {
+      first_name: "Hana",
+      last_name: "Hand",
+      headline: "",
+      title: "Head of Data",
+      company: "",
+      location: "",
+      fit: "",
+      tier: "",
+      confidence: "",
+      status: "pending",
+      review: "",
+      review_reason: "",
+      review_text: "",
+      source: "manual",
+      why: "",
+      linkedin_url: "https://linkedin.com/in/hana-hand",
+    },
+  ]);
+});

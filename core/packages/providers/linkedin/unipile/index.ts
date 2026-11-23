@@ -1,23 +1,29 @@
 // The Unipile adapter of the LinkedIn port (README.md): the user's own account through Unipile's
 // hosted authentication, then reads and the send side, over Unipile's REST API with Node's fetch
 // from this folder only; no SDK (README.md "Covers"): invitations in invites.ts, messages in
-// messages.ts, a post's engagers in engagers.ts, under cursors signed with UNIPILE_CURSOR_SECRET
-// (cursor.ts). Every answer is mapped to the port's words and parsed with its schemas, so that a
-// vendor field that is not a business field stops here. The webhooks are webhooks.ts's: the three
-// sources behind the shared secret header, and the hosted-auth notify behind the pairing token that
-// createHostedAuthLink puts in the link's name (README.md "Webhooks", "Pairing").
+// messages.ts, a post's engagers in engagers.ts, the post reads in posts.ts, a company page in
+// company.ts, a 1st-degree connection's "Contact info" emails in contact.ts (gamma-en-087), under
+// cursors signed
+// with UNIPILE_CURSOR_SECRET (cursor.ts). Every answer is mapped to the port's words and parsed with
+// its schemas, so that a vendor field that is not a business field stops here. The webhooks are
+// webhooks.ts's: the three sources behind the shared secret header, and the hosted-auth notify
+// behind the pairing token that createHostedAuthLink puts in the link's name (README.md "Webhooks",
+// "Pairing").
 import { randomUUID } from "node:crypto";
 import { AppError } from "@whytide/platform";
 import { z } from "zod";
 import { defineAdapter, type PortImplementation } from "../../_pattern/index.ts";
 import { type AccountStatus, linkedinPort, linkedinProfile } from "../port.ts";
 import { notFound, offShape, segment, unipileClient } from "./client.ts";
+import { getCompany } from "./company.ts";
 import { unipileConfig } from "./config.ts";
-import { PROVIDER_REF_PREFIX, SECRET_MIN_CHARS } from "./constants.ts";
+import { PROVIDER_REF_PREFIX, RELATION, SECRET_MIN_CHARS } from "./constants.ts";
+import { getContactEmails } from "./contact.ts";
 import { signedCursors } from "./cursor.ts";
 import { listPostEngagers } from "./engagers.ts";
 import { invites } from "./invites.ts";
 import { messaging } from "./messages.ts";
+import { posts } from "./posts.ts";
 import { webhooks } from "./webhooks.ts";
 
 export { SECRET_HEADER } from "./constants.ts";
@@ -50,6 +56,8 @@ const user = z.object({
   last_name: z.string().nullish(),
   headline: z.string().nullish(),
   location: z.string().nullish(),
+  /** The member's distance from the account, as getRelation reads it: FIRST_DEGREE, a relation. */
+  network_distance: z.string().nullish(),
   work_experience: z
     .array(
       z.object({
@@ -139,6 +147,7 @@ export function unipileLinkedin({
         ...(companyUrl.data ? { companyUrl: companyUrl.data } : {}),
         locationText: data.location ?? "",
         ...(job?.industry ? { industry: job.industry } : {}),
+        ...(data.network_distance ? { connected: data.network_distance === RELATION } : {}),
         fetchedAt: new Date(now()),
       });
       if (!profile.success) throw offShape("getProfile");
@@ -147,6 +156,9 @@ export function unipileLinkedin({
     parseWebhook,
     ...invites(call, now, cursors),
     ...messaging(call, now),
+    ...posts(call, cursors),
+    getCompany: getCompany(call, now),
+    getContactEmails: getContactEmails(call),
   };
 }
 

@@ -3,8 +3,9 @@
 // database, answering real HTTP. The fake's connect route is mounted on the host, where the web's
 // rewrite of /api/linkedin/* reaches it; a visit posts the fake's signed webhook to the host's
 // webhook route. Criteria 1 (the api's part), 2 (the raw read), 3 and 4; the screen's part is the
-// web's Playwright spec. fix-read-cap's criteria 1 to 3: the daily read cap's PATCH. It lives here: a
-// module never imports a host.
+// web's Playwright spec. fix-read-cap's criteria 1 to 3: the daily read cap's PATCH. gamma-p6-070:
+// who sees and changes which account, with its owner's name and the flags. It lives here: a module
+// never imports a host.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
@@ -19,7 +20,13 @@ import {
   linkedinPort,
 } from "@whytide/providers";
 import { signInAs } from "@whytide/providers/auth/testing";
-import { createTwoWorkspaces, type TestTenant, useTenancyClient } from "@whytide/tenancy/testing";
+import {
+  createMembership,
+  createTwoWorkspaces,
+  createUser,
+  type TestTenant,
+  useTenancyClient,
+} from "@whytide/tenancy/testing";
 import type { Api } from "../src/start.ts";
 
 const APP_ORIGIN = "https://app.whytide.test";
@@ -144,7 +151,11 @@ test("connect: 400 disclosure_required without the acknowledgment; with it, the 
     workingHours: { start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5] },
     dailyReadCap: 100,
     mine: true,
+    ownerName: a.user.displayName,
     canManage: true,
+    canEdit: true,
+    canPause: true,
+    canUnpause: false,
     paused: false,
     pausedBy: null,
     disclosureVersion: 2,
@@ -228,7 +239,7 @@ test("PATCH the daily read cap: 100, the most, is stored and listed after 40; 0,
   for (const cap of [0, 101, 250, 1.5, "100"]) {
     assert.deepEqual(await patch(a, cap), refused, `${cap}`);
   }
-  // B's user is no member of A's workspace: alpha's can() evaluates no role, so that is who lacks it.
+  // B's user is no member of A's workspace, refused before any role is read (roles.test.ts).
   const outsider = { ...a, user: b.user };
   assert.deepEqual(await patch(outsider, 50), { status: 403, body: { code: "forbidden" } });
   const notFound = { status: 404, body: { code: "sender_account_not_found" } };
@@ -248,4 +259,61 @@ test("refresh: 202 with the account as it stands and linkedin.status_refresh_req
   assert.deepEqual(await events(a), [...published, requested]);
   assert.deepEqual(await refresh(b), { status: 404, body: { code: "sender_account_not_found" } });
   assert.deepEqual(await events(b), []);
+});
+
+test("each member's own account (gamma-p6-070): GET gives a Member their own account and an Owner every one, each with its owner's name, null once removed, and the flags; a Member renames, refreshes and disconnects their own; a teammate's answers not_account_owner to each, an Owner's PATCH of it too, nothing changed", async () => {
+  const [a] = await createTwoWorkspaces();
+  const ws = a.workspace.id;
+  const [member, teammate, gone] = [await createUser(), await createUser(), await createUser()];
+  for (const { id: userId } of [member, teammate, gone]) {
+    await createMembership({ userId, workspaceId: ws, role: "Member" });
+  }
+  const accountOf = async (ownerUserId: string) =>
+    (await testing.createConnectedAccount(ws, { ownerUserId })).id;
+  const [mine, theirs, left] = [
+    await accountOf(member.id),
+    await accountOf(teammate.id),
+    await accountOf(gone.id),
+  ];
+  const removed = { removedAt: new Date(), removedBy: a.user.id };
+  await app.membership.updateMany({ where: { userId: gone.id }, data: removed });
+  const asMember = { ...a, user: member };
+  type Listed = { id: string; ownerName: string | null } & Record<string, unknown>;
+  const flags = ({ id, ownerName, mine, canManage, canEdit, canPause, canUnpause }: Listed) => [
+    ...[id, ownerName, mine, canManage],
+    ...[canEdit, canPause, canUnpause],
+  ];
+  const own = (await call(asMember, "GET")).body.accounts.map(flags);
+  assert.deepEqual(own, [[mine, member.displayName, true, false, true, true, false]]);
+  const every = (await call(a, "GET")).body.accounts.map(flags);
+  assert.deepEqual(every, [
+    [mine, member.displayName, false, true, false, true, false],
+    [theirs, teammate.displayName, false, true, false, true, false],
+    [left, null, false, true, false, true, false],
+  ]);
+
+  const notOwner = { status: 403, body: { code: "not_account_owner" } };
+  const key = () => ({ "idempotency-key": randomUUID() });
+  const before = await app.senderAccount.findUniqueOrThrow({ where: { id: theirs } });
+  assert.deepEqual(await call(asMember, "PATCH", `/${theirs}`, { label: "Mine now" }), notOwner);
+  assert.deepEqual(await call(asMember, "POST", `/${theirs}/refresh`, undefined, key()), notOwner);
+  assert.deepEqual(await call(asMember, "DELETE", `/${theirs}`), notOwner);
+  assert.deepEqual(await call(a, "PATCH", `/${theirs}`, { label: "The Owner's" }), notOwner);
+  assert.deepEqual(await app.senderAccount.findUniqueOrThrow({ where: { id: theirs } }), before);
+  const published = await events(a);
+
+  const renamed = await call(asMember, "PATCH", `/${mine}`, { label: "Ada at work" });
+  assert.deepEqual(
+    [renamed.status, renamed.body.label, renamed.body.canEdit],
+    [200, "Ada at work", true],
+  );
+  const refreshed = await call(asMember, "POST", `/${mine}/refresh`, undefined, key());
+  assert.equal(refreshed.status, 202);
+  assert.deepEqual(await call(asMember, "DELETE", `/${mine}`), { status: 204, body: undefined });
+  const row = await app.senderAccount.findUniqueOrThrow({ where: { id: mine } });
+  assert.deepEqual([row.label, row.status], ["Ada at work", "disconnected"]);
+  assert.deepEqual(
+    (await events(a)).slice(published.length).map(([name]) => name),
+    ["linkedin.status_refresh_requested", "linkedin.sender_account_disconnected"],
+  );
 });

@@ -1,5 +1,6 @@
-// The drafter's gate, in code (agents/draft-profile/README.md; security §6): what the output schema
-// cannot say, the lengths and counts icpBody checks (schemas/icp.ts), and no value twice in a list.
+// The drafter's gates, in code (agents/draft-profile/README.md; security §6): what the output schema
+// cannot say, the lengths and counts icpBody checks (schemas/icp.ts), no value twice in a list, and
+// every field answered (prompt v2).
 // It reads a valid output and returns issues, never throws and never changes the output; callAgent
 // retries a failed gate once, the issues in <validation_error>, then answers ai_failed. An issue
 // names a path and the rule broken, never a value. Pure; it imports none of the module's registries,
@@ -40,4 +41,16 @@ export function limitsGate(output: DraftProfileOutput): GateResult {
   return { gate: "limits", issues };
 }
 
-export const DRAFT_PROFILE_GATES = [limitsGate];
+/** Every list holds a value and every text some words: the owner wants each field drafted. */
+export function completeGate(output: DraftProfileOutput): GateResult {
+  const issues: AgentIssue[] = [];
+  for (const field of LISTS) {
+    if (output[field].length === 0) issues.push({ path: field, message: "empty" });
+  }
+  for (const field of Object.keys(TEXTS) as (keyof typeof TEXTS)[]) {
+    if (output[field].trim() === "") issues.push({ path: field, message: "empty" });
+  }
+  return { gate: "complete", issues };
+}
+
+export const DRAFT_PROFILE_GATES = [limitsGate, completeGate];

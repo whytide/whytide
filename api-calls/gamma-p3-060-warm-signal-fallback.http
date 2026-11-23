@@ -1,0 +1,35 @@
+# campaigns' pause and resume, of a campaign and of one person's enrollment (gamma-p3-060's commands,
+# routed by gamma-p3-061; core/modules/campaigns/README.md "Routes", "Pausing"): a member's session,
+# campaigns.write (Owner and Admin). A pause stops new claims at once; a resume waits for the next
+# runs of the queue and the plan. The wrong state is 409, an id the workspace does not hold 404.
+# `campaignId` is a campaign of your workspace (GET …/campaigns) and `enrollmentId` an enrollment
+# (GET …/campaigns/enrollments?personId=): put them in http-client.private.env.json with your
+# workspaceId. A write sends the cookie, so it sends Origin: {{appOrigin}} too (the api's origin
+# check).
+
+### POST /v1/workspaces/{workspaceId}/campaigns/{campaignId}/pause: pauses the active campaign as a member's: nothing of its enrollments is opened, placed or sent until it resumes; its status, reason and pause time; 409 campaign_not_active for a draft or a paused one, 404 campaign_not_found
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{campaignId}}/pause
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+### POST /v1/workspaces/{workspaceId}/campaigns/{campaignId}/resume: resumes the paused campaign, its waiting steps placed again from the next runs; 409 campaign_not_paused, 404 campaign_not_found
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{campaignId}}/resume
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+### POST /v1/workspaces/{workspaceId}/campaigns/enrollments/{enrollmentId}/pause: pauses the active enrollment as a member's, until the time given, or without one until a member resumes it; a reply or a suppression still ends it; 409 enrollment_not_active, 404 enrollment_not_found
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/enrollments/{{enrollmentId}}/pause
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "until": "2026-11-16T09:00:00.000Z" }
+
+### POST /v1/workspaces/{workspaceId}/campaigns/enrollments/{enrollmentId}/resume: resumes the paused enrollment, its waiting steps placed again from the next runs; 409 enrollment_not_paused, 404 enrollment_not_found
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/enrollments/{{enrollmentId}}/resume
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}

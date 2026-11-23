@@ -19,10 +19,13 @@
     { "path": "../../packages/platform" },
     { "path": "../../packages/db" },
     { "path": "../../packages/providers" },
+    { "path": "../../packages/ai" },
     { "path": "../contacts" },
+    { "path": "../enrichment" },
     { "path": "../icp" },
     { "path": "../linkedin" },
     { "path": "../onboarding" },
+    { "path": "../playbooks" },
     { "path": "../qualification" },
     { "path": "../tenancy" }
   ]

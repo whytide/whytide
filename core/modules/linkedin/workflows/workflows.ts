@@ -3,19 +3,22 @@
 // linkedin_status_refresh, hourly and global, every account with a reference, workspace by workspace
 // and one after the other, then its pending invitations' check, due once a day (the patch
 // PENDING_INVITES_PATCH, asked once at the run's start): an account whose refresh or check failed
-// past its attempts is counted and the others go on. linkedin_daily, daily and global, starts each
+// past its attempts is counted and the others go on; behind STATUS_REFRESH_PAGES_PATCH, a run takes
+// one page of workspaces and continues as new with its cursor and counts until the last page
+// (gamma-p0-085). linkedin_daily, daily and global, starts each
 // workspace's linkedin_daily_workspace and purges the receipts; a workspace's run ramps its accounts,
 // expires the stale holds and purges its action log. A failed step leaves the purge after it to run,
 // then fails the run with its code.
 // linkedin_notify mails the owner about one health event, or the operator about the fleet breaker's
 // trip, once (domain/health/mail.ts).
-import { isCancellation, patched, proxyActivities } from "@temporalio/workflow";
+import { continueAsNew, isCancellation, patched, proxyActivities } from "@temporalio/workflow";
 import type { ActivityFunctions } from "@whytide/platform";
 import {
   DAILY_TIMEOUT,
   INVITES_CHECK_TIMEOUT,
   NOTIFY_TIMEOUT,
   PENDING_INVITES_PATCH,
+  STATUS_REFRESH_PAGES_PATCH,
 } from "./constants.ts";
 import type { dailyActivities } from "./daily.ts";
 import type { activities } from "./index.ts";
@@ -36,13 +39,27 @@ export async function linkedin_refresh_account(input: { workspaceId: string; acc
   return linkedin_refresh_status(input);
 }
 
-export async function linkedin_status_refresh(input: Record<string, never>) {
+/** The status refresh's counts: the accounts refreshed, and the ones failed past their attempts. */
+export type StatusRefreshCounts = { readonly accounts: number; readonly failed: number };
+
+/** Continued as new, a run's cursor, the last workspace handled, and its counts so far. */
+export type StatusRefreshInput = {
+  readonly afterId?: string;
+  readonly counts?: StatusRefreshCounts;
+};
+
+export async function linkedin_status_refresh(
+  input: StatusRefreshInput,
+): Promise<StatusRefreshCounts> {
   // Asked once, here: a run started before the patch replays without its marker and checks no
   // invitations to its end, where a later ask, live once the replay is over, would turn it on mid-run.
   const checksInvites = patched(PENDING_INVITES_PATCH);
-  const { workspaceIds } = await linkedin_list_workspaces(input);
-  let accounts = 0;
-  let failed = 0;
+  // Asked once too, for the same reason: a run started before it lists its workspaces once, as
+  // before, and never continues as new.
+  const paged = patched(STATUS_REFRESH_PAGES_PATCH);
+  const page = paged ? { afterId: input.afterId } : input;
+  const { workspaceIds, next } = await linkedin_list_workspaces(page);
+  let { accounts, failed } = input.counts ?? { accounts: 0, failed: 0 };
   for (const workspaceId of workspaceIds) {
     const { accountIds } = await linkedin_list_referenced_accounts({ workspaceId });
     for (const accountId of accountIds) {
@@ -55,6 +72,14 @@ export async function linkedin_status_refresh(input: Record<string, never>) {
         failed += 1;
       }
     }
+  }
+  // After a page that is not the last, the next run of the same id goes on after its last
+  // workspace, so that no run's history grows with the number of workspaces.
+  if (paged && typeof next === "string") {
+    return continueAsNew<typeof linkedin_status_refresh>({
+      afterId: next,
+      counts: { accounts, failed },
+    });
   }
   return { accounts, failed };
 }

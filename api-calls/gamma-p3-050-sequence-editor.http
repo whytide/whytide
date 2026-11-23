@@ -1,0 +1,45 @@
+# campaigns' sequence editor and launch (gamma-p3-050; core/modules/campaigns/README.md "Routes",
+# "Launch checks"): a member's session; the writes take campaigns.write (Owner and Admin), the checks
+# campaigns.read. A save is the campaign's next version, which only new enrollments join; the same
+# steps again write nothing. The launch reads every check again under the campaign's lock and moves
+# a draft only. `campaignId` is a campaign of your workspace (GET …/campaigns): put it in
+# http-client.private.env.json with your workspaceId. A write sends the cookie, so it sends Origin:
+# {{appOrigin}} too (the api's origin check).
+
+### PUT /v1/workspaces/{workspaceId}/campaigns/{campaignId}/sequence: saves the steps as the campaign's next version, a delay in business days on each step but the connection request, the first message and, with the fallback, the first email, at most limits.maxStepDelayBusinessDays (CAMPAIGNS_MAX_STEP_DELAY_BUSINESS_DAYS, 30 unset); the version's number and steps; 400 campaign_sequence_invalid with details.rule, 409 campaign_archived, 404 campaign_not_found
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{campaignId}}/sequence
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{
+  "steps": [
+    { "action": "invite" },
+    { "action": "message" },
+    { "action": "message", "delayBusinessDays": 3 },
+    { "action": "email" },
+    { "action": "email", "delayBusinessDays": 3 }
+  ],
+  "emailFallback": true
+}
+
+### PATCH /v1/workspaces/{workspaceId}/campaigns/{campaignId}: renames the campaign, its name trimmed; 400 campaign_name_invalid outside 1 to 80 characters, 404 campaign_not_found
+PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{campaignId}}
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "name": "Warm leads" }
+
+### GET /v1/workspaces/{workspaceId}/campaigns/{campaignId}/launch-checks: each launch check read now for the campaign's owner, its LinkedIn account, the disclosure and the credits, with its code when it fails; 404 campaign_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{campaignId}}/launch-checks
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/campaigns/{campaignId}/launch: the draft campaign active, with its launch time, once every check passes again; 409 campaign_launch_blocked with details.checks, 409 campaign_not_draft, 404 campaign_not_found
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{campaignId}}/launch
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}

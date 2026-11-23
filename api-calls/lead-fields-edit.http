@@ -1,0 +1,19 @@
+# contacts' edit of a lead's person (lead-fields-edit; core/modules/contacts/README.md "Routes"): a
+# member's session and contacts.write, every role's. Any of the six fields, trimmed; an empty one
+# clears it, but the first name, which stays. A changed field takes the `member` stamp, which no later
+# LinkedIn, import or website value overwrites; no score, status or draft changes. A write sends the
+# cookie, so it sends Origin: {{appOrigin}} too. `personId` is a person of your workspace with a lead:
+# put it in http-client.private.env.json with your workspaceId.
+
+### PATCH /v1/workspaces/{workspaceId}/contacts/leads/{personId}: a member's edit of the lead's person, its names, headline, title, company and location; 200 with the lead as GET …/leads/{personId} answers it; 400 contacts_input_invalid naming the fields (a first name emptied, a value too long), validation_failed for another field (the LinkedIn URL, the country); 404 lead_not_found, also for another workspace's person
+PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/{{personId}}
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{
+  "title": "VP Data",
+  "locationText": "Berlin, Germany",
+  "headline": ""
+}

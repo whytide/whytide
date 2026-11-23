@@ -4,7 +4,9 @@
 // with release, commit and the hour's sweep; the smaller of the day's read allowance and the cap, a
 // lowered cap at once and a raised one the next quota day; the quota day in two time zones, and west
 // of UTC across daylight saving; the working hours; twenty reservations on twenty connections; the
-// 200; one draw a day; remainingToday and the week's 100; senderOf; the log's rows.
+// 200; one draw a day; remainingToday and the week's 100; senderOf; the log's rows. A page of posts
+// (`read_posts`), the reads `keep` leaves, alone and at once on fifteen connections, and
+// readsLeftToday (gamma-p5-015).
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
@@ -18,6 +20,7 @@ import {
   commitReads,
   type Refusal,
   type Reservation,
+  readsLeftToday,
   readUsage,
   releaseReads,
   remainingToday,
@@ -29,6 +32,10 @@ import type { ActionOutcome } from "../schemas/quota.ts";
 import {
   createConnectedAccount,
   openSending,
+  setAccountPaused,
+  setHealth,
+  setPlatformControls,
+  setWorkspaceStopped,
   useClock,
   useLinkedinClient,
   useRandom,
@@ -73,6 +80,17 @@ const days = async (accountId: string) =>
   (await app.senderQuotaUsage.findMany({ where: { senderAccountId: accountId } }))
     .map(({ quotaDay, readsReserved, readsCommitted }) => [quotaDay, readsReserved, readsCommitted])
     .sort();
+
+/** A read of `count` pages of posts for the account, keeping `keep`, in its run. */
+const posts = (
+  owner: Awaited<ReturnType<typeof account>>,
+  options: { count?: number; keep?: number } = {},
+  client?: PrismaClient,
+) => {
+  const { count = 1, keep } = options;
+  const input = { accountId: owner.id, count, kind: "read_posts", keep } as const;
+  return owner.run(() => reserveReads(input), client);
+};
 
 /** The account's row of the quota day, its counters set as the sends of the day left them. */
 async function sendsOn(accountId: string, quotaDay: string, counted: Record<string, number>) {
@@ -393,4 +411,142 @@ test("every reservation and every read writes one action-log row with its count 
   );
   // The rows count in the table only: linkedin's activities add the metric after their run.
   assert.equal(recordedMetrics().get("linkedin.actions"), undefined);
+});
+
+test("read_posts: a page counts one read of the day, its row with no object; past the cap read_cap_reached and past the 200 daily_actions_cap_reached, each with the next quota day's start; outside the hours outside_working_hours with the next window's", async () => {
+  const paris = await account("Europe/Paris", OFFICE);
+  at = new Date("2026-10-22T10:00:00Z"); // Thursday 12:00 in Paris
+  granted(await posts(paris));
+  assert.deepEqual(await days(paris.id), [["2026-10-22", 1, 0]]);
+  granted(await paris.reserve(99));
+  const midnight = "2026-10-22T22:00:00.000Z"; // Friday 00:00 in Paris
+  assert.deepEqual(await posts(paris), refusal("read_cap_reached", midnight));
+  at = new Date("2026-10-22T17:00:00Z"); // 19:00 in Paris
+  const friday = "2026-10-23T06:30:00.000Z"; // Friday 08:30 in Paris
+  assert.deepEqual(await posts(paris), refusal("outside_working_hours", friday));
+  const rows = await app.senderActionLog.findMany({
+    where: { senderAccountId: paris.id, kind: "read_posts" },
+    orderBy: [{ at: "asc" }, { id: "asc" }],
+  });
+  assert.deepEqual(
+    rows.map(({ objectRef, count, outcome }) => [objectRef, count, outcome]),
+    [
+      [null, 1, "reserved"],
+      [null, 1, "read_cap_reached"],
+      [null, 1, "outside_working_hours"],
+    ],
+  );
+
+  const busy = await account("Europe/Paris", OFFICE);
+  at = new Date("2026-10-22T10:00:00Z");
+  await busy.run(() => remainingToday(busy.id));
+  const counted = { invitesCommitted: 60, messagesCommitted: 120, withdrawalsCommitted: 15 };
+  await sendsOn(busy.id, "2026-10-22", { ...counted, readsCommitted: 5 });
+  assert.deepEqual(await posts(busy), refusal("daily_actions_cap_reached", midnight));
+});
+
+test("read_posts under each kill switch, the account not connected, its health's pause and its retry_at: refused with the code, no read counted, and readsLeftToday answers 0; lifted, the page is granted", async () => {
+  const paris = await account("Europe/Paris", OFFICE);
+  at = new Date("2026-10-22T10:00:00Z"); // Thursday 12:00 in Paris
+  const retryAt = new Date("2026-10-22T11:00:00Z");
+  const status = (value: "connected" | "disconnected") => () =>
+    app.senderAccount.update({ where: { id: paris.id }, data: { status: value } });
+  const retry = (value: Date | null) => () =>
+    app.senderAccount.update({ where: { id: paris.id }, data: { retryAt: value } });
+  const pausedUntil = new Date("2026-10-23T10:00:00Z");
+  const platform = (stopped: boolean) => () => setPlatformControls({ stopped });
+  const workspace = (on: boolean) => () =>
+    setWorkspaceStopped(paris.workspaceId, on ? "operator" : null);
+  const stop = (on: boolean) => () => setAccountPaused(paris.id, on ? "tester" : null);
+  const health = (on: boolean) => () =>
+    on ? setHealth(paris.id, "restricted", { pausedUntil }) : setHealth(paris.id, "healthy");
+  const holds = [
+    ["platform_stopped", null, platform(true), platform(false)],
+    ["workspace_stopped", null, workspace(true), workspace(false)],
+    ["account_stopped", null, stop(true), stop(false)],
+    ["linkedin_account_disconnected", null, status("disconnected"), status("connected")],
+    ["account_paused", null, health(true), health(false)],
+    ["rate_limited", retryAt, retry(retryAt), retry(null)],
+  ] as const;
+  for (const [refused, retryAtOf, on, off] of holds) {
+    await on();
+    assert.deepEqual(await posts(paris), { refused, retryAt: retryAtOf }, refused);
+    assert.equal((await paris.run(() => readsLeftToday(paris.id))).left, 0, refused);
+    await off();
+  }
+  assert.deepEqual(await days(paris.id), [["2026-10-22", 0, 0]]);
+  granted(await posts(paris));
+  assert.deepEqual(await days(paris.id), [["2026-10-22", 1, 0]]);
+});
+
+test("keep: with 25 reads left, a page of 5 keeping 20 is granted, and the next of 1 is refused read_cap_reached with the next window's start; without keep it is granted; keep counts the 200 too", async () => {
+  const paris = await account("Europe/Paris", OFFICE);
+  at = new Date("2026-10-22T10:00:00Z"); // Thursday 12:00 in Paris
+  granted(await paris.reserve(75));
+  granted(await posts(paris, { count: 5, keep: 20 }));
+  const friday = "2026-10-23T06:30:00.000Z"; // Friday 08:30 in Paris, the next window's start
+  assert.deepEqual(await posts(paris, { keep: 20 }), refusal("read_cap_reached", friday));
+  granted(await posts(paris));
+  assert.deepEqual(await days(paris.id), [["2026-10-22", 81, 0]]);
+
+  // 100 reads left by the budget, 6 by the 200: keeping 6, no read is left to take.
+  const busy = await account("Europe/Paris", OFFICE);
+  await busy.run(() => remainingToday(busy.id));
+  const counted = { invitesCommitted: 60, messagesCommitted: 119, withdrawalsCommitted: 15 };
+  await sendsOn(busy.id, "2026-10-22", counted);
+  assert.deepEqual(await posts(busy, { keep: 6 }), refusal("read_cap_reached", friday));
+  granted(await posts(busy, { keep: 5 }));
+});
+
+test("keep at once: fifteen pages keeping 20, on fifteen connections, with 30 reads left: exactly ten granted, and 20 left", async () => {
+  const london = await account("Europe/London", ALWAYS);
+  at = new Date("2026-10-22T12:00:00Z");
+  granted(await london.reserve(70));
+  const clients = Array.from({ length: 15 }, () => createDbClient("app", { schema: db.schema }));
+  try {
+    const answers = await Promise.all(clients.map((client) => posts(london, { keep: 20 }, client)));
+    const outcomes = answers.map((answer) => ("refused" in answer ? answer.refused : "granted"));
+    assert.deepEqual(outcomes.sort(), [
+      ...Array(10).fill("granted"),
+      ...Array(5).fill("read_cap_reached"),
+    ]);
+    assert.deepEqual(await days(london.id), [["2026-10-22", 80, 0]]);
+    assert.equal((await london.run(() => readsLeftToday(london.id))).left, 20);
+  } finally {
+    await Promise.all(clients.map((client) => client.$disconnect()));
+  }
+});
+
+test("readsLeftToday: the usage route's read limit less its reserved and made reads, within the 200, as reserveReads grants them; outside the window the same reads, the window closed; it makes the day's row", async () => {
+  const paris = await account("Europe/Paris", OFFICE);
+  at = new Date("2026-10-22T10:00:00Z"); // Thursday 12:00 in Paris
+  const left = () => paris.run(() => readsLeftToday(paris.id));
+  const fromUsage = async () => {
+    const usage = await paris.run(() => readUsage(paris.id));
+    const reads = Math.min(usage.readAllowance, usage.cap) - usage.reserved - usage.committed;
+    return Math.min(reads, usage.actions.max - usage.actions.used);
+  };
+  const friday = new Date("2026-10-23T06:30:00Z"); // Friday 08:30 in Paris
+  const open = { quotaDay: "2026-10-22", left: 100, windowOpen: true, nextWindowAt: friday };
+  assert.deepEqual(await left(), open);
+  assert.deepEqual(await days(paris.id), [["2026-10-22", 0, 0]]);
+  const read = granted(await paris.reserve(30));
+  await paris.run(() => commitReads(read, 20));
+  granted(await posts(paris));
+  assert.deepEqual([(await left()).left, await fromUsage()], [79, 79]);
+  await paris.run(() => updateSettings(paris.id, { dailyReadCap: 40 }));
+  assert.deepEqual([(await left()).left, await fromUsage()], [19, 19]);
+  await sendsOn(paris.id, "2026-10-22", { invitesCommitted: 60, messagesCommitted: 110 });
+  assert.deepEqual([(await left()).left, await fromUsage()], [9, 9]);
+  at = new Date("2026-10-22T17:00:00Z"); // 19:00 in Paris
+  const closed = { quotaDay: "2026-10-22", left: 9, windowOpen: false, nextWindowAt: friday };
+  assert.deepEqual(await left(), closed);
+  at = new Date("2026-10-22T10:00:00Z");
+  const midnight = "2026-10-22T22:00:00.000Z"; // Friday 00:00 in Paris
+  assert.deepEqual(
+    await posts(paris, { count: 10 }),
+    refusal("daily_actions_cap_reached", midnight),
+  );
+  granted(await posts(paris, { count: 9 }));
+  assert.equal((await left()).left, 0);
 });

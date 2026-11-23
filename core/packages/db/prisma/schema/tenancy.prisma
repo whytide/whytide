@@ -3,7 +3,9 @@
 // through withoutTenant("tenancy"); memberships is a tenant table. The relations are declared for
 // their foreign keys and queried model by model (the tenant client refuses a relation in any
 // argument). Hand-written SQL in the migration: users_email_lowercase, a CHECK that keeps every
-// email lowercased, so that the unique email is unique whatever the case it was typed in.
+// email lowercased, so that the unique email is unique whatever the case it was typed in; and in
+// 20261105122726_tenancy_membership_removal (gamma-p6-030), memberships_removed_together, a CHECK
+// that sets removed_at and removed_by together or neither.
 
 // A person who signs in: the authentication adapter maps its users onto this table (alpha-p3-020).
 // email and display_name are the account holder's own, not a lead's: docs/security.md of tenancy.
@@ -48,7 +50,8 @@ model Workspace {
 }
 
 // A user's role in one workspace. The index on user_id serves the one read across workspaces,
-// a user's own memberships (tenancy's docs/security.md).
+// a user's own memberships (tenancy's docs/security.md). A removed membership keeps its row, so
+// the ids other tables hold stay valid; every read of memberships skips it (gamma-p6-030).
 /// tenant
 model Membership {
   id          String         @id
@@ -56,6 +59,9 @@ model Membership {
   userId      String         @map("user_id")
   role        MembershipRole
   createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  /// Set by removeMember, with the user who removed it; cleared when addMember adds the user again.
+  removedAt   DateTime?      @map("removed_at") @db.Timestamptz()
+  removedBy   String?        @map("removed_by")
   workspace   Workspace      @relation(fields: [workspaceId], references: [id])
   user        User           @relation(fields: [userId], references: [id])
 

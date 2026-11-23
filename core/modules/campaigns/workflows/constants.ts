@@ -9,6 +9,14 @@ export const MS_PER_MINUTE = 60_000;
 export const PLAN_TIMEOUT = "1 minute";
 /** A queue activity's start-to-close: the tick's starts, a workspace's due steps, or one step. */
 export const QUEUE_TIMEOUT = "1 minute";
+/**
+ * The queue run's pages (gamma-p0-085; README.md "The queue"): the due steps one run asks for at
+ * most, after its cursor in id order, the run continued as new after each page but the last (not in
+ * the sources); and the patch of campaigns_queue that pages, asked once at the run's start: a run
+ * started before it replays unchanged and never continues as new.
+ */
+export const QUEUE_PAGE_SIZE = 200;
+export const QUEUE_PAGES_PATCH = "queue-pages";
 /** A sender activity's start-to-close: one tenant run, with a request file written or read. */
 export const SENDER_TIMEOUT = "1 minute";
 /**
@@ -68,3 +76,9 @@ export const SEND_START_TIMEOUT = "1 minute";
  * past them the read has no answer and is settled as not made, each attempt one call at most.
  */
 export const PROFILE_READ_ATTEMPTS = 3;
+
+/**
+ * A reply label's notice's attempt (gamma-p4-050): a tenant run, tenancy's reads and the app-mail
+ * port's send, whose SMTP waits add up, as inbox's reply mail's.
+ */
+export const NOTICE_TIMEOUT = "1 minute";

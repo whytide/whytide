@@ -7,6 +7,7 @@ import { Prisma, tenantClient } from "@whytide/db";
 import { AppError, currentTenant, newId } from "@whytide/platform";
 import { errors } from "../errors.ts";
 import { ids } from "../ids.ts";
+import { holdUntil } from "./hold.ts";
 import { type LeadSource, mergeSource, type SourceKind, sourceEntry } from "./lead.ts";
 import type { Lead } from "./leads.ts";
 import { normalizeLinkedinUrl } from "./linkedin-url.ts";
@@ -46,7 +47,11 @@ export async function upsertPersonsFromSource(
   const checked = inputs.map((input): Refused | Checked => {
     const parsed = upsertPersonInput.safeParse(input);
     if (!parsed.success) return { code: errors.contacts_input_invalid };
-    const linkedinUrl = normalizeLinkedinUrl(parsed.data.profile.linkedinUrl);
+    // An import's row always has a profile and never an address: one without a profile, or with an
+    // address, is the one-row command's (gamma-rf-050).
+    const { linkedinUrl: url, email } = parsed.data.profile;
+    if (url === undefined || email !== undefined) return { code: errors.contacts_input_invalid };
+    const linkedinUrl = normalizeLinkedinUrl(url);
     if (linkedinUrl === null) return { code: errors.linkedin_url_invalid };
     return { parsed: parsed.data, linkedinUrl, hashes: hashesOf(linkedinUrl, parsed.data) };
   });
@@ -102,8 +107,11 @@ async function writePersons(
     const stored = (await tenantClient.person.findMany({
       where: { linkedinUrl: { in: urls } },
     })) as Person[];
+    // Each read by its URL, so none is a person without a profile (gamma-rf-050).
     const state = new Map<string, Record<string, unknown>>(
-      stored.map((person) => [person.linkedinUrl, person]),
+      stored.flatMap((person) =>
+        person.linkedinUrl === null ? [] : [[person.linkedinUrl, person] as const],
+      ),
     );
     const wasStored = new Set(state.keys());
     for (const { linkedinUrl, parsed } of pending) {
@@ -159,7 +167,8 @@ export type LeadForPerson = {
 
 /**
  * createLeadForPerson for each input, in their order, in one INSERT … ON CONFLICT on the person: a
- * new lead pending, labeled by its first source; a lead the person has gets each source it lacks
+ * new lead pending, labeled by its first source and held for enrichment (hold.ts); a lead the person
+ * has keeps its hold and gets each source it lacks
  * (by kind and ref), and the label and URL brought again for one it has, in the statement itself,
  * so that no other run's source is lost. An answer per input, the lead as the call leaves it; only
  * the first input of a new lead is `created`. contacts_input_invalid naming the input's fields, and
@@ -193,10 +202,11 @@ export async function createLeadsForPersons(
 /** One INSERT … ON CONFLICT of the leads: the persons written and which leads are new. */
 function insertLeads(sources: ReadonlyMap<string, readonly LeadSource[]>) {
   const { workspaceId } = currentTenant();
+  const hold = holdUntil(new Date());
   const values = [...sources].map(([personId, entries]) => {
     const [first] = entries as [LeadSource];
     return Prisma.sql`(${personId}, ${workspaceId}, ${first.kind}::lead_source_kind,
-      ${json(entries)}::jsonb, ${first.at}::timestamptz, now())`;
+      ${json(entries)}::jsonb, ${first.at}::timestamptz, now(), ${hold}::timestamptz)`;
   });
   // The lead's sources, each taking the label and URL the call brings for its kind and ref, where
   // given (mergeSource); then the sources the lead lacks, in the call's order. updated_at moves with
@@ -211,7 +221,8 @@ function insertLeads(sources: ReadonlyMap<string, readonly LeadSource[]>) {
     WHERE NOT leads.sources @> jsonb_build_array(
       jsonb_build_object('kind', entry->'kind', 'ref', entry->'ref'))), '[]')`;
   return tenantClient.$queryRaw<{ person_id: string; inserted: boolean }[]>`
-    INSERT INTO leads (person_id, workspace_id, source_label, sources, first_source_at, updated_at)
+    INSERT INTO leads (person_id, workspace_id, source_label, sources, first_source_at, updated_at,
+      enrichment_hold_until)
     VALUES ${Prisma.join(values)}
     ON CONFLICT (workspace_id, person_id) DO UPDATE SET
       sources = ${renamed} || ${missing},

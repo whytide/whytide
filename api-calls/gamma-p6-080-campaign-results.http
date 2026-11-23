@@ -1,0 +1,7 @@
+# campaigns' funnel, the Results page (core/modules/campaigns/README.md "Routes"): a member's
+# session, campaigns.read. Put your workspaceId in http-client.private.env.json.
+
+### GET /v1/workspaces/{workspaceId}/campaigns/funnel: per campaign the member sees, by name (an Owner or Admin every one, with its owner's name; a Member her own), the people enrolled, then on LinkedIn and by email those sent to, who accepted, replied and replied positively, each enrollment once per stage; ids, names, codes and numbers only; none without a campaign
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/funnel
+Accept: application/json
+Cookie: {{sessionCookie}}

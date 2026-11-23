@@ -5,8 +5,9 @@
 // says which key, nothing about it. The key bytes live in the wrapper's closure, so a logged or
 // spread key ring shows versions only; the unwrap is not on the wrapper at all but behind
 // unwrapperOf, which only secrets/worker.ts calls, so holding the keys gives the api no way to
-// decrypt. A cloud key service replaces masterKeyWrapper and registers its unwrap the same way.
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
+// decrypt. A cloud key service replaces masterKeyWrapper and registers its unwrap the same way. Its
+// derive step (deriveSecret, derive.ts) computes a value from the key without opening anything.
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from "node:crypto";
 import type { Env } from "../config/define.ts";
 import { AppError } from "../errors/index.ts";
 import { secretsConfig } from "./config.ts";
@@ -17,6 +18,8 @@ export type KeyWrapper = {
   /** Sixteen hex characters, the blob's key_version. */
   readonly keyVersion: string;
   wrap(dataKey: Buffer, associatedData: Buffer): Buffer;
+  /** 32 bytes: an HMAC-SHA-256 of the input under a key HKDF-SHA-256 derives from this key for the purpose. */
+  derive(input: Buffer, purpose: string): Buffer;
 };
 /** Throws a plain Error when the key or the associated data are not the wrap's. */
 export type Unwrap = (wrapped: Buffer, associatedData: Buffer) => Buffer;
@@ -30,6 +33,8 @@ export const TAG_BYTES = 16;
 export const WRAPPED_KEY_BYTES = NONCE_BYTES + KEY_BYTES + TAG_BYTES;
 const BASE64_KEY = /^[A-Za-z0-9+/]{43}=$/;
 const VERSION_LABEL = "whytide.secrets.key_version.v1";
+/** HKDF's salt for derive: a label of its own, so no derived key is ever a wrap key or a version. */
+const DERIVE_LABEL = "whytide.secrets.derive.v1";
 const unwrappers = new WeakMap<KeyWrapper, Unwrap>();
 let loaded: SecretKeys | undefined;
 
@@ -104,6 +109,14 @@ function masterKeyWrapper(key: Buffer): KeyWrapper {
       cipher.setAAD(associatedData);
       const encrypted = Buffer.concat([cipher.update(dataKey), cipher.final()]);
       return Buffer.concat([nonce, encrypted, cipher.getAuthTag()]);
+    },
+    derive(input, purpose) {
+      const derived = Buffer.from(hkdfSync("sha256", key, DERIVE_LABEL, purpose, KEY_BYTES));
+      try {
+        return createHmac("sha256", derived).update(input).digest();
+      } finally {
+        derived.fill(0);
+      }
     },
   });
   registerUnwrapper(wrapper, (wrapped, associatedData) => {

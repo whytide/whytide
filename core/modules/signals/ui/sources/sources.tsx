@@ -5,41 +5,73 @@
 // per account; then the add form, the list and the runs panel of the source the address names. A
 // change reads them again; Run now too, and opens its source's runs panel, which reads the new run.
 // While a run reads, or until the run Run now asked for starts, the list alone is read again every
-// SOURCES_POLL_MS, so that its card follows it.
+// SOURCES_POLL_MS, so that its card follows it. The add form's "Import sources from a CSV" opens the
+// import under it (source-import.tsx); an import reads the screen again, and the Imported files too
+// (SourcesAndFiles). Who is signed in (GET /v1/me) says which sources the member may write: their
+// own, or every one for a holder of signals.manage (README "Decided here"); the forms offer a
+// member without it only their own sender accounts, the api refusing the others.
 import { ErrorState, LoadingState, Skeleton } from "@whytide/ui";
 import { ApiError, browserApi, data } from "@whytide/web/api/browser";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
+import { SIGNALS_MANAGE_ROLES } from "../../domain/constants.ts";
 import { AddSourceForm } from "./add-source-form.tsx";
 import { CONNECTED, SKELETON, SOURCES_POLL_MS } from "./constants.ts";
+import { ImportedFiles } from "./imported-files.tsx";
 import { RunsPanel } from "./runs-panel.tsx";
-import { type Account, type Source, SourceList, type Usage } from "./source-list.tsx";
+import { SourceImport } from "./source-import.tsx";
+import { type Account, type Source, SourceList, type Usage, type Viewer } from "./source-list.tsx";
 
 type Loaded = {
   readonly sources: Source[];
   readonly accounts: Account[];
   readonly usage: ReadonlyMap<string, Usage>;
+  readonly viewer: Viewer;
 };
 
-export function SourcesScreen(props: { workspaceId: string; runsOf: string | undefined }) {
-  const { workspaceId } = props;
+/** The screen, then the Imported files, which an import of sources reads again. */
+export function SourcesAndFiles(props: { workspaceId: string; runsOf: string | undefined }) {
+  const [imports, setImports] = useState(0);
+  return (
+    <div className="grid gap-8">
+      <SourcesScreen {...props} onImported={() => setImports((count) => count + 1)} />
+      <ImportedFiles key={imports} workspaceId={props.workspaceId} />
+    </div>
+  );
+}
+
+export function SourcesScreen(props: {
+  workspaceId: string;
+  runsOf: string | undefined;
+  /** Sources were imported from a CSV file. */
+  onImported: () => void;
+}) {
+  const { workspaceId, onImported } = props;
   const t = useTranslations("signals.sources");
   const [loaded, setLoaded] = useState<Loaded>();
+  /** The import of a CSV file of sources, open under the add form. */
+  const [importing, setImporting] = useState(false);
   const [failure, setFailure] = useState<string>();
   /** The source whose runs show, and the runs asked for: the panel reads again after each. */
   const [runs, setRuns] = useState({ of: props.runsOf, asked: 0 });
   /** The source Run now asked a run of, and its last run then, which the run's start changes. */
   const [starting, setStarting] = useState<Pick<Source, "id" | "lastRunAt">>();
 
-  /** The whole screen: the sources and the sender accounts, then the usage a run waits on. */
+  /** The whole screen: the sources, the sender accounts and the member, then the usage. */
   const read = useCallback(async (): Promise<Loaded> => {
     const api = browserApi();
     const path = { workspaceId };
-    const [{ sources }, { accounts }] = await Promise.all([
+    const [{ sources }, { accounts }, me] = await Promise.all([
       data(api.GET("/v1/workspaces/{workspaceId}/signals/sources", { params: { path } })),
       data(api.GET("/v1/workspaces/{workspaceId}/linkedin/accounts", { params: { path } })),
+      data(api.GET("/v1/me")),
     ]);
-    return { sources, accounts, usage: await usageOf(workspaceId, sources, accounts) };
+    const role = me.memberships.find(
+      (membership) => membership.workspaceId === workspaceId || membership.slug === workspaceId,
+    )?.role;
+    const manages = SIGNALS_MANAGE_ROLES.some((manager) => manager === role);
+    const viewer = { userId: me.user.id, manages };
+    return { sources, accounts, usage: await usageOf(workspaceId, sources, accounts), viewer };
   }, [workspaceId]);
 
   const load = useCallback(async () => {
@@ -80,7 +112,9 @@ export function SourcesScreen(props: { workspaceId: string; runsOf: string | und
         );
         const unread = sources.some(
           ({ openRun, senderAccountId }) =>
-            openRun?.status === "waiting" && !loaded.usage.has(senderAccountId),
+            openRun?.status === "waiting" &&
+            senderAccountId !== null &&
+            !loaded.usage.has(senderAccountId),
         );
         const whole = unread ? await read() : undefined;
         if (live) setLoaded((shown) => whole ?? (shown && { ...shown, sources }));
@@ -131,16 +165,35 @@ export function SourcesScreen(props: { workspaceId: string; runsOf: string | und
       </section>
     );
   }
-  const { sources, accounts, usage } = loaded;
+  const { sources, accounts, usage, viewer } = loaded;
+  // A source reads through its creator's own account unless signals.manage's (gamma-p6-015).
+  const offered = viewer.manages ? accounts : accounts.filter(({ mine }) => mine);
   const shown = sources.find((source) => source.id === runs.of);
   return (
     <div className="grid gap-6">
-      <AddSourceForm workspaceId={workspaceId} accounts={accounts} onAdded={load} />
+      <AddSourceForm
+        workspaceId={workspaceId}
+        accounts={offered}
+        onAdded={load}
+        onImport={() => setImporting(true)}
+      />
+      {importing ? (
+        <SourceImport
+          workspaceId={workspaceId}
+          accounts={offered}
+          onImported={async () => {
+            onImported();
+            await load();
+          }}
+          onClose={() => setImporting(false)}
+        />
+      ) : null}
       <SourceList
         workspaceId={workspaceId}
         sources={sources}
         accounts={accounts}
         usage={usage}
+        viewer={viewer}
         onChange={load}
         onRan={ran}
         runsOf={shown?.id}
@@ -166,6 +219,7 @@ async function usageOf(workspaceId: string, sources: Source[], accounts: Account
   const waiting = new Set(
     sources.filter(({ openRun }) => openRun?.status === "waiting").map((s) => s.senderAccountId),
   );
+  // A source with no account (Web research) never waits on one.
   const ids = accounts.filter((a) => a.status === CONNECTED && waiting.has(a.id)).map((a) => a.id);
   const api = browserApi();
   const read = async (id: string): Promise<[string, Usage] | undefined> => {

@@ -19,6 +19,7 @@
     { "path": "../../packages/platform" },
     { "path": "../../packages/db" },
     { "path": "../contacts" },
+    { "path": "../email" },
     { "path": "../linkedin" },
     { "path": "../messaging" },
     { "path": "../tenancy" }

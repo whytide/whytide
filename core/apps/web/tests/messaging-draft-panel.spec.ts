@@ -5,8 +5,9 @@
 // its writer leaves it, and the panel's next poll shows it. Note and Draft, then the draft with its
 // counter, plan, facts and their sources, and gates; Edit and Save, the counter in the danger
 // colour and Save refused above the limit; Regenerate on top of the edited draft, kept in the
-// history; a flagged draft's reasons without Copy; a failed one's reason, for each of the four
-// codes; the panel absent for another workspace's person. Every text from its key, through
+// history; a flagged draft's reasons without Copy; a failed one's reason, for each of the five
+// codes; a lead's email draft with its subject (gamma-p3-070); the panel absent for another
+// workspace's person. Every text from its key, through
 // next-intl's translator over the module's messages; axe on each state. Copy and the clipboard,
 // which Chromium alone grants, are messaging-states.spec.ts's.
 import { AxeBuilder } from "@axe-core/playwright";
@@ -39,6 +40,7 @@ const GATES = [
   "grounding",
   "red_lines",
   "colleague_signal",
+  "signal_act",
 ];
 /** A failed draft's codes (README.md "The writer"). */
 const FAILURES = [
@@ -46,6 +48,7 @@ const FAILURES = [
   "draft_requester_not_member",
   "dossier_lead_not_found",
   "write_failed",
+  "profile_not_english",
 ];
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -156,6 +159,8 @@ const button = (scope: Locator, key: string) =>
 const isPost =
   (path: RegExp) => (r: { request: () => { method: () => string }; url: () => string }) =>
     r.request().method() === "POST" && path.test(new URL(r.url()).pathname);
+const passed = (gate: string) =>
+  t("messaging.draft.gate_result", { gate: t(`messaging.draft.gate.${gate}`), result: "passed" });
 
 test("note and Draft: one request, the draft being written with Draft and Regenerate disabled; the next poll shows it, its counter, its plan with the facts and their sources, its gates; axe", async ({
   page,
@@ -199,8 +204,6 @@ test("note and Draft: one request, the draft being written with Draft and Regene
     `Blue Harbor Labs ${source("company_name")}`,
   ]);
   await expect(panel).not.toContainText("persons/");
-  const passed = (gate: string) =>
-    t("messaging.draft.gate_result", { gate: t(`messaging.draft.gate.${gate}`), result: "passed" });
   await expect(listOf(panel, "messaging.draft.gates").locator(":scope > li")).toHaveText(
     GATES.map(passed),
   );
@@ -259,7 +262,7 @@ test("Edit, a word changed, Save: the edited text and mark; above the limit the 
   await axe(page);
 });
 
-test("a flagged draft shows its reasons, the entity that failed grounding, and no Copy; a failed one shows its code's reason, for each of the four; another workspace's person has no panel; axe", async ({
+test("a flagged draft shows its reasons, the entity that failed grounding, and no Copy; a failed one shows its code's reason, for each of the five; another workspace's person has no panel; axe", async ({
   page,
   signInAs,
   baseURL,
@@ -302,4 +305,31 @@ test("a flagged draft shows its reasons, the entity that failed grounding, and n
   await page.goto(`/w/wsp_e2e_b/leads/${personId}`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(t("contacts.lead.not_found"));
   await expect(panel).toHaveCount(0);
+});
+
+test("a lead's email draft: its subject above its body and in the history, beside the email's channel, with the email's gates; axe", async ({
+  page,
+  signInAs,
+  baseURL,
+}) => {
+  await signInAs();
+  const subject = "Warm leads at Blue Harbor Labs";
+  const email = { channel: "email", stepKind: "email_first", subject };
+  const { personId } = await seed(page, baseURL, (d) => [written(d, NOTE, email)]);
+  await page.goto(leadPath(personId));
+  const panel = panelOf(page);
+  const current = panel.locator('[data-part="draft"]');
+  const title = current.getByText(t("messaging.draft.subject", { subject }), { exact: true });
+  const body = current.getByText(NOTE, { exact: true });
+  await expect(title).toBeVisible();
+  await expect(body).toBeVisible();
+  const [above, below] = [await title.boundingBox(), await body.boundingBox()];
+  expect((above?.y ?? 0) < (below?.y ?? 0)).toBe(true);
+  await expect(listOf(panel, "messaging.draft.gates").locator(":scope > li")).toHaveText(
+    [...GATES, "subject", "links"].map(passed),
+  );
+  const history = listOf(panel, "messaging.draft.history").getByRole("listitem");
+  await expect(history.nth(0)).toContainText(t("messaging.draft.subject", { subject }));
+  await expect(history.nth(0)).toContainText(t("messaging.draft.channel.email"));
+  await axe(page);
 });

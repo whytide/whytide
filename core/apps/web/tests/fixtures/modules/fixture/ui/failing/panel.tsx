@@ -1,6 +1,7 @@
-// The test module's panel in the draft slot of contacts' lead page (ui/nav.ts `panels`), as the
-// request's cookie `fixture_panel` asks: `throw` throws, as
-// core/apps/web/tests/evidence-panel.spec.ts sets it to prove the slot's error boundary; `wait`
+// The test module's panel in the draft slot of contacts' lead page and in the campaign slot of
+// playbooks' agent page (ui/nav.ts `panels`), as the request's cookie `fixture_panel` asks: `throw`
+// throws, as core/apps/web/tests/evidence-panel.spec.ts and playbooks-agents.spec.ts set it to prove
+// each slot's error boundary; `wait`
 // answers after two seconds with a line, so that contacts-states.spec.ts sees the slot's loading
 // state and a retry's answer; `not_found` calls notFound(), which passes the slot's boundary; it
 // renders nothing otherwise.

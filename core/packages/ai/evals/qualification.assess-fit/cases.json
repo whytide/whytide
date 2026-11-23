@@ -1177,5 +1177,290 @@
       "disqualifiers": [],
       "verdicts": { "title_function": "met", "seniority": "met" }
     }
+  },
+  {
+    "name": "combined-title-revops-gtm",
+    "input": {
+      "profile": {
+        "headline": "RevOps & GTM Lead | B2B SaaS",
+        "title": "RevOps & GTM Lead",
+        "country": "Germany (DE)"
+      },
+      "company": { "name": "Kestrel Cloud", "industry": "Software", "size": "51-200" },
+      "evidence": ["We moved our weekly pipeline reviews into Salesforce"],
+      "icp": {
+        "titles": ["Revenue Operations Manager", "Head of Sales"],
+        "seniorities": ["manager", "head", "director"],
+        "industries": ["Software"],
+        "company_sizes": ["51-200", "201-500"],
+        "countries": ["DE", "NL"]
+      },
+      "must_haves": "Runs a sales team that works in a CRM.",
+      "disqualifiers": "Agencies, consultants and recruiters."
+    },
+    "fake": [
+      {
+        "verdicts": [
+          { "criterion": "title_function", "verdict": "met", "evidence": "RevOps & GTM Lead" },
+          { "criterion": "seniority", "verdict": "partially_met", "evidence": "Lead" },
+          { "criterion": "company_size", "verdict": "met", "evidence": "51-200" },
+          { "criterion": "industry", "verdict": "met", "evidence": "Software" },
+          { "criterion": "location", "verdict": "met", "evidence": "Germany (DE)" },
+          {
+            "criterion": "must_haves",
+            "verdict": "met",
+            "evidence": "pipeline reviews into Salesforce"
+          }
+        ],
+        "disqualifiers": [],
+        "summary": "A revenue operations and go-to-market lead at a mid-sized German software company."
+      }
+    ],
+    "expected": { "disqualifiers": [], "verdicts": { "title_function": "met" } }
+  },
+  {
+    "name": "abbreviated-title-alone",
+    "input": {
+      "profile": {
+        "headline": "RevOps at Kestrel Cloud | Revenue operations for the sales team",
+        "title": "RevOps",
+        "country": "Germany (DE)"
+      },
+      "company": { "name": "Kestrel Cloud", "industry": "Software", "size": "51-200" },
+      "evidence": [],
+      "icp": {
+        "titles": ["Revenue Operations Manager", "Head of Sales"],
+        "seniorities": ["manager", "head", "director"],
+        "industries": ["Software"],
+        "company_sizes": ["51-200", "201-500"],
+        "countries": ["DE", "NL"]
+      },
+      "must_haves": "Runs a sales team that works in a CRM.",
+      "disqualifiers": "Agencies, consultants and recruiters."
+    },
+    "fake": [
+      {
+        "verdicts": [
+          {
+            "criterion": "title_function",
+            "verdict": "met",
+            "evidence": "Revenue operations for the sales team"
+          },
+          { "criterion": "seniority", "verdict": "unknown", "evidence": "" },
+          { "criterion": "company_size", "verdict": "met", "evidence": "51-200" },
+          { "criterion": "industry", "verdict": "met", "evidence": "Software" },
+          { "criterion": "location", "verdict": "met", "evidence": "Germany (DE)" },
+          { "criterion": "must_haves", "verdict": "unknown", "evidence": "" }
+        ],
+        "disqualifiers": [],
+        "summary": "A revenue operations person at a mid-sized German software company, level not stated."
+      }
+    ],
+    "expected": {
+      "disqualifiers": [],
+      "verdicts": { "title_function": "met", "seniority": "unknown" }
+    }
+  },
+  {
+    "name": "combined-title-one-part-matches",
+    "input": {
+      "profile": {
+        "headline": "Finance & RevOps Manager at Linden Systems",
+        "title": "Finance & RevOps Manager",
+        "country": "Netherlands (NL)"
+      },
+      "company": { "name": "Linden Systems", "industry": "Software", "size": "201-500" },
+      "evidence": [],
+      "icp": {
+        "titles": ["Revenue Operations Manager", "Head of Sales"],
+        "seniorities": ["manager", "head", "director"],
+        "industries": ["Software"],
+        "company_sizes": ["51-200", "201-500"],
+        "countries": ["DE", "NL"]
+      },
+      "must_haves": "Runs a sales team that works in a CRM.",
+      "disqualifiers": "Agencies, consultants and recruiters."
+    },
+    "fake": [
+      {
+        "verdicts": [
+          { "criterion": "title_function", "verdict": "met", "evidence": "RevOps Manager" },
+          { "criterion": "seniority", "verdict": "met", "evidence": "Manager" },
+          { "criterion": "company_size", "verdict": "met", "evidence": "201-500" },
+          { "criterion": "industry", "verdict": "met", "evidence": "Software" },
+          { "criterion": "location", "verdict": "met", "evidence": "Netherlands (NL)" },
+          { "criterion": "must_haves", "verdict": "unknown", "evidence": "" }
+        ],
+        "disqualifiers": [],
+        "summary": "A finance and revenue operations manager at a Dutch software company."
+      }
+    ],
+    "expected": { "disqualifiers": [], "verdicts": { "title_function": "met" } }
+  },
+  {
+    "name": "combined-title-no-part-matches",
+    "input": {
+      "profile": {
+        "headline": "Office & Facilities Manager | Workplace and events",
+        "title": "Office & Facilities Manager",
+        "country": "Germany (DE)"
+      },
+      "company": { "name": "Kestrel Cloud", "industry": "Software", "size": "51-200" },
+      "evidence": [],
+      "icp": {
+        "titles": ["Revenue Operations Manager", "Head of Sales"],
+        "seniorities": ["manager", "head", "director"],
+        "industries": ["Software"],
+        "company_sizes": ["51-200", "201-500"],
+        "countries": ["DE", "NL"]
+      },
+      "must_haves": "Runs a sales team that works in a CRM.",
+      "disqualifiers": "Agencies, consultants and recruiters."
+    },
+    "fake": [
+      {
+        "verdicts": [
+          {
+            "criterion": "title_function",
+            "verdict": "not_met",
+            "evidence": "Office & Facilities Manager"
+          },
+          { "criterion": "seniority", "verdict": "met", "evidence": "Manager" },
+          { "criterion": "company_size", "verdict": "met", "evidence": "51-200" },
+          { "criterion": "industry", "verdict": "met", "evidence": "Software" },
+          { "criterion": "location", "verdict": "met", "evidence": "Germany (DE)" },
+          { "criterion": "must_haves", "verdict": "unknown", "evidence": "" }
+        ],
+        "disqualifiers": [],
+        "summary": "An office and facilities manager at a German software company, outside sales and revenue operations."
+      }
+    ],
+    "expected": {
+      "disqualifiers": [],
+      "verdicts": { "title_function": "not_met", "seniority": "met" }
+    }
+  },
+  {
+    "name": "agency-owner-targeted",
+    "input": {
+      "profile": {
+        "headline": "Founder & CEO at Brightline Media | Performance marketing agency",
+        "title": "Founder & CEO",
+        "country": "United States (US)"
+      },
+      "company": { "name": "Brightline Media", "industry": "Marketing Services", "size": "11-50" },
+      "evidence": ["We run paid social for 40 ecommerce clients"],
+      "icp": {
+        "titles": ["Agency Owner", "Founder", "Managing Director"],
+        "seniorities": ["owner_founder", "c_level", "director"],
+        "industries": ["Marketing Services", "Advertising Services"],
+        "company_sizes": ["1-10", "11-50"],
+        "countries": ["US", "GB"]
+      },
+      "must_haves": "Runs an agency that serves several clients.",
+      "disqualifiers": "Students and job seekers."
+    },
+    "fake": [
+      {
+        "verdicts": [
+          { "criterion": "title_function", "verdict": "met", "evidence": "Founder & CEO" },
+          { "criterion": "seniority", "verdict": "met", "evidence": "Founder" },
+          { "criterion": "company_size", "verdict": "met", "evidence": "11-50" },
+          { "criterion": "industry", "verdict": "met", "evidence": "Marketing Services" },
+          { "criterion": "location", "verdict": "met", "evidence": "United States (US)" },
+          {
+            "criterion": "must_haves",
+            "verdict": "met",
+            "evidence": "paid social for 40 ecommerce clients"
+          }
+        ],
+        "disqualifiers": [],
+        "summary": "The founder of a small American marketing agency with many clients."
+      }
+    ],
+    "expected": {
+      "disqualifiers": [],
+      "verdicts": { "title_function": "met", "must_haves": "met" }
+    }
+  },
+  {
+    "name": "agency-not-targeted",
+    "input": {
+      "profile": {
+        "headline": "Managing Director at Copperleaf Digital, a B2B marketing agency",
+        "title": "Managing Director",
+        "country": "Germany (DE)"
+      },
+      "company": {
+        "name": "Copperleaf Digital",
+        "industry": "Marketing Services",
+        "size": "11-50"
+      },
+      "evidence": [],
+      "icp": {
+        "titles": ["Revenue Operations Manager", "Head of Sales"],
+        "seniorities": ["manager", "head", "director"],
+        "industries": ["Software"],
+        "company_sizes": ["51-200", "201-500"],
+        "countries": ["DE", "NL"]
+      },
+      "must_haves": "Runs a sales team that works in a CRM.",
+      "disqualifiers": "Agencies, consultants and recruiters."
+    },
+    "fake": [
+      {
+        "verdicts": [
+          { "criterion": "title_function", "verdict": "not_met", "evidence": "Managing Director" },
+          { "criterion": "seniority", "verdict": "partially_met", "evidence": "Director" },
+          { "criterion": "company_size", "verdict": "not_met", "evidence": "11-50" },
+          { "criterion": "industry", "verdict": "not_met", "evidence": "Marketing Services" },
+          { "criterion": "location", "verdict": "met", "evidence": "Germany (DE)" },
+          { "criterion": "must_haves", "verdict": "unknown", "evidence": "" }
+        ],
+        "disqualifiers": ["agency_or_consultant"],
+        "summary": "The managing director of a small German marketing agency, not an end customer."
+      }
+    ],
+    "expected": { "disqualifiers": ["agency_or_consultant"], "verdicts": { "industry": "not_met" } }
+  },
+  {
+    "name": "student-not-targeted",
+    "input": {
+      "profile": {
+        "headline": "MBA student | Former SDR",
+        "title": "MBA Candidate",
+        "country": "Netherlands (NL)"
+      },
+      "company": {
+        "name": "Delta Business School",
+        "industry": "Higher Education",
+        "size": "201-500"
+      },
+      "evidence": [],
+      "icp": {
+        "titles": ["Revenue Operations Manager", "Head of Sales"],
+        "seniorities": ["manager", "head", "director"],
+        "industries": ["Software"],
+        "company_sizes": ["51-200", "201-500"],
+        "countries": ["DE", "NL"]
+      },
+      "must_haves": "Runs a sales team that works in a CRM.",
+      "disqualifiers": "Agencies, consultants and recruiters."
+    },
+    "fake": [
+      {
+        "verdicts": [
+          { "criterion": "title_function", "verdict": "not_met", "evidence": "MBA Candidate" },
+          { "criterion": "seniority", "verdict": "unknown", "evidence": "" },
+          { "criterion": "company_size", "verdict": "met", "evidence": "201-500" },
+          { "criterion": "industry", "verdict": "not_met", "evidence": "Higher Education" },
+          { "criterion": "location", "verdict": "met", "evidence": "Netherlands (NL)" },
+          { "criterion": "must_haves", "verdict": "unknown", "evidence": "" }
+        ],
+        "disqualifiers": ["student_or_intern"],
+        "summary": "An MBA student at a Dutch business school, not in a sales role."
+      }
+    ],
+    "expected": { "disqualifiers": ["student_or_intern"], "verdicts": { "industry": "not_met" } }
   }
 ]

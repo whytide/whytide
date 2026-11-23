@@ -16,14 +16,46 @@
 // (migration 20261029101240_contacts_outreach_status): its REVOKE UPDATE from app keeps the changes
 // append-only, and two CHECKs, lead_status_changes_actor (an actor_id for a user, none for system)
 // and lead_status_changes_change (from_status differs from to_status), keep each row a real change.
+// gamma-p5-055 adds leads.icp_id_scored, the audience of the decision, and its index on
+// (workspace_id, icp_id_scored, icp_version_scored) (migration 20261102113200_contacts_lead_audience).
+// gamma-p2-040 gives suppression_entries its channels, the relationship layer and its column
+// (migration 20261102125800_contacts_suppression_channels), and takes DELETE on it from app.
+// title-check-ai's migration 20261104101137_contacts_title_hashes_reset, data only, deletes once the
+// rejected candidates' hashes whose only reason is title_mismatch, which no filter writes anymore.
+// gamma-p2-045 adds an eighth, exclusion_lists, a CSV of domains imported as one list, and
+// suppression_entries.exclusion_list_id (migration 20261112231349_contacts_exclusion_lists).
+// review-gaps adds a ninth, exclusion_list_domains, every domain each list names (migration
+// 20261113030128_contacts_exclusion_list_domains).
+// gamma-en-040 adds leads.enrichment_hold_until, the time a new lead waits for enrichment until, and
+// workspace_companies.employee_count and description, the company's own facts enrichment brings
+// (migration 20261113114002_contacts_enrichment), with hand-written SQL Prisma cannot say: the
+// partial index (workspace_id, enrichment_hold_until) WHERE enrichment_hold_until IS NOT NULL, and
+// the CHECKs workspace_companies_employee_count (at least 1) and workspace_companies_description (at
+// most 2,000 characters).
+// gamma-rf-010 adds the company index's two layers above the workspace's row (migration
+// 20261114134946_contacts_shared_companies): companies, one company for every workspace, global, with
+// the facts a shared class brought (contacts' CONTACTS_SHARED_FACT_SOURCES) and no name; and
+// group_companies, one sharing group's facts and keys on that company, keyed by (sharing_group_id,
+// company_id), the group being tenancy's sharingGroupOf(), with no foreign key; and
+// workspace_companies.company_id, the row's link, set once. Hand-written SQL Prisma cannot say: app
+// holds no DELETE on the two tables; companies_field_provenance_source refuses a stamp whose source
+// is not a shared class (so never linkedin, import, member or ai_inferred); and both carry
+// workspace_companies' CHECKs on employee_count and description. Only contacts' domain/companies.ts
+// and domain/companies/ name the two tables.
+// gamma-rf-040 adds person_email_hashes, the keyed hash of each email address a person holds and no
+// address, and an address block: suppression_match_type's `email` and suppression_entries.email
+// (migration 20261114165214_contacts_suppression_email). Hand-written SQL: the CHECK
+// suppression_entries_email_match, and app holds no UPDATE on person_email_hashes.
 
 /// tenant
 model Person {
   id              String            @id
   workspaceId     String            @map("workspace_id")
-  /// https://linkedin.com/in/<slug>, lowercased (contacts' domain/linkedin-url.ts).
+  /// https://linkedin.com/in/<slug>, lowercased (contacts' domain/linkedin-url.ts); null for a person
+  /// known by an email address's hash only (person_email_hashes, gamma-rf-040), never by neither
+  /// (gamma-rf-050).
   /// pii: business_contact
-  linkedinUrl     String            @map("linkedin_url")
+  linkedinUrl     String?           @map("linkedin_url")
   /// The provider's member id, keyed by adapter name: { "unipile": "…" }.
   /// pii: business_contact
   providerRefs    Json?             @map("provider_refs")
@@ -53,6 +85,7 @@ model Person {
   // Restrict: SET NULL on a key with workspace_id would empty workspace_id too; nothing deletes a company.
   company         WorkspaceCompany? @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
   lead            Lead?
+  emailHashes     PersonEmailHash[]
 
   @@unique([workspaceId, linkedinUrl])
   @@unique([workspaceId, id])
@@ -63,27 +96,92 @@ model Person {
 // A company of the workspace, unique by its normalized LinkedIn page or its domain.
 /// tenant
 model WorkspaceCompany {
-  id              String   @id
-  workspaceId     String   @map("workspace_id")
+  id              String         @id
+  workspaceId     String         @map("workspace_id")
   name            String
   /// Lowercased, without the scheme, www. or a path.
   domain          String?
   /// https://linkedin.com/company/<slug>, lowercased.
-  linkedinUrl     String?  @map("linkedin_url")
+  linkedinUrl     String?        @map("linkedin_url")
   industry        String?
-  sizeRange       String?  @map("size_range")
+  sizeRange       String?        @map("size_range")
   /// ISO 3166-1 alpha-2.
   country         String?
-  providerRefs    Json?    @map("provider_refs")
-  fieldProvenance Json     @map("field_provenance")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  /// The headcount a source gives (gamma-en-040), at least 1 (a hand-written CHECK).
+  employeeCount   Int?           @map("employee_count")
+  /// The company's own description, at most 2,000 characters (a hand-written CHECK).
+  description     String?
+  providerRefs    Json?          @map("provider_refs")
+  fieldProvenance Json           @map("field_provenance")
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz()
+  /// The shared company the row is linked to (gamma-rf-010): set once, never changed.
+  companyId       String?        @map("company_id")
   persons         Person[]
+  // Restrict: nothing deletes a shared company.
+  sharedCompany   SharedCompany? @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([workspaceId, linkedinUrl])
   @@unique([workspaceId, domain])
   @@unique([workspaceId, id])
+  @@index([workspaceId, companyId])
   @@map("workspace_companies")
+}
+
+/// One company for every workspace (gamma-rf-010): only the facts a shared class brought, keyed by its
+/// LinkedIn page or its domain. No name, and no column that names a workspace, an organization, a user
+/// or a run.
+model SharedCompany {
+  id              String             @id
+  /// https://linkedin.com/company/<slug>, lowercased.
+  linkedinUrl     String?            @unique @map("linkedin_url")
+  /// Lowercased, without the scheme, www. or a path.
+  domain          String?            @unique
+  industry        String?
+  sizeRange       String?            @map("size_range")
+  /// ISO 3166-1 alpha-2.
+  country         String?
+  /// At least 1 (a hand-written CHECK).
+  employeeCount   Int?               @map("employee_count")
+  /// At most 2,000 characters (a hand-written CHECK).
+  description     String?
+  providerRefs    Json?              @map("provider_refs")
+  /// { field: { source, provider, at } }; a hand-written CHECK takes only a shared class's source.
+  fieldProvenance Json               @map("field_provenance")
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime           @updatedAt @map("updated_at") @db.Timestamptz()
+  groupRows       GroupCompany[]
+  workspaceRows   WorkspaceCompany[]
+
+  @@map("companies")
+}
+
+/// One sharing group's facts and keys on a shared company (gamma-rf-010): the group is tenancy's
+/// sharingGroupOf(), the workspace's organization today, and has no foreign key. Not a tenant table:
+/// every query on it carries sharingGroupOf()'s id, never one a caller names.
+model GroupCompany {
+  sharingGroupId  String        @map("sharing_group_id")
+  companyId       String        @map("company_id")
+  /// Not unique here: two groups may know one page.
+  linkedinUrl     String?       @map("linkedin_url")
+  domain          String?
+  industry        String?
+  sizeRange       String?       @map("size_range")
+  /// ISO 3166-1 alpha-2.
+  country         String?
+  /// At least 1 (a hand-written CHECK).
+  employeeCount   Int?          @map("employee_count")
+  /// At most 2,000 characters (a hand-written CHECK).
+  description     String?
+  providerRefs    Json?         @map("provider_refs")
+  fieldProvenance Json          @map("field_provenance")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz()
+  // Restrict: nothing deletes a shared company.
+  company         SharedCompany @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([sharingGroupId, companyId])
+  @@map("group_companies")
 }
 
 // What is left of a rejected candidate (90 days) or an erased person (for good): the HMAC of a
@@ -114,6 +212,27 @@ enum PersonHashKind {
   @@map("person_hash_kind")
 }
 
+// The email addresses a person holds, as hashes (gamma-rf-040; contacts' docs/data.md): enrichment
+// keeps the address (contact_points) and records its hash here first (recordPersonEmail), so that
+// a block on an address stops the person on every channel, LinkedIn's too, whose gate knows no
+// address. One address belongs to one person of a workspace: the key is (workspace_id, hash). No
+// address is stored. erasePerson deletes the person's rows before the person (Restrict); nothing
+// updates one: the migration 20261114165214_contacts_suppression_email revokes UPDATE from app.
+/// tenant
+model PersonEmailHash {
+  workspaceId String   @map("workspace_id")
+  personId    String   @map("person_id")
+  /// contacts' hashOf of the address, trimmed and in lower case (`email`).
+  /// pii: personal
+  hash        String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  person      Person   @relation(fields: [workspaceId, personId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([workspaceId, hash])
+  @@index([workspaceId, personId])
+  @@map("person_email_hashes")
+}
+
 // A person's one lead in the workspace, keyed on the person, so that a second source can never make a
 // second lead (architecture §7.3): where it came from, and what qualification decided (F04 §4.2). The
 // person's fields are joined at read time, never copied here.
@@ -124,7 +243,8 @@ model Lead {
   qualificationStatus    LeadQualificationStatus @default(pending) @map("qualification_status")
   /// The first source's kind.
   sourceLabel            LeadSourceKind          @map("source_label")
-  /// [{ kind, ref, at }], one per source, in the order they came; ref is the id of what brought it.
+  /// [{ kind, ref, at }], one per source, in the order they came; ref is the id of what brought it,
+  /// the member's user id for a lead added by hand (manual).
   sources                Json
   firstSourceAt          DateTime                @map("first_source_at") @db.Timestamptz()
   /// 0 to 100.
@@ -139,6 +259,9 @@ model Lead {
   hardFilterReason       String?                 @map("hard_filter_reason")
   /// A code: a disqualifier, insufficient_credits, the reason of ai_failed.
   statusReason           String?                 @map("status_reason")
+  /// The audience the decision was judged against (gamma-p5-055): icp's id, a plain id contacts
+  /// checks nothing about; null for a decision made before audiences, the default audience's.
+  icpIdScored            String?                 @map("icp_id_scored")
   icpVersionScored       Int?                    @map("icp_version_scored")
   /// Milliseconds, as JavaScript reads them, so that the newest-first cursor matches the row exactly.
   createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -150,6 +273,9 @@ model Lead {
   outreachStatus         LeadOutreachStatus      @default(pending_review) @map("outreach_status")
   /// A code: why the latest change happened, such as opted_out; null when none was given.
   outreachReason         String?                 @map("outreach_reason")
+  /// A new lead waits for enrichment until then before its first judgement (gamma-en-040); null for
+  /// none. A hand-written partial index covers the held ones.
+  enrichmentHoldUntil    DateTime?               @map("enrichment_hold_until") @db.Timestamptz()
   person                 Person                  @relation(fields: [workspaceId, personId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict)
   reviewDecisions        ReviewDecision[]
   statusChanges          LeadStatusChange[]
@@ -158,6 +284,7 @@ model Lead {
   @@index([workspaceId, qualificationStatus, fitScore])
   @@index([workspaceId, createdAt])
   @@index([workspaceId, outreachStatus])
+  @@index([workspaceId, icpIdScored, icpVersionScored])
   @@map("leads")
 }
 
@@ -216,9 +343,11 @@ enum LeadQualificationStatus {
   @@map("lead_qualification_status")
 }
 
+// A lead's source kinds: a signal's, an import's, and a member's by hand (lead-manual-create).
 enum LeadSourceKind {
   signal
   imported
+  manual
 
   @@map("lead_source_kind")
 }
@@ -300,46 +429,117 @@ enum ReviewReasonCode {
 
 // The workspace's never-contact list and its opt-outs (beta-p2-010; contacts' docs/data.md): an
 // entry blocks a person by the profile URL, or a company by its page or its domain, and is matched by
-// `hash` alone, so an entry still works once erasure clears its raw value. A blocklist entry is
-// removed by setting removed_at, never deleted. Hand-written SQL in the migration
-// 20261029091739_contacts_suppression: the unique key of the entries not removed,
+// `hash` alone, so an entry still works once erasure clears its raw value. A blocklist or a
+// relationship entry is removed by setting removed_at, never deleted. Hand-written SQL in the
+// migration 20261029091739_contacts_suppression: the unique key of the entries not removed,
 // suppression_entries_active_key on (workspace_id, layer, match_type, hash, channel) WHERE
 // removed_at IS NULL, a partial index the schema cannot say without a preview feature, and which
 // Prisma's diff leaves alone; and three CHECKs: suppression_entries_linkedin_url_match
 // (linkedin_url only on a linkedin_url entry), suppression_entries_domain_match (domain on a domain
 // entry, and only there) and suppression_entries_opt_out_kept (removed_at null on every opt-out).
+// In the migration 20261102125800_contacts_suppression_channels (gamma-p2-040): two more CHECKs,
+// suppression_entries_opt_out_every_channel (an opt-out's channel is all) and
+// suppression_entries_relationship_match (relationship set on a relationship entry and only there,
+// and such an entry on a domain), and REVOKE DELETE from app, so that no row is ever deleted. In the
+// migration 20261112231349_contacts_exclusion_lists (gamma-p2-045): suppression_entries_csv_list (a
+// csv entry has its exclusion list, and only a csv entry has one). In the migration
+// 20261114165214_contacts_suppression_email (gamma-rf-040): the match type email, on an address, and
+// suppression_entries_email_match (email on an email entry only).
 /// tenant
 model SuppressionEntry {
-  id          String               @id
-  workspaceId String               @map("workspace_id")
-  layer       SuppressionLayer
-  matchType   SuppressionMatchType @map("match_type")
-  /// contacts' hashOf of the normalized value: `url` for a profile or a company page, `domain`.
+  id              String                   @id
+  workspaceId     String                   @map("workspace_id")
+  layer           SuppressionLayer
+  matchType       SuppressionMatchType     @map("match_type")
+  /// contacts' hashOf of the normalized value: `url` for a profile or a company page, `domain`,
+  /// `email` for an address (gamma-rf-040).
   /// pii: personal
-  hash        String
+  hash            String
   /// The normalized profile or company page of a linkedin_url entry; null once the person is erased.
   /// pii: business_contact
-  linkedinUrl String?              @map("linkedin_url")
+  linkedinUrl     String?                  @map("linkedin_url")
   /// The normalized domain of a domain entry: a company's, as workspace_companies.domain.
-  domain      String?
-  channel     SuppressionChannel   @default(all)
-  source      SuppressionSource
+  domain          String?
+  /// The address of an email entry, trimmed and in lower case (gamma-rf-040); null once the person
+  /// who held it is erased.
+  /// pii: personal
+  email           String?
+  /// all, or the one channel the entry stops (gamma-p2-040); an opt-out is always all.
+  channel         SuppressionChannel       @default(all)
+  /// A relationship entry's kind, customer or competitor; null on every other layer.
+  relationship    SuppressionRelationship?
+  source          SuppressionSource
   /// A code: reply_opt_out for an opt-out found in a reply.
-  reason      String?
+  reason          String?
   /// The user who added the entry; null for system.
-  createdBy   String?              @map("created_by")
-  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
-  /// Set when a blocklist entry is removed; never on an opt-out.
-  removedAt   DateTime?            @map("removed_at") @db.Timestamptz(3)
-  removedBy   String?              @map("removed_by")
+  createdBy       String?                  @map("created_by")
+  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  /// Set when a blocklist or a relationship entry is removed; never on an opt-out.
+  removedAt       DateTime?                @map("removed_at") @db.Timestamptz(3)
+  removedBy       String?                  @map("removed_by")
+  /// The exclusion list a csv entry came with (gamma-p2-045); null on every other entry.
+  exclusionListId String?                  @map("exclusion_list_id")
+  exclusionList   ExclusionList?           @relation(fields: [workspaceId, exclusionListId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([workspaceId, hash])
+  @@index([workspaceId, exclusionListId])
   @@map("suppression_entries")
+}
+
+// An exclusion list (gamma-p2-045; contacts' docs/data.md): a CSV of customer or competitor domains,
+// imported in one run as relationship entries on every channel, each with the list's id. Removed as a
+// whole, by setting removed_at on the list and on its active entries, never deleted: the migration
+// 20261112231349_contacts_exclusion_lists revokes DELETE on it from app. The file is not stored.
+/// tenant
+model ExclusionList {
+  id             String                  @id
+  workspaceId    String                  @map("workspace_id")
+  /// The uploaded file's name, its first 200 characters.
+  name           String
+  /// What the file's companies are excluded as, customer or competitor.
+  relationship   SuppressionRelationship
+  /// The entries the import added.
+  entryCount     Int                     @map("entry_count")
+  /// The rows whose domain the file had already, or an active relationship entry held.
+  duplicateCount Int                     @map("duplicate_count")
+  /// The rows whose cell is no domain.
+  invalidCount   Int                     @map("invalid_count")
+  /// The user who imported the file.
+  createdBy      String                  @map("created_by")
+  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  /// Set with removed_by when an Owner or an Admin removes the list, its active entries with it.
+  removedAt      DateTime?               @map("removed_at") @db.Timestamptz(3)
+  removedBy      String?                 @map("removed_by")
+  entries        SuppressionEntry[]
+  domains        ExclusionListDomain[]
+
+  @@unique([workspaceId, id])
+  @@map("exclusion_lists")
+}
+
+// Every domain an exclusion list names (review-gaps; contacts' docs/data.md), its new entries' and
+// its duplicates' alike, by the domain's hash as suppression_entries.hash holds it, so that a list's
+// removal keeps the entries another active list names (domain/exclusions/lists.ts). The import writes
+// one row per domain of its file; nothing updates or deletes one: the migration
+// 20261113030128_contacts_exclusion_list_domains revokes UPDATE and DELETE on it from app,
+// and fills it from the lists' csv entries.
+/// tenant
+model ExclusionListDomain {
+  workspaceId     String        @map("workspace_id")
+  exclusionListId String        @map("exclusion_list_id")
+  /// contacts' hashOf of the normalized domain, as a domain entry's hash: a company's, no person's.
+  hash            String
+  exclusionList   ExclusionList @relation(fields: [workspaceId, exclusionListId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([workspaceId, exclusionListId, hash])
+  @@index([workspaceId, hash])
+  @@map("exclusion_list_domains")
 }
 
 enum SuppressionLayer {
   blocklist
   opt_out
+  relationship
 
   @@map("suppression_layer")
 }
@@ -347,19 +547,31 @@ enum SuppressionLayer {
 enum SuppressionMatchType {
   linkedin_url
   domain
+  email
 
   @@map("suppression_match_type")
 }
 
 enum SuppressionChannel {
   all
+  linkedin
+  email
 
   @@map("suppression_channel")
+}
+
+// A company excluded by its domain as the workspace's customer or competitor (gamma-p2-040).
+enum SuppressionRelationship {
+  customer
+  competitor
+
+  @@map("suppression_relationship")
 }
 
 enum SuppressionSource {
   manual
   system
+  csv
 
   @@map("suppression_source")
 }

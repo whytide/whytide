@@ -2,9 +2,11 @@
 // the sequence for that person"), on a schema of the worktree's database, in tenant runs as the
 // worker's activity has them: the message, the hold and the opt-out commit together, and a failure
 // after the hold, at the message's insert or at the commit, leaves none of them, the lead still in
-// its campaign. No model in the path: no @whytide/ai dependency, no call to the LLM port.
+// its campaign. No model in the path (AGENTS.md rule 5, as gamma-p4-040 rewrote it): none of
+// inbox's own files that the store's run imports names @whytide/ai or reaches the classifier, no
+// file but the classifier's imports @whytide/ai in any form, and a stored reply calls no model.
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { useHashSalt } from "@whytide/contacts/testing";
 import { asRole, withTestDb } from "@whytide/db/testing";
@@ -70,12 +72,81 @@ for (const [at, table, when] of [
   });
 }
 
-test("no model in the stop: no @whytide/ai dependency and no call to the LLM port", async () => {
-  const manifest = JSON.parse(
-    await readFile(new URL("../../package.json", import.meta.url), "utf8"),
+/** What a source imports: from "…", a bare import "…" and import("…"); never import.meta. */
+const FROM = /\b(?:from|import)\s*\(?\s*"([^"]+)"/g;
+const specifiersOf = (text: string) => [...text.matchAll(FROM)].map(([, name = ""]) => name);
+const isAi = (name: string) => /^@whytide\/ai(?:\/|$)/.test(name);
+type Read = (url: URL) => Promise<string>;
+const fromDisk: Read = (url) => readFile(url, "utf8");
+
+/** Each inbox file the entry reaches by its relative imports, with the packages it imports. */
+async function reachable(entry: URL, read: Read): Promise<Map<string, string[]>> {
+  const seen = new Map<string, string[]>();
+  const queue = [entry];
+  for (let url = queue.pop(); url !== undefined; url = queue.pop()) {
+    if (seen.has(url.pathname)) continue;
+    const specifiers = specifiersOf(await read(url));
+    const packages = specifiers.filter((s) => !s.startsWith("."));
+    seen.set(url.pathname, packages);
+    queue.push(...specifiers.filter((s) => s.startsWith(".")).map((s) => new URL(s, url)));
+  }
+  return seen;
+}
+
+/** The classifier's files, by their path from the module's root; its constants import nothing. */
+const CLASSIFIER = /^(?:agents\/|domain\/classify\/(?!constants\.ts$))/;
+
+// Rule 5's breaches under root, each file by its path from it: the store's run naming
+// @whytide/ai or reaching the classifier, and a file but the classifier's importing it.
+async function breaches(root: URL, files: readonly string[], read = fromDisk): Promise<string[]> {
+  const found: string[] = [];
+  for (const [path, packages] of await reachable(new URL("domain/store/store.ts", root), read)) {
+    const file = path.slice(root.pathname.length);
+    if (packages.some(isAi)) found.push(`the store's run: ${file} names ai`);
+    if (CLASSIFIER.test(file)) found.push(`the store's run reaches ${file}`);
+  }
+  for (const file of files) {
+    const named = specifiersOf(await read(new URL(file, root))).some(isAi);
+    if (named && !/^(?:agents|domain\/classify)\//.test(file)) found.push(`${file} names ai`);
+  }
+  return found;
+}
+
+/** The folders the module's sources are not in, at its root. */
+const SKIPPED = new Set(["node_modules", "dist", "tests", ".tmp"]);
+/** The module's .ts and .tsx files, by their path from the root; links are not followed. */
+async function sources(root: URL, folder = ""): Promise<string[]> {
+  const entries = await readdir(new URL(folder, root), { withFileTypes: true });
+  const found = await Promise.all(
+    entries.map(async (entry) => {
+      const path = `${folder}${entry.name}`;
+      if (entry.isDirectory()) return SKIPPED.has(path) ? [] : sources(root, `${path}/`);
+      return /\.tsx?$/.test(entry.name) ? [path] : [];
+    }),
   );
-  const declared = { ...manifest.dependencies, ...manifest.devDependencies };
-  assert.equal("@whytide/ai" in declared, false);
+  return found.flat();
+}
+
+test("no model in the stop: none of inbox's files the store's run imports names @whytide/ai or reaches the classifier, no file but the classifier's imports @whytide/ai in any form (a planted bare and dynamic import caught), and a stored reply calls no model", async () => {
+  const root = new URL("../../", import.meta.url);
+  const files = await sources(root);
+  const classify = await fromDisk(new URL("domain/classify/classify.ts", root));
+  assert.ok(specifiersOf(classify).some(isAi), "the classifier's import is read");
+  assert.ok(files.includes("domain/classify/classify.ts"), "the walk finds the classifier");
+  assert.deepEqual(await breaches(root, files), []);
+  // The control, in memory: a bare and two dynamic imports, each caught; import.meta names nothing.
+  const planted = new Map([
+    ["domain/store/store.ts", 'import "@whytide/ai";\nawait import("../classify/classify.ts");'],
+    ["ui/x.ts", 'const ai = await import("@whytide/ai");\nimport.meta.url;'],
+  ]);
+  const at = new URL("file:///planted/");
+  const read: Read = async (url) => planted.get(url.pathname.slice(at.pathname.length)) ?? "";
+  assert.deepEqual(await breaches(at, [...planted.keys()], read), [
+    "the store's run: domain/store/store.ts names ai",
+    "the store's run reaches domain/classify/classify.ts",
+    "domain/store/store.ts names ai",
+    "ui/x.ts names ai",
+  ]);
   const { id: senderAccountId } = await account();
   const personId = await enrolled(senderAccountId, "reply-hold-no-model");
   llm.reset();

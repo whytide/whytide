@@ -2,7 +2,9 @@
 // (docs/rules/coding.md §2, §3): ids only. Its own subscribers, in the worker, keep a source's
 // schedule `signals-<sourceId>` (platform README "Workflows"), start a run asked for by hand and
 // cancel a stopped run's workflow (README.md "Runs") and qualification's batch for the persons a run
-// found ("Processing"), in the workspace of the delivery's tenant run, never the payload's.
+// found ("Processing"), in the workspace of the delivery's tenant run, never the payload's. It
+// subscribes to playbooks' playbook_updated too: a paused agent's sources' open runs are stopped
+// (paused-agent-sources); signals imports playbooks, never the other way round.
 import { tenantClient } from "@whytide/db";
 import {
   cancelWorkflow,
@@ -15,9 +17,13 @@ import {
   startWorkflow,
   subscribe,
 } from "@whytide/platform";
+import { events as playbooks } from "@whytide/playbooks";
 import { batchStart } from "@whytide/qualification";
 import { z } from "zod";
-import { runNowWorkflowIdOf } from "./domain/constants.ts";
+import { RESEARCH_WORKFLOW, runNowWorkflowIdOf } from "./domain/constants.ts";
+import "./domain/register-checker.ts";
+import "./domain/register-reader.ts";
+import { stopPausedAgentRuns } from "./domain/sources.ts";
 import { registeredSourceKinds } from "./sources/registry.ts";
 
 const source = z.strictObject({ source_id: z.string() });
@@ -70,6 +76,8 @@ async function scheduleSource(found: Schedulable): Promise<void> {
   const kind = registeredSourceKinds().get(found.kind);
   if (!kind) return;
   const at = kind.schedule(found.config, found.createdAt);
+  // A research source (gamma-wr-030) has no fire time: no schedule, the daily tick writes its runs.
+  if (at.length === 0) return;
   const after = found.lastRunAt?.getTime() ?? Number.NEGATIVE_INFINITY;
   await createSchedule({
     scheduleId: scheduleIdOf(found.id),
@@ -112,11 +120,15 @@ subscribe(events["signals.source_deleted"], async ({ source_id, workflow_ids = [
   for (const workflowId of workflow_ids) await cancelRun(workflowId, { source_id });
 });
 
-// By an id from the run's: a second delivery starts no second run.
+// By an id from the run's: a second delivery starts no second run. A research source's run is the
+// research workflow's (gamma-wr-030); the kind is read from the source, which a delete may have taken.
 subscribe(events["signals.run_requested"], async ({ source_id, run_id }) => {
   const { workspaceId } = currentTenant();
+  const found = await tenantClient.signalSource.findFirst({ where: { id: source_id } });
+  const research =
+    found !== null && registeredSourceKinds().get(found.kind)?.cadence === "research";
   await startWorkflow({
-    workflow: RUN_WORKFLOW,
+    workflow: research ? RESEARCH_WORKFLOW : RUN_WORKFLOW,
     input: { workspaceId, sourceId: source_id, runId: run_id },
     workflowId: runNowWorkflowIdOf(workspaceId, run_id),
   });
@@ -137,4 +149,12 @@ subscribe(events["signals.run_stop_requested"], async ({ source_id, run_id }) =>
 // subscribers do (decisions.md, 2026-10-22: qualification never imports signals). One run at a time.
 subscribe(events["signals.person_found"], async () => {
   await startWorkflow(batchStart(currentTenant().workspaceId));
+});
+
+// An agent changed (paused-agent-sources): while it is paused when this is delivered, by a member or
+// for its owner's removal, its sources' open runs are stopped as Stop stops them, in the delivery's
+// run (domain/sources.ts stopPausedAgentRuns); a redelivery finds their stops asked and asks none.
+// A resume starts nothing: the sources run again from their next due time.
+subscribe(playbooks["playbooks.playbook_updated"], async ({ playbookId }) => {
+  await stopPausedAgentRuns(playbookId);
 });

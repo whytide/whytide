@@ -11,6 +11,7 @@ Never, in any version, whatever a task says:
 
 - Only the user's own LinkedIn account, connected through the provider's hosted authentication, read within the daily cap and inside working hours. No cookies, no passwords, no second-factor secrets, no shared, rented or fake accounts, no scraping of anything.
 - Business profile fields only. Never a profile's "Contact info" section, never special-category data (health, religion, politics, sexual orientation, ethnicity, union membership), never private messages, never a detail a person has hidden with visibility settings.
+  - **Exception (the owner's decision of 2026-11-13, for now):** the email addresses a lead shows their 1st-degree connections in "Contact info", allowed behind `LINKEDIN_CONTACT_INFO_ENABLED`, off by default (gamma-en-087). Only the email, only for a lead the workspace's own account is connected to, only during an email lookup, and only used once a verifier calls it valid; never the section's phone numbers, addresses, birthday, messengers or websites. Switching it off stops new reads; addresses found earlier stay in use, and nothing is deleted. It will be turned off later. The LinkedIn port's README, "What the port will never have", holds the rule's text, and its never-list safety case allows this one method only.
 - The AI sees anonymized, delimited input and returns structured output. It never sees a name, a photo or pronouns during qualification. When it fails, the lead waits for a human.
 - Every claim in a draft traces to data we hold.
 - AI vendors on no-training, minimal-retention terms.
@@ -43,6 +44,7 @@ Never, in any version, whatever a task says:
 ## 5. Requests, uploads and egress
 
 - Every server-side fetch (the website fetch, in alpha) goes through the one HTTP client in `platform`, which resolves the address itself, blocks private, link-local and metadata ranges, and re-checks after every redirect. No `fetch` outside it, except inside a vendor adapter.
+- A page rendered in the headless browser stays behind three fences: the browser service sits on an internal network with the worker only, away from the data services and with no route out; the adapter's route filter fetches every request the browser routes in the worker through that client; and what Chromium would send by itself goes to a proxy where nothing answers, with WebRTC and WebTransport taken from the page (core/packages/providers/browser/playwright/README.md).
 - Uploads have a size and a type limit and are parsed in a sandboxed way: streaming, no formula evaluation, no macros.
 - The API has rate limits per workspace, CSRF and origin checks, strict security headers, and idempotency keys on writes that spend credits or call providers. TLS ends at the Caddy edge in production.
 - Model output never causes a side effect directly. Code chooses actions from enumerated outputs, and those pass the permission and credit checks like any other call.

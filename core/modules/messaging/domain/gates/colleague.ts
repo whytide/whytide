@@ -40,8 +40,19 @@ export function colleagueIssues(text: string, colleagues: readonly Colleague[]):
     const [first, last] = [split(firstName ?? ""), split(lastName ?? "")];
     return first.length > 0 && last.length > 0 ? [[...first, ...last]] : [];
   });
+  return phraseHits(text, [...PHRASES, ...names]).map((phrase) => ({
+    gate: "colleague_signal",
+    phrase,
+  }));
+}
+
+/**
+ * The sequences of words the text holds, whole words after words(), each once, in the text's
+ * order, as the text wrote them; the signal-act gate's matcher too (policies.ts).
+ */
+export function phraseHits(text: string, sequences: readonly (readonly string[])[]): string[] {
   const byFirst = new Map<string, (readonly string[])[]>();
-  for (const sequence of [...PHRASES, ...names]) {
+  for (const sequence of sequences) {
     const [head = ""] = sequence;
     byFirst.set(head, [...(byFirst.get(head) ?? []), sequence]);
   }
@@ -55,7 +66,7 @@ export function colleagueIssues(text: string, colleagues: readonly Colleague[]):
       if (matches && end !== undefined && !hits.has(key)) hits.set(key, text.slice(start, end));
     }
   });
-  return [...hits.values()].map((phrase) => ({ gate: "colleague_signal", phrase }));
+  return [...hits.values()];
 }
 
 /** The text's words as words() writes them, each with the span of the text it comes from. */
@@ -70,7 +81,7 @@ function tokensOf(text: string): Token[] {
 }
 
 /** A value's words as the gates compare them (words()), none for an empty one. */
-function split(value: string): string[] {
+export function split(value: string): string[] {
   return words(value)
     .split(" ")
     .filter((word) => word !== "");

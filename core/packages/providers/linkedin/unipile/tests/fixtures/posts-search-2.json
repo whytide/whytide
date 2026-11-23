@@ -1,0 +1,50 @@
+{
+  "object": "LinkedinSearch",
+  "items": [
+    {
+      "social_id": "urn:li:activity:7000000000000000104",
+      "text": "fixture-body-marker: what sales automation changed for us",
+      "parsed_datetime": "2026-09-29T09:00:00.000Z",
+      "author": {
+        "public_identifier": "chidi-fixture",
+        "id": "fixture-member-chidi",
+        "name": "Chidi Fixture",
+        "is_company": false,
+        "headline": "VP Sales at Northwind Example",
+        "emails": ["chidi@example.com"],
+        "phone": "+44 20 7946 0001",
+        "profile_picture_url": "https://media.example.com/chidi.jpg"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000105",
+      "text": "fixture-body-marker: Sales automation: a checklist",
+      "parsed_datetime": "2026-09-28T09:00:00.000Z",
+      "author": {
+        "public_identifier": "dana-specimen",
+        "id": "fixture-member-dana",
+        "name": "Dana Specimen",
+        "is_company": false,
+        "headline": "Founder at Blue Harbor Labs"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000112",
+      "text": "fixture-body-marker: an older note on sales automation",
+      "parsed_datetime": "2026-09-20T09:00:00.000Z",
+      "author": {
+        "public_identifier": "ada-example",
+        "id": "fixture-member-ada",
+        "name": "Ada Example",
+        "is_company": false,
+        "headline": "Head of Growth at Example Ltd"
+      }
+    }
+  ],
+  "paging": {
+    "start": 5,
+    "page_count": 3,
+    "total_count": null
+  },
+  "cursor": null
+}

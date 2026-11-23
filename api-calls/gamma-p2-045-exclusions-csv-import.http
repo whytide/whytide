@@ -1,0 +1,32 @@
+# contacts' exclusion lists (core/modules/contacts/README.md "Routes", gamma-p2-045): a CSV of company
+# domains imported as one list of customers or competitors, the workspace's lists, and a list
+# removed. The upload's file is written inline below, made-up domains only; a row that is no domain
+# comes back as its number and its code. Every role imports and lists; only an Owner or an Admin
+# removes. Put an `exclusionListId` the upload or the list answers in http-client.private.env.json.
+# A write sends the cookie, so it sends Origin too.
+
+### POST /v1/workspaces/{workspaceId}/contacts/exclusions/imports: imports the file as one list of customers, each domain an entry on every channel, the leads at it suppressed; 201 with the list, what it added, its duplicates and the rows without an entry; 400 exclusions_unsupported_type, exclusions_bad_encoding, exclusions_missing_column, exclusions_too_many_rows or exclusions_no_valid_row, 413 exclusions_too_large
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/exclusions/imports?relationship=customer
+Content-Type: multipart/form-data; boundary=WhytideExclusionsBoundary
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+--WhytideExclusionsBoundary
+Content-Disposition: form-data; name="file"; filename="customers.csv"
+Content-Type: text/csv
+
+company,domain
+Example Harbor,harbor.example
+Example Quay,https://www.quay.example/
+Not a domain,=1+1
+--WhytideExclusionsBoundary--
+
+### GET /v1/workspaces/{workspaceId}/contacts/exclusions/lists: the workspace's lists, newest first, a page at a time, the removed ones with their removal
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/exclusions/lists?limit=20
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### DELETE /v1/workspaces/{workspaceId}/contacts/exclusions/lists/{listId}: removes the list and its active entries, kept on record with their removal; 204; 404 exclusion_list_not_found for an unknown list, another workspace's or one removed already
+DELETE {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/exclusions/lists/{{exclusionListId}}
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}

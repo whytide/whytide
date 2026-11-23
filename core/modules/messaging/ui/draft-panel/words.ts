@@ -16,6 +16,7 @@ export function useDraftWords() {
   const channel: Record<Draft["channel"], string> = {
     linkedin_note: t("channel.note"),
     linkedin_message: t("channel.message"),
+    email: t("channel.email"),
   };
   const angle: Record<Plan["angle"], string> = {
     signal_comment: t("angle.signal_comment"),
@@ -35,6 +36,10 @@ export function useDraftWords() {
     grounding: t("gate.grounding"),
     red_lines: t("gate.red_lines"),
     colleague_signal: t("gate.colleague_signal"),
+    signal_act: t("gate.signal_act"),
+    subject: t("gate.subject"),
+    links: t("gate.links"),
+    near_duplicate: t("gate.near_duplicate"),
   };
   /**
    * A draft's mark, in the history and over the newest: none for a ready one. The panel lists a
@@ -48,7 +53,7 @@ export function useDraftWords() {
     edited: t("edited"),
     approved: undefined,
   };
-  /** Why a failed draft failed, by its code (README.md "The writer"): none off the six. */
+  /** Why a failed draft failed, by its code (README.md "The writer"): none off the seven. */
   const failure = (code: string) =>
     pick(
       {
@@ -58,6 +63,7 @@ export function useDraftWords() {
         write_failed: t("failure.write_failed"),
         earlier_draft_invalid: t("failure.earlier_draft_invalid"),
         draft_stuck: t("failure.draft_stuck"),
+        profile_not_english: t("failure.profile_not_english"),
       },
       code,
     );

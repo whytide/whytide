@@ -3,12 +3,14 @@
 // "Screen"), read in the browser as the member in one call, inside the slot's boundary, with its
 // loading state and its error state with a retry: the lead's attribution and the person's events,
 // newest first, one line each on a timeline, each after its reaction's icon; an imported lead shows
-// the Imported label, and a person without an event the empty state. A reduced event's line is a
-// summary from its reaction and date: no text is stored.
+// the Imported label, "Imported from" its file when the source names it, a lead added by hand Added
+// manually (lead-manual-create), and a person without an event the empty state. A reduced event's
+// line is a summary from its reaction and date: no text is stored.
 import { Badge, EmptyState, ErrorState, Link, LoadingState } from "@whytide/ui";
 import {
   Activity,
   ExternalLink,
+  Globe,
   type LucideIcon,
   MessageSquare,
   Repeat2,
@@ -78,8 +80,11 @@ function Evidence({ events, attribution }: EvidenceResponse) {
   const t = useTranslations("signals.evidence");
   const format = useFormatter();
   const named = (label: string | null) => label ?? t("source_deleted");
-  const sourceName = ({ kind, label }: Source) =>
-    kind === "imported" ? t("imported") : named(label);
+  const sourceName = ({ kind, label }: Source) => {
+    if (kind === "manual") return t("manual");
+    if (kind !== "imported") return named(label);
+    return label === null ? t("imported") : t("imported_from", { file: label });
+  };
   /** The reaction in words with its author; the author alone for a reaction off the three. */
   const reacted = (reaction: string, author: string) => {
     const words: Record<string, string> = {
@@ -104,6 +109,15 @@ function Evidence({ events, attribution }: EvidenceResponse) {
         </time>
       ),
     };
+    if (event.research !== undefined) {
+      const { company } = event.research;
+      if (event.research.foundBy === "managers" && company !== null) {
+        return t.rich("research.found_by_managers", { ...values, company: company.name });
+      }
+      return company === null
+        ? t.rich("research.found_unnamed", values)
+        : t.rich("research.found", { ...values, company: company.name });
+    }
     if (found === null || found.reducedAt !== null) {
       return t.rich("reduced", { ...values, reaction: found?.reaction ?? "other" });
     }
@@ -114,13 +128,16 @@ function Evidence({ events, attribution }: EvidenceResponse) {
         : t("comment", { author: found.author, text });
     return t.rich("event", { ...values, action });
   };
-  const imported = events.length === 0 && attribution?.first.kind === "imported";
+  /** An imported lead, or one added by hand, without an event: its source alone, as a badge. */
+  const alone =
+    events.length === 0 &&
+    (attribution?.first.kind === "imported" || attribution?.first.kind === "manual");
 
   return (
     <>
-      {imported ? (
+      {alone ? (
         <p className="flex">
-          <Badge>{t("imported")}</Badge>
+          <Badge>{sourceName(attribution.first)}</Badge>
         </p>
       ) : (
         attribution && (
@@ -143,7 +160,10 @@ function Evidence({ events, attribution }: EvidenceResponse) {
       {events.length > 0 ? (
         <ol className="relative grid gap-5 before:absolute before:inset-y-3 before:start-3 before:w-px before:bg-line">
           {events.map((event) => {
-            const Icon = REACTION_ICON[event.evidence?.reaction ?? ""] ?? Activity;
+            const Icon =
+              event.research === undefined
+                ? (REACTION_ICON[event.evidence?.reaction ?? ""] ?? Activity)
+                : Globe;
             return (
               <li key={event.id} className="relative grid gap-1 ps-10">
                 <span
@@ -153,6 +173,7 @@ function Evidence({ events, attribution }: EvidenceResponse) {
                   <Icon className="size-3.5" />
                 </span>
                 <p className="text-pretty text-ink-muted">{line(event)}</p>
+                {event.research !== undefined && <Research research={event.research} />}
                 {event.evidence && WEB.test(event.evidence.url) && (
                   <p className="text-sm">
                     <Link href={event.evidence.url} target="_blank" rel="noopener noreferrer">
@@ -170,6 +191,60 @@ function Evidence({ events, attribution }: EvidenceResponse) {
         </ol>
       ) : (
         <EmptyState message={t("empty")} />
+      )}
+    </>
+  );
+}
+
+/**
+ * A Web research event (gamma-wr-061): the page the person was found on, and the company's reasons with
+ * their quotes as the research run kept them, so that the member can check each on its page. Never
+ * another person named on the page: the route sends none.
+ */
+function Research({ research }: { research: NonNullable<Event["research"]> }) {
+  const t = useTranslations("signals.evidence");
+  const open = (url: string, label: string) =>
+    WEB.test(url) && (
+      <Link href={url} target="_blank" rel="noopener noreferrer">
+        {label}
+        <ExternalLink
+          aria-hidden="true"
+          className="ms-1 inline size-3.5 align-[-0.125em] rtl:-scale-x-100"
+        />
+      </Link>
+    );
+  const reasons = research.company?.reasons ?? [];
+  return (
+    <>
+      {research.foundBy === "managers" ? (
+        <>
+          <p className="text-sm">{open(research.url, t("research.company_site"))}</p>
+          <p className="text-xs text-ink-muted">{t("research.managers_by_search")}</p>
+          {research.title !== undefined && (
+            <p className="text-sm text-ink-muted">
+              {t("research.managers_title", { title: research.title })}
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="text-sm">{open(research.url, t("page"))}</p>
+      )}
+      {research.foundBy === "search" && (
+        <p className="text-xs text-ink-muted">{t("research.profile_by_search")}</p>
+      )}
+      {reasons.length > 0 && (
+        <div className="mt-1 grid gap-2">
+          <p className="text-xs font-medium text-ink-muted">{t("research.reasons")}</p>
+          {reasons.map((reason, at) => (
+            <div key={`${at}-${reason.kind}`} className="grid gap-0.5 text-sm">
+              <p className="text-ink">{reason.line}</p>
+              <blockquote className="border-s-2 border-line ps-3 text-ink-muted">
+                {t("research.quote", { quote: reason.quote })}
+              </blockquote>
+              <p>{open(reason.url, t("research.reason_page"))}</p>
+            </div>
+          ))}
+        </div>
       )}
     </>
   );

@@ -120,7 +120,7 @@ isolationTest("sender_outreach", {
 
 isolationTest("linkedin_workspace_controls", {
   async createRow(workspaceId) {
-    await inRun(workspaceId, () => setWorkspaceStop(true, "usr_tenancy"));
+    await inRun(workspaceId, () => setWorkspaceStop(true, principal));
     return inRun(workspaceId, () => tenantClient.linkedinWorkspaceControl.findFirstOrThrow());
   },
   readAs: (workspaceId) =>
@@ -155,7 +155,7 @@ test("applyHealth's raw lock, called in workspace B's run with workspace A's acc
 test("a workspace's stop holds in that workspace only: the other reads no stop and still reserves a read", async () => {
   const [a, b] = ["wsp_tenancy_stop_a", "wsp_tenancy_stop_b"];
   const { id: accountId } = await createConnectedAccount(b);
-  await inRun(a, () => setWorkspaceStop(true, "usr_tenancy"));
+  await inRun(a, () => setWorkspaceStop(true, principal));
   assert.deepEqual((await inRun(a, () => readControls())).workspace, {
     stopped: true,
     stopSource: "tester",
@@ -233,9 +233,9 @@ test("every query and command of a request or a run on linkedin's tables goes th
   await assertScoped(() => findSendReservation("sqr_unknown"));
   await assertScoped(() => reservationsOfKey("key"));
   await assertScoped(() => readControls());
-  await assertScoped(() => pauseAccount("sac_unknown", "usr_unknown"));
-  await assertScoped(() => unpauseAccount("sac_unknown", "usr_unknown"));
-  await assertScoped(() => setWorkspaceStop(true, "usr_unknown"));
+  await assertScoped(() => pauseAccount("sac_unknown", principal));
+  await assertScoped(() => unpauseAccount("sac_unknown", principal));
+  await assertScoped(() => setWorkspaceStop(true, principal));
   const accepted = { version: DISCLOSURE_VERSION, personalAccount: true };
   await assertScoped(() => acceptDisclosure("sac_unknown", "usr_unknown", accepted));
 });

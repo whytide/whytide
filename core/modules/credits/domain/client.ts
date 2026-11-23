@@ -1,8 +1,9 @@
 // The credits client (README "Reserving", docs/concepts.md, docs/flows.md), bound into the platform's
 // `credits` at the api's and the worker's start. Every method runs in the caller's own tenant run, on
 // its transaction: reserve takes the organization's advisory lock, expires the organization's
-// reservations past their lease, checks the balance and inserts the usage, all in that transaction,
-// so two reserves of one organization never pass the check together; commit and release take the
+// reservations past their lease, checks the balance and inserts the usage at the price in effect at
+// its instant, with that price list's version, all in that transaction, so two reserves of one
+// organization never pass the check together; commit and release take the
 // same lock first (README "Decided here"). Sums stay Postgres numeric: Prisma's Decimal computes
 // with 20 digits only. Each outcome counts in the metric credits.usage (metrics.ts).
 import { type TenantClient, tenantClient } from "@whytide/db";
@@ -72,8 +73,8 @@ export function createCreditsClient(now: () => Date = () => new Date()): Credits
       }
       const repeat = await tx.creditUsage.findFirst({ where: { idempotencyKey } });
       if (repeat) return { usageId: repeat.id, credits: repeat.credits.toFixed() };
-      const price = await currentPrice(tx, action);
       const at = now();
+      const price = await currentPrice(tx, action, at);
       const expired = await tx.$executeRaw`UPDATE credit_usage SET status = 'expired',
           settled_at = ${at}::timestamptz
         WHERE organization_id = ${organizationId} AND status = 'reserved'
@@ -102,6 +103,7 @@ export function createCreditsClient(now: () => Date = () => new Date()): Credits
           subjectRef,
           leaseExpiresAt: leaseExpiresAt(lease, at),
           createdAt: at,
+          priceListVersion: price.version,
         },
         select: { id: true },
       });
@@ -151,7 +153,7 @@ export function createCreditsClient(now: () => Date = () => new Date()): Credits
     },
 
     async priceOf(action) {
-      return currentPrice(tenantClient, action);
+      return currentPrice(tenantClient, action, now());
     },
   };
 }

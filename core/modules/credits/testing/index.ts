@@ -1,11 +1,13 @@
 // credits' test helpers (README "Testing"), `@whytide/credits/testing`, for tests only, on asRole of
 // @whytide/db/testing, so the test file calls withTestDb() first: the fixed plan with an allowance,
 // then each organization's subscription and grant for the current period, as the seeder writes them;
-// useCreditsClient(asRole("app")) points the module's own `app` client at the test's schema.
+// useCreditsClient(asRole("app")) points the module's own `app` client at the test's schema; and the
+// seeder's price list at a given instant, assemblePrices and syncPrices, for a host's tests.
 import { asRole } from "@whytide/db/testing";
 import { seedOrganization, seedPlan } from "../domain/seed.ts";
 
 export { createCreditsClient } from "../domain/client.ts";
+export { assemblePrices, syncPrices } from "../domain/prices.ts";
 export { useClient as useCreditsClient } from "../domain/store.ts";
 
 export async function grantAllowance(

@@ -13,7 +13,7 @@ export const assessFitTask = defineAgentTask(
     module: "qualification",
     kind: "classification",
     model: qualificationConfig.AI_MODEL_QUALIFICATION_ASSESS_FIT,
-    promptVersion: 1,
+    promptVersion: 2,
     inputSchema: assessFitInput,
     outputSchema: assessFitOutput,
     budget: { maxInputTokens: 12_000, maxOutputTokens: 1_500, maxCostCredits: 1 },

@@ -127,7 +127,7 @@ export function limitsFor(
     invites: Math.min(invites, actions),
     messages: Math.min(sendsLeft(day, "message"), actions),
     withdrawals: Math.min(sendsLeft(day, "withdraw"), actions),
-    reads: Math.min(readsLeft(account, day), actions),
+    reads: readsGrantable(account, day),
     actions,
   };
 }
@@ -216,6 +216,15 @@ export function actionsUsed(day: DayUsage): number {
 
 /** The actions left of the 200. */
 export const actionsLeft = (day: DayUsage): number => left(ACTIONS_PER_DAY_MAX, actionsUsed(day));
+
+/**
+ * The reads a reservation may still take today: the read budget's, within the actions left of the
+ * 200 (limitsFor's reads; reserveReads' `keep` and readsLeftToday, gamma-p5-015).
+ */
+export const readsGrantable = (
+  account: Pick<QuotaAccount, "dailyReadCap">,
+  day: DayUsage,
+): number => Math.min(readsLeft(account, day), actionsLeft(day));
 
 /**
  * What is left of today's window after `at`, in the account's zone: from the later of `at` and the

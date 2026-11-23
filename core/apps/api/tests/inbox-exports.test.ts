@@ -2,9 +2,13 @@
 // set"): the host started with identity and inbox, on the fake authentication adapter, in a schema of
 // the worktree's database, the files port on the slice's own storage (.env.local), answering real
 // HTTP. Leads by contacts' commands; threads, messages and labels as the store and the label leave
-// them (@whytide/inbox/testing), one label changed through the label's route. The lines, ?week, the
-// content type, the file in the files port, another workspace, the permission. It lives here: a
-// module never imports a host. Made-up names only.
+// them (@whytide/inbox/testing), one label changed through the label's route by the thread's owner,
+// two of the 7 labels written as beta's two words (gamma-p4-055). The lines, with their channel, the
+// owner's class, the classification and the phrases' match (gamma-p7-060), ?week, the content type,
+// the file in the files port, another workspace, the permission: inbox.export, an Owner's or an
+// Admin's, a Member refused (gamma-p7-060); each file holds the caller's own threads' replies only
+// (gamma-p6-060). It lives here: a module never imports a
+// host. Made-up names only.
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { text } from "node:stream/consumers";
@@ -121,29 +125,33 @@ const lead = (workspaceId: string, firstName: string, lastName: string) =>
     },
     { client: app },
   );
-/** A thread of the person, and a writer of its messages. */
-async function threadOf(workspaceId: string, personId: string) {
-  const threadId = await inbox.createThread({ workspaceId, personId });
+/** A thread of the person, on the account of the owner given, and a writer of its messages. */
+async function threadOf(workspaceId: string, personId: string, ownerUserId: string) {
+  const threadId = await inbox.createThread({ workspaceId, personId, ownerUserId });
   type Message = Parameters<InboxTesting["createMessage"]>[0];
   const message = (given: Omit<Message, "workspaceId" | "threadId" | "personId">) =>
     inbox.createMessage({ workspaceId, threadId, personId, ...given });
   return { threadId, message };
 }
-/** A reply of the person, labeled `ago` before now unless no label is given: the reply's id. */
+/**
+ * A reply of the person on the thread of `owner`, the tenant's Owner unless given, labeled by them
+ * `ago` before now: the reply's id.
+ */
 async function labeledReply(
   tenant: TestTenant,
   names: [string, string],
   label: "positive" | "not_positive",
   ago: number,
+  owner: string = tenant.user.id,
 ) {
   const workspaceId = tenant.workspace.id;
   const personId = await lead(workspaceId, ...names);
-  const { threadId, message } = await threadOf(workspaceId, personId);
+  const { threadId, message } = await threadOf(workspaceId, personId, owner);
   const now = Date.now();
   await message({ direction: "out", sentBy: "campaign", sentAt: new Date(now - ago - 2 * MINUTE) });
   const messageId = await message({ body: "Happy to talk.", sentAt: new Date(now - ago - MINUTE) });
   const labeledAt = new Date(now - ago);
-  await inbox.createLabel({ workspaceId, messageId, label, labeledBy: tenant.user.id, labeledAt });
+  await inbox.createLabel({ workspaceId, messageId, label, labeledBy: owner, labeledAt });
   return { personId, threadId, messageId };
 }
 
@@ -156,7 +164,7 @@ test("GET …/inbox/exports/reply-labels.jsonl: a line per labeled reply, its la
   // Ottoline's thread: twelve messages, then her reply, labeled through the route, then changed;
   // then the account's answer.
   const ottoline = await lead(workspaceId, "Ottoline", "Vashti");
-  const ours = await threadOf(workspaceId, ottoline);
+  const ours = await threadOf(workspaceId, ottoline, a.user.id);
   const before = Array.from({ length: 12 }, (_, i) => {
     const direction = i % 2 === 0 ? "out" : "in";
     const sentBy = direction === "in" ? undefined : i === 0 ? "campaign" : "user";
@@ -185,15 +193,15 @@ test("GET …/inbox/exports/reply-labels.jsonl: a line per labeled reply, its la
       },
       body: JSON.stringify({ label: value }),
     });
-  assert.equal((await label("positive")).status, 200);
-  const changed = await label("not_positive");
+  assert.equal((await label("interested")).status, 200);
+  const changed = await label("not_now");
   assert.equal(changed.status, 200);
   const { labeledAt } = (await changed.json()) as { labeledAt: string };
 
   // Bramwell's thread: the campaign's message, labeled straight in the table; a labeled reply and an
   // unlabeled one.
   const bramwell = await lead(workspaceId, "Bramwell", "Okonkwo");
-  const theirs = await threadOf(workspaceId, bramwell);
+  const theirs = await threadOf(workspaceId, bramwell, a.user.id);
   const opening = await theirs.message({
     ...{ direction: "out", sentBy: "campaign", sentAt: at(-60) },
     body: "Hi Bramwell, a question about your data team.",
@@ -203,6 +211,10 @@ test("GET …/inbox/exports/reply-labels.jsonl: a line per labeled reply, its la
   const owner = { workspaceId, labeledBy: a.user.id };
   await inbox.createLabel({ ...owner, messageId: answered, label: "positive", labeledAt: at(-40) });
   await inbox.createLabel({ ...owner, messageId: opening, label: "positive", labeledAt: at(-39) });
+  await inbox.createClassification({
+    ...{ workspaceId, messageId: answered, threadId: theirs.threadId, personId: bramwell },
+    ...{ label: "not_now", confidence: 0.55, isSuggested: true },
+  });
 
   const { res, body, lines } = await exported(a.user.id, workspaceId);
   assert.equal(res.status, 200);
@@ -215,10 +227,20 @@ test("GET …/inbox/exports/reply-labels.jsonl: a line per labeled reply, its la
     {
       person_sha256: sha256(bramwell),
       thread_sha256: sha256(theirs.threadId),
+      channel: "linkedin",
       label: "positive",
+      class_label: null,
       labeled_at: at(-40).toISOString(),
       received_at: at(-50).toISOString(),
       text: "Not now, thanks.",
+      opt_out_matched: false,
+      classification: {
+        label: "not_now",
+        confidence: 0.55,
+        is_suggested: true,
+        origin: "model",
+        prompt_version: 1,
+      },
       earlier: [
         {
           direction: "out",
@@ -231,10 +253,14 @@ test("GET …/inbox/exports/reply-labels.jsonl: a line per labeled reply, its la
     {
       person_sha256: sha256(ottoline),
       thread_sha256: sha256(ours.threadId),
+      channel: "linkedin",
       label: "not_positive",
+      class_label: "not_now",
       labeled_at: labeledAt,
       received_at: at(-10).toISOString(),
       text: "Yes [first_name] here, Tuesday works",
+      opt_out_matched: false,
+      classification: null,
       earlier: before.slice(2).map(({ direction, sentBy, body, sentAt }) => ({
         direction,
         sent_by: sentBy ?? null,
@@ -243,7 +269,7 @@ test("GET …/inbox/exports/reply-labels.jsonl: a line per labeled reply, its la
       })),
     },
   ]);
-  for (const value of ["Ottoline", "Vashti", "Bramwell", "Okonkwo", "linkedin"]) {
+  for (const value of ["Ottoline", "Vashti", "Bramwell", "Okonkwo", "linkedin.com"]) {
     assert.doesNotMatch(body, new RegExp(value, "i"), value);
   }
   assert.doesNotMatch(body, /\b(?:per|thr|msg|rlb|wsp|usr|sac)_[0-9A-Za-z]/);
@@ -293,26 +319,44 @@ test("?week: that ISO week's labels only, to reply-labels-<week>.jsonl, the day'
   );
 });
 
-test("two workspaces: each one's file holds its own replies only; a Member exports, another workspace's user is refused 403; the route declares inbox.read", async () => {
+test("the permission: inbox.export, an Owner's or an Admin's file, each their own threads' replies only; a Member refused 403 forbidden, writing nothing; each workspace's its own; another workspace's user refused 403", async () => {
   const [a, b] = await createTwoWorkspaces();
-  const ours = await labeledReply(a, ["Ottoline", "Vashti"], "positive", 0);
-  const theirs = await labeledReply(b, ["Linnea", "Haverkamp"], "not_positive", 0);
   const member = await createUser();
   await createMembership({ userId: member.id, workspaceId: a.workspace.id, role: "Member" });
+  const admin = await createUser();
+  await createMembership({ userId: admin.id, workspaceId: a.workspace.id, role: "Admin" });
+  const ours = await labeledReply(a, ["Ottoline", "Vashti"], "positive", 0);
+  await labeledReply(a, ["Saoirse", "Delacroix"], "not_positive", 0, member.id);
+  const admins = await labeledReply(a, ["Bramwell", "Okonkwo"], "positive", 0, admin.id);
+  const theirs = await labeledReply(b, ["Linnea", "Haverkamp"], "not_positive", 0);
+  const pairs = (lines: Record<string, any>[]) =>
+    lines.map((line) => [line.person_sha256, line.thread_sha256, line.channel]);
 
-  const mine = await exported(member.id, a.workspace.id);
-  assert.equal(mine.res.status, 200);
-  assert.deepEqual(
-    mine.lines.map((line) => [line.person_sha256, line.thread_sha256]),
-    [[sha256(ours.personId), sha256(ours.threadId)]],
-  );
-  const other = await exported(b.user.id, b.workspace.id);
-  assert.deepEqual(
-    other.lines.map((line) => [line.person_sha256, line.thread_sha256]),
-    [[sha256(theirs.personId), sha256(theirs.threadId)]],
-  );
-  const refused = await exported(b.user.id, a.workspace.id);
+  const refused = await exported(member.id, a.workspace.id);
   assert.deepEqual([refused.res.status, JSON.parse(refused.body)], [403, { code: "forbidden" }]);
+  const files = await getAdapter(filesPort, filesConfig.PROVIDER_FILES);
+  const listed = await files.list({ workspaceId: a.workspace.id, prefix: "exports/" });
+  assert.deepEqual(listed.files, [], "a refused export writes no file");
+
+  const owners = await exported(a.user.id, a.workspace.id);
+  assert.equal(owners.res.status, 200);
+  assert.deepEqual(pairs(owners.lines), [
+    [sha256(ours.personId), sha256(ours.threadId), "linkedin"],
+  ]);
+  const adminsFile = await exported(admin.id, a.workspace.id);
+  assert.equal(adminsFile.res.status, 200);
+  assert.deepEqual(pairs(adminsFile.lines), [
+    [sha256(admins.personId), sha256(admins.threadId), "linkedin"],
+  ]);
+  const other = await exported(b.user.id, b.workspace.id);
+  assert.deepEqual(pairs(other.lines), [
+    [sha256(theirs.personId), sha256(theirs.threadId), "linkedin"],
+  ]);
+  const elsewhere = await exported(b.user.id, a.workspace.id);
+  assert.deepEqual(
+    [elsewhere.res.status, JSON.parse(elsewhere.body)],
+    [403, { code: "forbidden" }],
+  );
   const handler = ExportsController.prototype.replyLabels;
-  assert.equal(Reflect.getMetadata("whytide:permission", handler), "inbox.read");
+  assert.equal(Reflect.getMetadata("whytide:permission", handler), "inbox.export");
 });

@@ -98,6 +98,7 @@ test("a suppressed person: the step skipped with the reason, the pending steps c
       at: at.toISOString(),
       step: { status: "scheduled" },
       enrollment: { status: "active" },
+      owner: { member: "active" },
       suppression: { suppressed: true, reason: "opted_out" },
     },
   });
@@ -206,7 +207,7 @@ test("the order: the first check that fails decides", async () => {
   }
 });
 
-test("a pass answers what each check saw, the approved item and the text's hash among them, and writes nothing", async () => {
+test("a pass answers what each check saw, the approved item, the text's hash, the mode, the first touch and the approval's origin among them, and writes nothing", async () => {
   await account();
   const { personId, enrollmentId, steps } = await enrolledLead("gate-pass");
   const approvalItemId = await approved(steps.connect);
@@ -221,11 +222,18 @@ test("a pass answers what each check saw, the approved item and the text's hash 
       at: at.toISOString(),
       step: { status: "executing" },
       enrollment: { status: "active" },
+      // The account's owner, an active member of the workspace (gamma-p6-040).
+      owner: { member: "active" },
       suppression: { suppressed: false },
       reply: { lastInboundAt: null, startedAt: startedAt?.toISOString() },
+      campaign: { status: "active" },
       touch: { lastTouchAt: null, quotaDay: at.toISOString().slice(0, 10) },
-      // The connection request's note, empty by default.
-      approval: { approvalItemId, status: "approved", contentHash: sha256("") },
+      // The connection request's note, empty by default, approved by a person, the campaign in
+      // its first 7 days (gamma-p4-070).
+      approval: {
+        ...{ approvalItemId, status: "approved", contentHash: sha256("") },
+        ...{ mode: "review_everything", firstTouch: true, origin: "app" },
+      },
     },
   });
   assert.deepEqual(await stepsOf(personId), before);

@@ -23,6 +23,7 @@
     { "path": "../contacts" },
     { "path": "../discovery" },
     { "path": "../icp" },
+    { "path": "../playbooks" },
     { "path": "../tenancy" }
   ]
 }

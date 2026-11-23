@@ -1,12 +1,13 @@
 // The person's outreach row as the sends keep it (docs/data.md "sender_outreach"), in the caller's run:
 // what a send or its check got from the provider, keyed by account and person, naming the step that
 // sent last; the reply linkedin_check_reply finds; and sentMessageRef, inbox's match for the echo of a
-// sent message (beta-p5-020). Provider refs stay here: no answer, event or log line carries one.
+// sent message (beta-p5-020), a reply from the inbox's too, with its time (gamma-p4-060). Provider
+// refs stay here: no answer, event or log line carries one.
 import { tenantClient } from "@whytide/db";
 import { AppError, currentTenant, newId } from "@whytide/platform";
 import { errors } from "../../errors.ts";
 import { ids } from "../../ids.ts";
-import { STEP_EXECUTION_ID } from "../../schemas/quota.ts";
+import { SEND_REF } from "../../schemas/quota.ts";
 
 export type Outreach = {
   readonly id: string;
@@ -90,20 +91,21 @@ export async function markReplied(id: string, at: Date): Promise<void> {
 }
 
 /**
- * The message ref and chat ref of the row whose last send was the step's message, or null, in the
- * caller's tenant run. read_input_invalid for an id that is no step execution's.
+ * The message ref and the chat ref of the row whose last send was the step's message, or the inbox
+ * reply's (SEND_REF), with the provider's time when the row holds one; else null, in the caller's
+ * tenant run. read_input_invalid for an id that is neither.
  */
 export async function sentMessageRef(
   stepExecutionId: string,
-): Promise<{ messageRef: string; chatRef: string } | null> {
+): Promise<{ messageRef: string; chatRef: string; sentAt: Date | null } | null> {
   // Prisma drops an undefined value from a where: unchecked, that would be any row of the workspace.
-  if (typeof stepExecutionId !== "string" || !STEP_EXECUTION_ID.test(stepExecutionId)) {
+  if (typeof stepExecutionId !== "string" || !SEND_REF.test(stepExecutionId)) {
     throw new AppError(errors.read_input_invalid, { details: { fields: ["stepExecutionId"] } });
   }
   const row = await tenantClient.senderOutreach.findFirst({
     where: { lastStepExecutionId: stepExecutionId },
-    select: { lastMessageRef: true, providerChatRef: true },
+    select: { lastMessageRef: true, providerChatRef: true, lastSentAt: true },
   });
-  const { lastMessageRef: messageRef, providerChatRef: chatRef } = row ?? {};
-  return messageRef && chatRef ? { messageRef, chatRef } : null;
+  const { lastMessageRef: messageRef, providerChatRef: chatRef, lastSentAt: sentAt } = row ?? {};
+  return messageRef && chatRef ? { messageRef, chatRef, sentAt: sentAt ?? null } : null;
 }

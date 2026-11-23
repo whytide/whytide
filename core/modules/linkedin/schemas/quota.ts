@@ -2,6 +2,7 @@
 // quota"), which code calls, the log's closed list of outcomes, and the usage route's answer, the
 // day's budgets, from which the api host builds the OpenAPI document.
 import { z } from "zod";
+import { READS_PER_DAY_MAX } from "../domain/quota/constants.ts";
 import { SEND_KEY_MAX_CHARS } from "../domain/send/constants.ts";
 
 const LINKEDIN_HOSTS = new Set(["linkedin.com", "www.linkedin.com"]);
@@ -9,18 +10,23 @@ const LINKEDIN_HOSTS = new Set(["linkedin.com", "www.linkedin.com"]);
 export const PERSON_ID = /^per_[0-9A-HJKMNP-TV-Z]{26}$/;
 /** A step execution's id (campaigns'), what a send's log row names. */
 export const STEP_EXECUTION_ID = /^sx_[0-9A-HJKMNP-TV-Z]{26}$/;
+/**
+ * What a send names in its request file, its log rows and its outreach row: a step execution's id,
+ * or the id of the inbox message a member's reply is (`msg_…`, inbox's; gamma-p4-060).
+ */
+export const SEND_REF = /^(?:sx|msg)_[0-9A-HJKMNP-TV-Z]{26}$/;
 const COLON = "(?::|%3[Aa])";
 const POST_PATH = new RegExp(
   `^/(?:posts/[\\w%.~-]+|feed/update/urn${COLON}li${COLON}(?:activity|share|ugcPost)${COLON}\\d{1,30})/?$`,
 );
 
 /**
- * A person's id (`per_…`), a step execution's (`sx_…`) or a LinkedIn post's URL, https, with no
- * query or fragment: never a profile's URL, which names a person who may not be a person of ours
+ * A person's id (`per_…`), a send's (SEND_REF) or a LinkedIn post's URL, https, with no query or
+ * fragment: never a profile's URL, which names a person who may not be a person of ours
  * (docs/security.md).
  */
 export function isObjectRef(value: string): boolean {
-  if (PERSON_ID.test(value) || STEP_EXECUTION_ID.test(value)) return true;
+  if (PERSON_ID.test(value) || SEND_REF.test(value)) return true;
   if (!URL.canParse(value)) return false;
   const url = new URL(value);
   const plain = url.protocol === "https:" && !url.username && !url.port && !url.search && !url.hash;
@@ -34,8 +40,9 @@ export const sendActionTypes = ["invite", "message", "withdraw"] as const;
 export type SendActionType = (typeof sendActionTypes)[number];
 /**
  * The reads (`send_check`: the checks before a send's retry and before a message; `pending_invites`
- * and `relation_check`: the day's check of the pending invitations, beta-p4-070), the sends, the
- * status checks.
+ * and `relation_check`: the day's check of the pending invitations, beta-p4-070; `read_posts`: a page
+ * of a source's posts, gamma-p5-015; `read_company`: a company page's facts, gamma-en-060), the sends,
+ * the status checks.
  */
 export const actionKinds = [
   "read_engagers",
@@ -47,6 +54,8 @@ export const actionKinds = [
   "send_check",
   "pending_invites",
   "relation_check",
+  "read_posts",
+  "read_company",
 ] as const;
 
 /**
@@ -102,7 +111,7 @@ export const reserveInput = z.strictObject({
   accountId,
   /**
    * Reads: an engager-list page counts one, a profile one, a check before a send one, a page of the
-   * pending invitations one, a relation one.
+   * pending invitations one, a relation one, a page of posts one, a company page one.
    */
   count: z.int().min(1).max(1000),
   kind: z.enum([
@@ -111,8 +120,15 @@ export const reserveInput = z.strictObject({
     "send_check",
     "pending_invites",
     "relation_check",
+    "read_posts",
+    "read_company",
   ]),
   objectRef: objectRef.optional(),
+  /**
+   * The reads this reservation must leave in the account's quota day, else read_cap_reached: the
+   * share signals keeps for the send path's checks (gamma-p5-015); the send path passes none.
+   */
+  keep: z.int().min(0).max(READS_PER_DAY_MAX).optional(),
 });
 export type ReserveInput = z.input<typeof reserveInput>;
 
@@ -148,10 +164,10 @@ export const logInput = z
     callRef: z.string().min(1).max(512).optional(),
   })
   .refine(({ kind, withNote }) => !withNote || kind === "invite", { path: ["withNote"] })
-  // A send's row names its step execution, never a person or a post.
+  // A send's row names its step execution or its inbox reply (SEND_REF), never a person or a post.
   .refine(
     ({ kind, objectRef }) =>
-      objectRef === undefined || !SEND_KINDS.includes(kind) || STEP_EXECUTION_ID.test(objectRef),
+      objectRef === undefined || !SEND_KINDS.includes(kind) || SEND_REF.test(objectRef),
     { path: ["objectRef"] },
   );
 export type LogInput = z.input<typeof logInput>;

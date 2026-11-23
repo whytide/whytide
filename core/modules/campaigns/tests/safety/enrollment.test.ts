@@ -20,7 +20,7 @@ import {
 import { useHashSalt } from "@whytide/contacts/testing";
 import { createOutboxStore, outboxWriter, type TenantClient, withTenant } from "@whytide/db";
 import { asRole, withTestDb } from "@whytide/db/testing";
-import { createConnectedAccount, useLinkedinClient } from "@whytide/linkedin/testing";
+import { useLinkedinClient } from "@whytide/linkedin/testing";
 import {
   collectLogs,
   createLogger,
@@ -32,14 +32,16 @@ import {
 import { enrollApproved } from "../../domain/enroll/enroll.ts";
 import "../../events.ts";
 import { ids } from "../../ids.ts";
+import { APPROVER, fixture } from "../fixtures.ts";
 
 withTestDb();
 useHashSalt("test-salt-".repeat(4));
 useLinkedinClient(asRole("app"));
 const WORKSPACE = "wsp_campaigns_safety";
-const APPROVER = "usr_campaigns_approver";
 const DAY_MS = 86_400_000;
 const app = () => asRole("app");
+/** The approver's account, the approver the workspace's Owner: the seeded campaign's sender. */
+const { account } = fixture(WORKSPACE);
 const log = createLogger({ destination: collectLogs().destination });
 const run = <T>(fn: (tx: TenantClient) => Promise<T>) =>
   withTenant({ workspaceId: WORKSPACE, principal: servicePrincipal("campaigns_safety") }, fn, {
@@ -98,7 +100,7 @@ const refusedBy = (write: Promise<unknown>, index: string) =>
   assert.rejects(write, { code: "P2002", message: new RegExp(`\`${index}\``) });
 
 test("a person who opted out, or was touched in the last 90 days, gets an exited enrollment and no step execution", async () => {
-  await createConnectedAccount(WORKSPACE, { ownerUserId: APPROVER });
+  await account();
   const optedOut = await leadOf("safety-opted-out");
   const touched = await leadOf("safety-touched");
   const clear = await leadOf("safety-clear");
@@ -132,7 +134,7 @@ test("a person who opted out, or was touched in the last 90 days, gets an exited
 });
 
 test("a block committed while the delivery waits on the lead leaves no step, and the lead suppressed", async () => {
-  await createConnectedAccount(WORKSPACE, { ownerUserId: APPROVER });
+  await account();
   const personId = await leadOf("safety-raced");
   await approve(personId);
   // The block's run writes its entry and locks the lead (contacts' suppression write), then waits.
@@ -171,7 +173,7 @@ test("a block committed while the delivery waits on the lead leaves no step, and
 });
 
 test("a person never has two active enrollments: two approvals one after the other, two deliveries at once, or a direct write", async () => {
-  await createConnectedAccount(WORKSPACE, { ownerUserId: APPROVER });
+  await account();
   const twice = await leadOf("safety-twice");
   await approve(twice);
   await approve(twice);
@@ -202,7 +204,7 @@ test("a person never has two active enrollments: two approvals one after the oth
 });
 
 test("a redelivered event enrolls once, and every new step is planned", async () => {
-  await createConnectedAccount(WORKSPACE, { ownerUserId: APPROVER });
+  await account();
   const personId = await leadOf("safety-redelivered");
   const eventId = await approve(personId);
   assert.equal(await deliver(), 1);
@@ -225,7 +227,7 @@ test("a redelivered event enrolls once, and every new step is planned", async ()
 });
 
 test("the partial unique key: two unsent rows with one key stand, a second one entering executing is refused", async () => {
-  await createConnectedAccount(WORKSPACE, { ownerUserId: APPROVER });
+  await account();
   const personId = await leadOf("safety-key");
   await approve(personId);
   assert.equal(await deliver(), 1);

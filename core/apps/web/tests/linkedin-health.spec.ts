@@ -1,9 +1,10 @@
 // The LinkedIn screen's health card (beta-p6-040; core/modules/linkedin/README.md "Screen",
 // "Health"), as e2e@example.com in wsp_e2e_linkedin_health: the account connected through the fake's
 // hosted link, its health seeded through the e2e api's route, which stands in for the absent worker
-// too. Each state with its hints; "Check status", then Resume behind its Dialog; a member's view, no
-// buttons; the fleet breaker and no events, routed (a real breaker would pause every spec's invites);
-// loading, error and retry; a phone's width. Every text from its key, and axe.
+// too. Each state with its hints; "Check status", then Resume behind its Dialog; another member's
+// account, as an Owner sees a teammate's (gamma-p6-070), routed: a hint, no buttons; the fleet
+// breaker and no events, routed (a real breaker would pause every spec's invites); loading, error
+// and retry; a phone's width. Every text from its key, and axe.
 import { AxeBuilder } from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import linkedin from "../../../modules/linkedin/messages/en.json" with { type: "json" };
@@ -117,11 +118,12 @@ test("the health card: each state and its hints; Check status, then Resume behin
   await shows("linkedin.health.blocked.reconnect_required");
   await expect(resume).toBeDisabled();
 
-  // A member who may not manage the account: a hint, no buttons.
+  // Another member's account, as an Owner sees a teammate's under their own: a hint, no buttons.
   await page.route(`**${ACCOUNTS}`, async (route) => {
     const response = await route.fetch();
     const json = await response.json();
-    const accounts = json.accounts.map((account: object) => ({ ...account, canManage: false }));
+    const teammate = { mine: false, canEdit: false };
+    const accounts = json.accounts.map((account: object) => ({ ...account, ...teammate }));
     await route.fulfill({ response, json: { ...json, accounts } });
   });
   await page.reload();

@@ -133,7 +133,13 @@ export function s3Files(env?: Env): PortImplementation<typeof filesPort> {
   };
 }
 
-export const s3Adapter = defineAdapter(filesPort, { name: "s3", create: () => s3Files() });
+export const s3Adapter = defineAdapter(filesPort, {
+  name: "s3",
+  // What s3Store() cannot start without and a server's deploy/.env gives, for deploy:check
+  // (gamma-en-105): compose.yaml passes the apps S3_ACCESS_KEY and S3_SECRET_KEY itself.
+  requires: ["S3_ENDPOINT", "S3_BUCKET"],
+  create: () => s3Files(),
+});
 
 /** `files_not_found` for a key the bucket does not hold; any other failure stays the store's. */
 async function found<T>(request: Promise<T>): Promise<T> {

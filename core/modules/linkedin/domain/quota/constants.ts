@@ -55,3 +55,6 @@ export const QUOTA_DAY_START = "00:00";
 
 /** The dates a row's day may lie from the account's date now, after a zone change: zones span 26 hours. */
 export const ZONE_DAYS = 2;
+
+/** A company page's share of an account's daily reads by default (LINKEDIN_COMPANY_READS_PER_DAY). */
+export const COMPANY_READS_PER_DAY_DEFAULT = 20;

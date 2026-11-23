@@ -1,6 +1,7 @@
 // The draft review (README "The drafter"): the accept and the discard of the pending draft, in the
 // caller's tenant run, the record's row locked until it commits: of an accept and a save at once, the
-// second waits for the first. Only a person's accept writes a drafted value into the record.
+// second waits for the first. Only an accept writes a drafted value into the record: a person's, or
+// the automatic accept of a run the prompt at sign-in started (draft.ts recordDraft).
 import { outboxWriter, Prisma, tenantClient } from "@whytide/db";
 import { AppError, currentTenant, publish } from "@whytide/platform";
 import { errors } from "../errors.ts";

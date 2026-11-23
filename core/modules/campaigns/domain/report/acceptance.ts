@@ -4,6 +4,7 @@
 // command sets `sentBefore` a week before the run, linkedin's acceptance rule, so fresh invites do not
 // pull the rate down.
 import { tenantClient } from "@whytide/db";
+import { linkedinSenderAccount } from "../steps/actions.ts";
 
 /** A sender's connection requests counted, and those accepted. */
 export type SenderAcceptance = {
@@ -23,10 +24,12 @@ export async function acceptanceBySender(period: {
       status: "succeeded",
       executedAt: { gte: period.since, lte: period.sentBefore },
     },
-    select: { senderAccountId: true, acceptedAt: true },
+    select: { id: true, senderAccountId: true, acceptedAt: true },
   });
   const bySender = new Map<string, { sent: number; accepted: number }>();
-  for (const { senderAccountId, acceptedAt } of steps) {
+  for (const step of steps) {
+    const senderAccountId = linkedinSenderAccount(step);
+    const { acceptedAt } = step;
     const counts = bySender.get(senderAccountId) ?? { sent: 0, accepted: 0 };
     counts.sent += 1;
     if (acceptedAt !== null) counts.accepted += 1;

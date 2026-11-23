@@ -1,10 +1,12 @@
 // The never-contact screen's add form (list.tsx): Person or Company, then the value as typed, a
-// LinkedIn profile for a person, a LinkedIn company page or a domain for a company, which the api
-// reads by its URL rules. A person may be recorded as opted out instead, only after a confirmation:
-// an opt-out is never removed, so one on a mistyped profile would stay. Add posts POST
-// …/contacts/suppression with an Idempotency-Key, which the same body sent again after a failure
-// reuses (core/apps/api "Request protection"); while it runs the form waits. The api's error shows
-// under the field, in words.
+// LinkedIn profile or an email address for a person (gamma-rf-040), a LinkedIn company page or a
+// domain for a company, which the api reads by its rules. The channel the entry stops: every
+// channel, LinkedIn only or email only. A company may be excluded as a customer or a competitor,
+// which the api takes on a domain only. A person may be recorded as opted out instead, on every
+// channel, only after a confirmation: an opt-out is never removed, so one on a mistyped profile or
+// address would stay. Add posts POST …/contacts/suppression with an Idempotency-Key, which the same
+// body sent again after a failure reuses (core/apps/api "Request protection"); while it runs the
+// form waits. The api's error shows under the field, in words.
 "use client";
 
 import { Button, Dialog, Select, TextField, useErrorText } from "@whytide/ui";
@@ -12,17 +14,34 @@ import { Plus } from "@whytide/ui/icons";
 import { ApiError, browserApi, data } from "@whytide/web/api/browser";
 import { useTranslations } from "next-intl";
 import { type FormEvent, useId, useRef, useState } from "react";
+import {
+  type AddLayer,
+  EVERY_CHANNEL,
+  type SuppressionChannel,
+  type SuppressionRelationship,
+} from "../../domain/suppression/constants.ts";
 import type { BlockKind } from "./block.tsx";
 
 /** The list an entry is added to: the workspace's blocks, or a person's opt-out. */
-export type Layer = "blocklist" | "opt_out";
-/** What the form posts: the kind, the value as typed, and the list. */
-type Body = { readonly kind: BlockKind; readonly value: string; readonly layer: Layer };
+export type Layer = AddLayer;
+/** What the form posts: the kind, the value as typed, the list, the channel, and a relationship. */
+type Body = {
+  readonly kind: BlockKind;
+  readonly value: string;
+  readonly layer: Layer;
+  readonly channel: SuppressionChannel;
+  readonly relationship?: SuppressionRelationship;
+};
 /** The last post that failed, with its key, which the same body, sent again, reuses. */
 type Attempt = { readonly body: Body; readonly key: string };
 
 const codeOf = (error: unknown) => (error instanceof ApiError ? error.code : "internal_error");
-const same = (a: Body, b: Body) => a.kind === b.kind && a.value === b.value && a.layer === b.layer;
+const same = (a: Body, b: Body) =>
+  a.kind === b.kind &&
+  a.value === b.value &&
+  a.layer === b.layer &&
+  a.channel === b.channel &&
+  a.relationship === b.relationship;
 
 /** `onAdded` once the api added the entry, or answered the one already there, with its list. */
 export function AddForm(props: { workspace: string; onAdded: (layer: Layer) => void }) {
@@ -31,6 +50,8 @@ export function AddForm(props: { workspace: string; onAdded: (layer: Layer) => v
   const id = useId();
   const [kind, setKind] = useState<BlockKind>("person");
   const [layer, setLayer] = useState<Layer>("blocklist");
+  const [channel, setChannel] = useState<SuppressionChannel>(EVERY_CHANNEL);
+  const [relationship, setRelationship] = useState<SuppressionRelationship | "">("");
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string>();
@@ -38,7 +59,21 @@ export function AddForm(props: { workspace: string; onAdded: (layer: Layer) => v
   const running = useRef(false);
   const last = useRef<Attempt>(undefined);
   const failure = useErrorText("contacts", failed ?? "internal_error");
-  const body: Body = { kind, value: value.trim(), layer: kind === "person" ? layer : "blocklist" };
+  const person = kind === "person";
+  const optOut = person && layer === "opt_out";
+  const body: Body = {
+    kind,
+    value: value.trim(),
+    layer: person ? layer : "blocklist",
+    // An opt-out is on every channel; a relationship is a company's.
+    channel: optOut ? EVERY_CHANNEL : channel,
+    ...(person || relationship === "" ? {} : { relationship }),
+  };
+  const channels: Record<SuppressionChannel, string> = {
+    all: t("channel.all"),
+    linkedin: t("channel.linkedin"),
+    email: t("channel.email"),
+  };
 
   async function add(sent: Body) {
     if (running.current) return;
@@ -72,7 +107,6 @@ export function AddForm(props: { workspace: string; onAdded: (layer: Layer) => v
     else void add(body);
   }
 
-  const person = kind === "person";
   return (
     <section
       aria-labelledby={`${id}-title`}
@@ -110,6 +144,33 @@ export function AddForm(props: { workspace: string; onAdded: (layer: Layer) => v
               />
             </div>
           )}
+          {!optOut && (
+            <div className="w-full sm:w-64">
+              <Select
+                label={t("form.channel")}
+                value={channel}
+                onChange={(event) => setChannel(event.target.value as SuppressionChannel)}
+                options={Object.entries(channels).map(([value, label]) => ({ value, label }))}
+              />
+            </div>
+          )}
+          {!person && (
+            <div className="w-full sm:w-64">
+              <Select
+                label={t("form.relationship")}
+                value={relationship}
+                onChange={(event) => {
+                  setRelationship(event.target.value as SuppressionRelationship | "");
+                  setFailed(undefined);
+                }}
+                options={[
+                  { value: "", label: t("relationship.none") },
+                  { value: "customer", label: t("relationship.customer") },
+                  { value: "competitor", label: t("relationship.competitor") },
+                ]}
+              />
+            </div>
+          )}
           <div className="min-w-0 flex-1 basis-80">
             <TextField
               label={person ? t("form.value_person") : t("form.value_company")}
@@ -120,7 +181,8 @@ export function AddForm(props: { workspace: string; onAdded: (layer: Layer) => v
                 setValue(event.target.value);
                 setFailed(undefined);
               }}
-              inputMode="url"
+              // A person's value may be an address, which a URL keyboard has no @ for.
+              inputMode={person ? undefined : "url"}
               autoComplete="off"
               spellCheck={false}
             />

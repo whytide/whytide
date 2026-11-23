@@ -34,7 +34,8 @@ export async function smokeSignIn(api: string, email: string, say: (line: string
   const health = await fetch(new URL("/health", api));
   expect(health.status === 200, `GET /health answered ${health.status}`);
   expect(await hasOrganization(), "no organization: the first `pnpm invite <email>` makes it");
-  expect((await runInvite([email], say)) === 0, `pnpm invite refused ${email}`);
+  // No invite mail: the step reads the sign-in link's mail only.
+  expect((await runInvite([email, "--no-mail"], say)) === 0, `pnpm invite refused ${email}`);
   const latest = readMailpit({ to: email }, { timeoutMs: 0 });
   const seen = await latest.then(
     ({ messageId }) => messageId,

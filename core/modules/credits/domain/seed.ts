@@ -96,9 +96,10 @@ export async function seed(client: PrismaClient, log: Logger, config: SeedSettin
 }
 
 /**
- * The api host's start hook: binds the credits client, then the seeder and the price list, the
- * prices the loaded modules declare with their PRICE_<ACTION> overrides, as billing_writer on a
- * client closed when it is done. A malformed override stops the start before anything is written.
+ * The api host's start hook: binds the credits client, then the seeder and the price list at the
+ * start's instant, the prices the loaded modules declare with their PRICE_<ACTION> overrides, as
+ * billing_writer on a client closed when it is done (a rise waits, prices.ts). A malformed override
+ * stops the start before anything is written.
  */
 export async function onStart({ log }: { readonly log: Logger }): Promise<void> {
   bindCreditsClient(creditsClient);
@@ -106,7 +107,7 @@ export async function onStart({ log }: { readonly log: Logger }): Promise<void> 
   const client = createDbClient("billing_writer");
   try {
     await seed(client, log);
-    await syncPrices(client, prices, log);
+    await syncPrices(client, prices, log, new Date());
   } finally {
     await client.$disconnect();
   }

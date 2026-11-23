@@ -1,0 +1,49 @@
+approvals.decide: Owner, Admin, Member
+approvals.read: Owner, Admin, Member
+campaigns.approval_mode: Owner, Admin
+campaigns.manage: Owner, Admin
+campaigns.read: Owner, Admin, Member
+campaigns.write: Owner, Admin, Member
+company_knowledge.read: Owner, Admin, Member
+company_knowledge.write: Owner, Admin
+contacts.read: Owner, Admin, Member
+contacts.write: Owner, Admin, Member
+credits.read: Owner, Admin, Member
+drafts.read: Owner, Admin, Member
+drafts.write: Owner, Admin, Member
+email.connect: Owner, Admin, Member
+email.manage: Owner, Admin
+email.read: Owner, Admin, Member
+enrichment.read: Owner, Admin, Member
+enrichment.run: Owner, Admin, Member
+exports.read: Owner, Admin
+icp.manage: Owner, Admin
+icp.read: Owner, Admin, Member
+icp.write: Owner, Admin, Member
+identity.invite: Owner
+imports.read: Owner, Admin, Member
+imports.write: Owner, Admin, Member
+inbox.export: Owner, Admin
+inbox.label: Owner, Admin, Member
+inbox.read: Owner, Admin, Member
+inbox.reply: Owner, Admin, Member
+leads.approve: Owner, Admin, Member
+leads.read: Owner, Admin, Member
+linkedin.connect: Owner, Admin, Member
+linkedin.manage: Owner, Admin
+linkedin.read: Owner, Admin, Member
+members.manage: Owner
+playbooks.manage: Owner, Admin
+playbooks.read: Owner, Admin, Member
+playbooks.write: Owner, Admin, Member
+qualification.rescore: Owner, Admin
+reviews.read: Owner, Admin, Member
+reviews.write: Owner, Admin, Member
+signals.manage: Owner, Admin
+signals.read: Owner, Admin, Member
+signals.run: Owner, Admin, Member
+signals.write: Owner, Admin, Member
+suppression.read: Owner, Admin, Member
+suppression.remove: Owner, Admin
+suppression.write: Owner, Admin, Member
+workspace.read: Owner, Admin, Member

@@ -494,5 +494,188 @@
     },
     "fake": [{ "angle": "signal_comment", "factIds": ["f_6", "f_12", "f_3"], "cta": "question" }],
     "expected": { "angle": "signal_comment" }
+  },
+  {
+    "name": "email-comment-outbound-first",
+    "input": {
+      "channel": {
+        "channel": "email",
+        "minWords": 50,
+        "maxWords": 120,
+        "subject": { "maxWords": 6, "maxCharacters": 60 }
+      },
+      "dossier": {
+        "sender": { "name": { "f_1": "Sam Writer" } },
+        "offer": {
+          "oneLiner": {
+            "f_2": "Signal Radar finds the people showing buying signals on LinkedIn."
+          },
+          "products": { "f_3": "Signal Radar" },
+          "painPoints": { "f_4": "Leads go cold before sales calls them." },
+          "proofPoints": { "f_5": "Northwind booked 40% more meetings in a quarter." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_6": "Elena" },
+        "headline": { "f_7": "Head of Sales at Quillmore" },
+        "title": { "f_8": "Head of Sales" },
+        "location": {},
+        "company": {
+          "name": { "f_9": "Quillmore" },
+          "industry": { "f_10": "Software Development" },
+          "sizeRange": { "f_11": "51-200" },
+          "country": { "f_12": "United Kingdom" }
+        }
+      },
+      "why_now": [
+        {
+          "reaction": { "f_16": "comment" },
+          "at": { "f_17": "2026-10-14T09:00:00.000Z" },
+          "excerpt": { "f_14": "Is outbound dead, or just badly aimed?" },
+          "comment": { "f_15": "Our SDRs spend half the week on lists that never reply." }
+        }
+      ],
+      "step": { "kind": "email_first", "earlier": [] },
+      "failures": [],
+      "replaced": null
+    },
+    "fake": [{ "angle": "signal_comment", "factIds": ["f_6", "f_15", "f_3"], "cta": "question" }],
+    "expected": { "angle": "signal_comment" }
+  },
+  {
+    "name": "email-proof-meetings-follow-up",
+    "input": {
+      "channel": { "channel": "email", "minWords": 50, "maxWords": 120, "subject": null },
+      "dossier": {
+        "sender": { "name": { "f_1": "Sam Writer" } },
+        "offer": {
+          "oneLiner": {
+            "f_2": "Signal Radar finds the people showing buying signals on LinkedIn."
+          },
+          "products": { "f_3": "Signal Radar" },
+          "painPoints": { "f_4": "Leads go cold before sales calls them." },
+          "proofPoints": { "f_5": "Northwind booked 40% more meetings in a quarter." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_6": "Marcus" },
+        "headline": {},
+        "title": { "f_7": "VP Sales" },
+        "location": {},
+        "company": {
+          "name": { "f_8": "Brookhaven Systems" },
+          "industry": { "f_9": "IT Services" },
+          "sizeRange": { "f_10": "201-500" },
+          "country": { "f_11": "Ireland" }
+        }
+      },
+      "why_now": [],
+      "step": {
+        "kind": "email_follow_up",
+        "earlier": [
+          {
+            "stepKey": "email_1",
+            "text": "Marcus, sales teams at IT service companies often spend their best hours on leads that went cold weeks ago. Northwind took another route and booked 40% more meetings in a quarter by calling people while they were showing buying signals. Signal Radar is what found those people for them, in public posts on LinkedIn. Would you be open to a short talk about whether that could work for Brookhaven Systems?"
+          }
+        ]
+      },
+      "failures": [],
+      "replaced": null
+    },
+    "fake": [{ "angle": "pain_point", "factIds": ["f_6", "f_4", "f_3"], "cta": "question" }],
+    "expected": { "angle": "pain_point" }
+  },
+  {
+    "name": "email-comment-breakdowns-follow-up",
+    "input": {
+      "channel": { "channel": "email", "minWords": 50, "maxWords": 120, "subject": null },
+      "dossier": {
+        "sender": { "name": { "f_1": "Ines Porter" } },
+        "offer": {
+          "oneLiner": { "f_2": "Fleetwise plans the maintenance of delivery fleets." },
+          "products": { "f_3": "Fleetwise" },
+          "painPoints": { "f_4": "Vans break down between services." },
+          "proofPoints": { "f_5": "Cut breakdowns by 30% at a 200-van fleet." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_6": "Gareth" },
+        "headline": {},
+        "title": { "f_7": "Fleet Manager" },
+        "location": {},
+        "company": {
+          "name": { "f_8": "Holloway Freight" },
+          "industry": { "f_9": "Transportation, Logistics, Supply Chain and Storage" },
+          "sizeRange": { "f_10": "201-500" },
+          "country": { "f_11": "United Kingdom" }
+        }
+      },
+      "why_now": [
+        {
+          "reaction": { "f_15": "comment" },
+          "at": { "f_16": "2026-10-09T07:30:00.000Z" },
+          "excerpt": { "f_13": "What does a breakdown really cost a delivery fleet?" },
+          "comment": { "f_14": "We lost four vans to breakdowns in one week this October." }
+        }
+      ],
+      "step": {
+        "kind": "email_follow_up",
+        "earlier": [
+          {
+            "stepKey": "email_1",
+            "text": "Gareth, the true cost of a breakdown goes well past the repair, and losing several vans in a single week makes that very clear. Fleetwise plans the maintenance of delivery fleets, so each van is serviced before it is likely to fail rather than after. The plan updates as mileage and service history change. How does your team at Holloway Freight decide when a van is due today?"
+          }
+        ]
+      },
+      "failures": [],
+      "replaced": null
+    },
+    "fake": [{ "angle": "proof_point", "factIds": ["f_6", "f_5", "f_3"], "cta": "soft_ask" }],
+    "expected": { "angle": "proof_point" }
+  },
+  {
+    "name": "email-reaction-service-first",
+    "input": {
+      "channel": {
+        "channel": "email",
+        "minWords": 50,
+        "maxWords": 120,
+        "subject": { "maxWords": 6, "maxCharacters": 60 }
+      },
+      "dossier": {
+        "sender": { "name": { "f_1": "Ines Porter" } },
+        "offer": {
+          "oneLiner": { "f_2": "Fleetwise plans the maintenance of delivery fleets." },
+          "products": { "f_3": "Fleetwise" },
+          "painPoints": { "f_4": "Vans break down between services." },
+          "proofPoints": { "f_5": "Cut breakdowns by 30% at a 200-van fleet." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_6": "Callum" },
+        "headline": {},
+        "title": { "f_7": "Maintenance Lead" },
+        "location": {},
+        "company": {
+          "name": { "f_8": "Saltire Couriers" },
+          "industry": {},
+          "sizeRange": {},
+          "country": { "f_9": "United Kingdom" }
+        }
+      },
+      "why_now": [
+        {
+          "reaction": { "f_12": "like" },
+          "at": { "f_13": "2026-10-16T12:00:00.000Z" },
+          "excerpt": { "f_11": "Five signs a van is due for a service." },
+          "comment": {}
+        }
+      ],
+      "step": { "kind": "email_first", "earlier": [] },
+      "failures": [],
+      "replaced": null
+    },
+    "fake": [{ "angle": "signal_reaction", "factIds": ["f_6", "f_11", "f_4"], "cta": "question" }],
+    "expected": { "angle": "signal_reaction" }
   }
 ]

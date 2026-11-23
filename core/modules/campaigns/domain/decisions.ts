@@ -4,9 +4,12 @@
 // read through approvals' decisionsFor, never on the payload alone, and only when it names who
 // decided and when: approved, the step becomes `scheduled` with the item's draft; skipped, the step
 // is skipped as its owner asked (steps/skip.ts). Anything else changes nothing: a redelivery, a
-// decision that comes after a hold or a cancel, an item still pending or blocked.
+// decision that comes after a hold or a cancel, an item still pending or blocked. The mode's
+// approval names no person (gamma-p4-070): it schedules the step too, by its origin, and the gate
+// then decides whether the step may take it (gate/approval.ts).
 import { decisionsFor, type StepDecision } from "@whytide/approvals";
 import type { TenantClient } from "@whytide/db";
+import { MODE_ORIGIN } from "./approval-mode/constants.ts";
 import { SKIPPED_STEP_FIELDS, type Skip, skipStep } from "./steps/skip.ts";
 
 /** What a delivery did to the step. */
@@ -22,15 +25,20 @@ export type StoredDecision =
 
 /**
  * The step's latest item's decision, when that item is the event's, `approved` or `skipped`, with
- * who decided and when (approvals' CHECK keeps both on a decided row); null for anything else.
+ * who decided and when (approvals' CHECK keeps both on a decided row), or `approved` by the mode,
+ * which names no person; null for anything else.
  */
 export function storedDecision(
   latest: StepDecision | undefined,
   approvalItemId: string,
 ): StoredDecision | null {
   if (latest === undefined || latest.approvalItemId !== approvalItemId) return null;
-  const { status, draftId, decidedBy, decidedAt } = latest;
-  if (decidedBy === null || decidedAt === null) return null;
+  const { status, draftId, decidedBy, decidedAt, decisionOrigin } = latest;
+  if (decidedAt === null) return null;
+  if (status === "approved" && decisionOrigin === MODE_ORIGIN && decidedBy === null) {
+    return { status, draftId };
+  }
+  if (decidedBy === null) return null;
   if (status === "approved") return { status, draftId };
   if (status === "skipped") return { status, by: decidedBy, at: decidedAt };
   return null;

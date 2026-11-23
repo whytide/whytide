@@ -1,7 +1,7 @@
 // The permission function and its policy table (architecture §5; coding §3): one table assembled
 // from every module's permissions.ts, one function every host asks before a module command runs, so
-// no handler decides access on its own. Alpha is the trivial case, every member is Owner, so a member
-// may do any registered action; roles are declared and kept for gamma, scopes for Core 1.1's agents.
+// no handler decides access on its own. A member may do an action whose registered roles hold the
+// member's role (gamma-p6-010); scopes, the deny list and agents' owner ceiling are Core 1.1's.
 import { AppError, defineErrors } from "../errors/index.ts";
 import type { Principal, Role } from "../principal/index.ts";
 
@@ -73,15 +73,16 @@ export const registeredPermissions = (): ReadonlyMap<string, RegisteredPermissio
  * action no module registered is `unknown_action`, a bug in the caller, whoever asks. A principal
  * bound to a workspace is forbidden another workspace's resource, service or human. A service
  * principal, internal code, may then do any registered action. A human needs a membership, which a
- * host checks against the URL's workspace by passing it as the resource. Roles and scopes are not
- * evaluated in alpha: every member is Owner.
+ * host checks against the URL's workspace by passing it as the resource, and last a role the action
+ * lists: an action registered with no roles is a service's only. Scopes wait for Core 1.1.
  */
 export function can(
   principal: Principal,
   action: string,
   resource?: PermissionResource,
 ): PermissionDecision {
-  if (!registry.has(action)) return permissionErrors.unknown_action;
+  const permission = registry.get(action);
+  if (!permission) return permissionErrors.unknown_action;
   if (resource && principal.workspaceId && resource.workspaceId !== principal.workspaceId) {
     return permissionErrors.forbidden;
   }
@@ -89,5 +90,28 @@ export function can(
   if (!principal.membershipId || !principal.workspaceId || !principal.role) {
     return permissionErrors.forbidden;
   }
+  if (!permission.roles.includes(principal.role)) return permissionErrors.forbidden;
   return "allow";
+}
+
+/**
+ * A row a member owns (gamma-p6-015): its owner's user id, null when the workspace owns it (made
+ * before the owner was recorded, or by the worker), and the module's action that writes another
+ * member's rows, its `<module>.manage`.
+ */
+export type OwnedRow = { readonly ownerUserId: string | null; readonly manageAction: string };
+
+/**
+ * Whether the principal may write a row a member owns: `allow` for whoever `can()` allows the manage
+ * action (the roles it lists, and the service) and for the row's owner, a member here; `forbidden`
+ * otherwise, so a row with no owner is the manage action's only. An unregistered manage action is
+ * `unknown_action`, a bug in the caller, even for the owner. It reads nothing and throws nothing: the
+ * host has checked the route's own action, and the module throws a refusal before it writes.
+ */
+export function canWriteOwned(principal: Principal, row: OwnedRow): PermissionDecision {
+  const manage = can(principal, row.manageAction);
+  if (manage !== permissionErrors.forbidden) return manage;
+  const member = Boolean(principal.membershipId && principal.workspaceId && principal.role);
+  const owns = member && Boolean(row.ownerUserId) && row.ownerUserId === principal.userId;
+  return owns ? "allow" : permissionErrors.forbidden;
 }

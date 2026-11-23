@@ -5,11 +5,17 @@
 // rows, grouped by sender, with each sender's period starts: a send is a `succeeded` invite or
 // message by its `executed_at`, an acceptance an invite's `accepted_at` (the detection, beta-p4-050),
 // a reply an enrollment `replied` by its `ended_at`. The label and the zone are linkedin's
-// (findSenderAccount): null for an account it no longer holds, whose days are UTC's. Ids, labels,
-// zones and numbers only: no person, no text, no provider reference.
+// (findSenderAccount): null for an account it no longer holds, whose days are UTC's. Whose accounts
+// (gamma-p6-070): a Member's own, by the account's owner; every member's, and an account linkedin no
+// longer holds, for a holder of linkedin.manage, which platform's can() answers. Ids, labels, zones
+// and numbers only: no person, no text, no provider reference.
 import { Prisma, tenantClient } from "@whytide/db";
-import { findSenderAccount, errors as linkedinErrors } from "@whytide/linkedin";
-import { currentTenant, instantAt, isAppError, quotaDay } from "@whytide/platform";
+import {
+  findSenderAccount,
+  errors as linkedinErrors,
+  permissions as linkedinPermissions,
+} from "@whytide/linkedin";
+import { can, currentTenant, instantAt, isAppError, quotaDay } from "@whytide/platform";
 import {
   COUNTS_FALLBACK_ZONE,
   DATE_LENGTH,
@@ -81,9 +87,16 @@ type Sender = {
 };
 type Counted = Readonly<Record<Period, number>> & { readonly senderAccountId: string };
 
+/** Whether the caller sees every member's sender accounts: a holder of linkedin.manage, an Owner. */
+export function seesAllSenders(): boolean {
+  const { principal, workspaceId } = currentTenant();
+  return can(principal, linkedinPermissions["linkedin.manage"], { workspaceId }) === "allow";
+}
+
 /**
- * The numbers at `at` of each sender account the workspace's enrollments name, ordered by label,
- * an account linkedin no longer holds last; none without an enrollment that has one.
+ * The numbers at `at` of each sender account the workspace's enrollments name that the caller sees
+ * (seesAllSenders, else their own), ordered by label, an account linkedin no longer holds last; none
+ * without an enrollment that has one.
  */
 export async function countsBySender(at: Date): Promise<SenderCounts[]> {
   const senders = await sendersOf(at);
@@ -130,16 +143,22 @@ function countBySender(source: Prisma.Sql, starts: Prisma.Sql): Promise<Counted[
     GROUP BY starts.sender_account_id`;
 }
 
-/** The sender accounts of the workspace's enrollments, each with its periods' starts, by label. */
+/**
+ * The sender accounts of the workspace's enrollments the caller sees, each with its periods' starts,
+ * by label: a Member's own; every one, an account linkedin no longer holds included, for a manager.
+ */
 async function sendersOf(at: Date): Promise<Sender[]> {
   const rows = await tenantClient.enrollment.groupBy({
     by: ["senderAccountId"],
     where: { senderAccountId: { not: null } },
   });
+  const all = seesAllSenders();
+  const { userId } = currentTenant().principal;
   const senders: Sender[] = [];
   for (const { senderAccountId } of rows) {
     if (senderAccountId === null) continue;
     const account = await accountOf(senderAccountId);
+    if (!all && account?.ownerUserId !== userId) continue;
     const timeZone = account?.timeZone ?? null;
     const starts = periodStarts(at, timeZone ?? COUNTS_FALLBACK_ZONE);
     senders.push({ senderAccountId, label: account?.label ?? null, timeZone, starts });
@@ -147,11 +166,13 @@ async function sendersOf(at: Date): Promise<Sender[]> {
   return senders.sort(byLabel);
 }
 
-/** The account's label and zone; null when linkedin no longer holds it in the run's workspace. */
-async function accountOf(id: string): Promise<{ label: string; timeZone: string } | null> {
+/** The account's label, zone and owner; null when linkedin no longer holds it in the run's workspace. */
+async function accountOf(
+  id: string,
+): Promise<{ label: string; timeZone: string; ownerUserId: string } | null> {
   try {
-    const { label, timeZone } = await findSenderAccount(id);
-    return { label, timeZone };
+    const { label, timeZone, ownerUserId } = await findSenderAccount(id);
+    return { label, timeZone, ownerUserId };
   } catch (error) {
     if (isAppError(error) && error.code === linkedinErrors.sender_account_not_found) return null;
     throw error;

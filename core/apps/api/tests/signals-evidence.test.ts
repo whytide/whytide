@@ -118,3 +118,154 @@ test("GET …/signals/leads/{personId}/evidence answers the person's events newe
     body: { code: "person_not_found" },
   });
 });
+
+test("a lead added by hand (contacts' manual source, lead-manual-create) without an event: the attribution names it first, without a label, and an import that came after among the others", async () => {
+  const [a] = await createTwoWorkspaces();
+  const personId = await personOf(a, "hana-hand");
+  await withTenant(
+    { workspaceId: a.workspace.id, principal: servicePrincipal("signals_test") },
+    async () => {
+      await createLeadForPerson({ personId, source: { kind: "manual", ref: a.user.id } });
+      await createLeadForPerson({ personId, source: { kind: "imported", ref: "job_1" } });
+    },
+    { client: asRole("app") },
+  );
+  assert.deepEqual(await evidenceOf(a, personId), {
+    status: 200,
+    body: {
+      events: [],
+      attribution: {
+        first: { kind: "manual", label: null },
+        others: [{ kind: "imported", label: null }],
+      },
+    },
+  });
+});
+
+test("a Web research event (gamma-wr-061) answers the page the person was found on and the found company's reasons as kept, with no reaction, author or words; the LinkedIn events' answer has no research field; another workspace's research evidence is never read", async () => {
+  const [a, b] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const source = await testing.createSignalSource({
+    ...{ workspaceId, label: "Cold rooms", kind: "web_research" },
+    config: { focus: "sellers of cold rooms" },
+    senderAccountId: null,
+  });
+  const page = "https://frio-aurora.example/team";
+  const reasons = [
+    {
+      ...{ kind: "focus", answer: "shown" },
+      line: "Sells cold rooms to restaurants.",
+      quote: "vende câmaras frigoríficas para restaurantes",
+      url: "https://frio-aurora.example/",
+      readAt: "2026-11-19T09:00:00.000Z",
+    },
+    {
+      ...{ kind: "must_have", answer: "shown", criterion: "Delivers with its own vans" },
+      line: "Own vans.",
+      quote: "Entregamos com as nossas próprias vans",
+      url: "https://frio-aurora.example/",
+      readAt: "2026-11-19T09:00:00.000Z",
+    },
+  ];
+  const company = await testing.createFoundCompany({
+    ...{ workspaceId, sourceId: source.id, domain: "frio-aurora.example", reasons },
+    name: "Frio Aurora Ltda",
+  });
+  const person = await personOf(a, "marina-research", [source.id]);
+  const research = await testing.createSignalEvent({
+    ...{ workspaceId, personId: person, sourceId: source.id, url: page },
+    research: { foundCompanyId: company.id },
+  });
+  const { status, body } = await evidenceOf(a, person);
+  assert.equal(status, 200);
+  assert.deepEqual(body.events, [
+    {
+      ...{ id: research.id, kind: "web_research", sourceId: source.id, sourceLabel: "Cold rooms" },
+      runId: null,
+      occurredAt: research.occurredAt.toISOString(),
+      evidence: null,
+      research: {
+        url: page,
+        company: {
+          name: "Frio Aurora Ltda",
+          domain: "frio-aurora.example",
+          reasons: [
+            {
+              ...{ kind: "focus", criterion: null, line: "Sells cold rooms to restaurants." },
+              quote: "vende câmaras frigoríficas para restaurantes",
+              url: "https://frio-aurora.example/",
+            },
+            {
+              ...{ kind: "must_have", criterion: "Delivers with its own vans", line: "Own vans." },
+              quote: "Entregamos com as nossas próprias vans",
+              url: "https://frio-aurora.example/",
+            },
+          ],
+        },
+      },
+    },
+  ]);
+  assert.deepEqual(body.attribution, {
+    first: { kind: "signal", label: "Cold rooms" },
+    others: [],
+  });
+
+  // A profile found by a web search (gamma-wr-070) says so on its event, and only then.
+  const searched = await personOf(a, "marina-by-search", [source.id]);
+  await testing.createSignalEvent({
+    ...{ workspaceId, personId: searched, sourceId: source.id, url: page },
+    research: { foundCompanyId: company.id, foundBy: "search" },
+  });
+  const found = (await evidenceOf(a, searched)).body.events as { research: { foundBy?: string } }[];
+  assert.deepEqual(
+    found.map((event) => event.research.foundBy),
+    ["search"],
+  );
+
+  // A person found by the search of the company's managers (gamma-wr-090) says so, with the result's
+  // title and the company's site as the page; once the evidence is reduced the title is gone.
+  const site = "https://frio-aurora.example/";
+  const title = "Rafael Duarte - Diretor de Operações - Frio Aurora | LinkedIn";
+  const manager = await personOf(a, "rafael-by-managers", [source.id]);
+  await testing.createSignalEvent({
+    ...{ workspaceId, personId: manager, sourceId: source.id, url: site, ownWords: title },
+    research: { foundCompanyId: company.id, foundBy: "managers" },
+  });
+  const managed = (await evidenceOf(a, manager)).body.events as { research: object }[];
+  assert.deepEqual(
+    managed.map(({ research }) => ({ ...research, company: undefined })),
+    [{ url: site, foundBy: "managers", title, company: undefined }],
+  );
+  const reduced = await personOf(a, "rafael-reduced", [source.id]);
+  await testing.createSignalEvent({
+    ...{ workspaceId, personId: reduced, sourceId: source.id, url: site, ownWords: title },
+    ...{ research: { foundCompanyId: company.id, foundBy: "managers" }, reducedAt: new Date() },
+  });
+  const gone = (await evidenceOf(a, reduced)).body.events as { research: { title?: string } }[];
+  assert.deepEqual(
+    gone.map(({ research }) => [research.title, "title" in research]),
+    [[undefined, false]],
+  );
+
+  // A LinkedIn event of the same person has no `research` field at all.
+  await testing.createSignalEvent({ workspaceId, personId: person });
+  const mixed = (await evidenceOf(a, person)).body.events as Record<string, unknown>[];
+  assert.deepEqual(mixed.map((event) => "research" in event).sort(), [false, true]);
+
+  // Workspace B reads none of A's: A's person is a 404 for B, and B's own research event that names
+  // A's company has no company to show.
+  assert.deepEqual(await evidenceOf(b, person), {
+    status: 404,
+    body: { code: "person_not_found" },
+  });
+  const theirs = await personOf(b, "marina-research");
+  await testing.createSignalEvent({
+    ...{ workspaceId: b.workspace.id, personId: theirs, url: page },
+    research: { foundCompanyId: company.id },
+  });
+  const other = (await evidenceOf(b, theirs)).body.events as { research: unknown }[];
+  assert.deepEqual(
+    other.map((event) => event.research),
+    [{ url: page, company: null }],
+  );
+});

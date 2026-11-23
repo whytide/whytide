@@ -1,0 +1,51 @@
+# inbox's reply route (core/modules/inbox/README.md "Replies from the inbox", "API"): a member's
+# session and inbox.reply, on a thread of their own, the one whose LinkedIn account they connected.
+# The reply goes out on the thread's own channel, LinkedIn's, from the worker, once, in the
+# account's limits: the answer is 202 with the message, sending; the thread's GET then gives its
+# sendStatus and errorCode. The Idempotency-Key is an example UUID: the same one answers the first
+# answer again for a day, another one sends another reply. It sends the cookie, so it sends Origin:
+# {{appOrigin}} too. Put in http-client.private.env.json, with your workspaceId: `threadId`, a
+# thread of yours; `suppressedThreadId`, one whose person is on the never-contact list;
+# `otherThreadId`, another member's. Other refusals: 409 reply_channel_unavailable (the account not
+# connected, the person's member id unknown), 400 reply_text_invalid with the channel's longest
+# text.
+
+### POST /v1/workspaces/{workspaceId}/inbox/threads/{id}/replies: replies on your own thread, on its channel; 202 with the message, sending
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/threads/{{threadId}}/replies
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000460
+
+{ "text": "Thanks, Tuesday at 3 works. I will send an invite." }
+
+### The same press again, with the same key: the first answer again (Idempotent-Replayed: true), no second reply
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/threads/{{threadId}}/replies
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000460
+
+{ "text": "Thanks, Tuesday at 3 works. I will send an invite." }
+
+### A suppressed person's thread: 409 person_suppressed with details.reason; nothing written
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/threads/{{suppressedThreadId}}/replies
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000461
+
+{ "text": "Thanks, Tuesday at 3 works." }
+
+### Another member's thread: 404 thread_not_found, as another workspace's; nothing written
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/threads/{{otherThreadId}}/replies
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000462
+
+{ "text": "Thanks, Tuesday at 3 works." }

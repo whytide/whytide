@@ -15,6 +15,7 @@ export const ENROLLMENT_TONE = {
   replied: "success",
   completed: "neutral",
   exited: "warning",
+  paused: "warning",
   refused: "warning",
 } as const satisfies Record<EnrollmentStatus | "refused", string>;
 

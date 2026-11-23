@@ -73,6 +73,8 @@ test("connect after the disclosure, back connected in the browser's zone; workin
   const days = card.getByRole("combobox", { name: say("linkedin.account.days_label") });
   await days.fill(say("linkedin.account.days.sat").slice(0, 3));
   await days.press("Enter");
+  // The list stays open after a pick, over the Save button below the field: Escape closes it.
+  await days.press("Escape");
   await card.getByRole("button", { name: say("linkedin.account.save") }).click();
   await expect(page.getByText(say("linkedin.account.saved"))).toBeVisible();
 

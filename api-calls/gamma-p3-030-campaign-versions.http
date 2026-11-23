@@ -1,0 +1,20 @@
+# campaigns' campaigns and their current versions (core/modules/campaigns/README.md "Routes"): a
+# member's session, campaigns.read. Each read makes the workspace's seeded campaign first, on first
+# use. `campaignId` is a campaign of your workspace, from the first request's answer, and
+# `playbookId` an agent of it (playbooks' GET …/playbooks): put them in
+# http-client.private.env.json with your workspaceId.
+
+### GET /v1/workspaces/{workspaceId}/campaigns: the workspace's campaigns, oldest first, each with its status, owner, agent (playbookId, null for the seeded one), current version's number and step count, and launch time; the first read makes the seeded campaign
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/campaigns?playbookId=: the agent's campaign alone (gamma-p3-065), none for an agent without one or of another workspace; 400 validation_failed for an empty value
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns?playbookId={{playbookId}}
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/campaigns/{campaignId}: the campaign and its current version's steps by position, each with its key, action, channel and delay, and the limits, limits.maxStepDelayBusinessDays from CAMPAIGNS_MAX_STEP_DELAY_BUSINESS_DAYS (30 unset); 404 campaign_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{campaignId}}
+Accept: application/json
+Cookie: {{sessionCookie}}

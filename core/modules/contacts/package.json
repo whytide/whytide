@@ -21,13 +21,19 @@
     "lint": "node ../../../tools/lint/lint.ts .",
     "test": "pnpm run build && APP_ENV=test node --test tests/*.test.ts",
     "test:safety": "pnpm run build && APP_ENV=test node --test \"tests/safety/*.test.ts\"",
-    "test:tenancy": "pnpm run build && APP_ENV=test node --test tests/tenancy.test.ts"
+    "test:tenancy": "pnpm run build && APP_ENV=test node --test tests/tenancy.test.ts",
+    "places:build": "node scripts/places-build.ts",
+    "countries:backfill": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/countries-backfill.js",
+    "companies:link": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/companies-link.js"
   },
   "dependencies": {
     "@nestjs/common": "12.1.3",
     "@whytide/db": "workspace:*",
     "@whytide/platform": "workspace:*",
+    "@whytide/tenancy": "workspace:*",
     "@whytide/ui": "workspace:*",
+    "busboy": "1.6.0",
+    "csv-parse": "7.0.3",
     "next": "16.4.1",
     "next-intl": "4.14.9",
     "react": "19.3.1",
@@ -35,6 +41,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@types/busboy": "1.5.5",
     "@types/react": "19.3.0"
   }
 }

@@ -6,10 +6,14 @@ import { type Prisma, tenantClient } from "@whytide/db";
 import { type SendLogRow, sendLogRows } from "@whytide/linkedin";
 import { ACTION_KINDS, type ActionKind } from "./constants.ts";
 
-/** A send's step as the zeros read it: ids and what the gate stored with the send, never a text. */
+/**
+ * A send's step as the zeros read it: ids, its campaign's key_ref (the approval's lock, gamma-p4-070)
+ * and what the gate stored with the send, never a text.
+ */
 export type SentStep = {
   readonly id: string;
   readonly personId: string;
+  readonly templateId: string;
   readonly jitChecks: Prisma.JsonValue | null;
 };
 /** An invite or a message that went out, with its step. */
@@ -35,7 +39,7 @@ export async function readSends(period: { readonly since: Date }): Promise<Sends
       ? []
       : await tenantClient.stepExecution.findMany({
           where: { id: { in: ids } },
-          select: { id: true, personId: true, jitChecks: true },
+          select: { id: true, personId: true, templateId: true, jitChecks: true },
         });
   const byId = new Map(steps.map((step) => [step.id, step]));
   const sends: Send[] = [];

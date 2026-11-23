@@ -5,12 +5,13 @@
 // holds ids, codes, booleans, numbers and instants (ISO) only.
 import { linkedinPort } from "@whytide/providers";
 import { z } from "zod";
-import { SEND_KEY_MAX_CHARS } from "../domain/send/constants.ts";
-import { type ActionOutcome, PERSON_ID, STEP_EXECUTION_ID } from "./quota.ts";
+import { SEND_KEY_MAX_CHARS, type SendRefusedReason } from "../domain/send/constants.ts";
+import { type ActionOutcome, PERSON_ID, SEND_REF } from "./quota.ts";
 
 const { sendInvite, sendMessage } = linkedinPort.methods;
 const step = {
-  stepExecutionId: z.string().regex(STEP_EXECUTION_ID),
+  /** The step execution the send is, or the inbox message a member's reply is (SEND_REF). */
+  stepExecutionId: z.string().regex(SEND_REF),
   personId: z.string().regex(PERSON_ID),
   /** The person's member id at the vendor, in the form the provider's webhooks carry. */
   memberRef: sendInvite.input.shape.memberRef,
@@ -41,8 +42,15 @@ export type SendStep = {
 export type SendSent = { readonly sent: true; readonly stepExecutionId: string };
 /** No port call: a refusal before it, `retryAt` when to ask again, null for a switch or a defect. */
 export type SendRefused = { readonly refused: ActionOutcome; readonly retryAt: string | null };
-/** The port's typed error after the call, settled by the error map; `retryAfterSec` for a rate limit. */
-export type SendFailed = { readonly refused: ActionOutcome; readonly retryAfterSec?: number };
+/**
+ * The port's typed error after the call, settled by the error map; `reason` when the map keys its
+ * row by one (SEND_REFUSED_REASONS), `retryAfterSec` for a rate limit.
+ */
+export type SendFailed = {
+  readonly refused: ActionOutcome;
+  readonly reason?: SendRefusedReason;
+  readonly retryAfterSec?: number;
+};
 export type SendResult = SendSent | SendRefused | SendFailed;
 
 /** Did the step's send go out; a refused read changes nothing. */

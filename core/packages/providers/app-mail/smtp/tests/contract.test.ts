@@ -8,4 +8,6 @@ import { loadEnvLocal, readMailpit } from "../../testing/index.ts";
 import { smtpAdapter } from "../index.ts";
 
 loadEnvLocal();
-contractSuite(appMailPort, smtpAdapter, appMailCases(readMailpit));
+// `requires` names a server's variables, for deploy:check; on the stack the suite fails without
+// them, never skips.
+contractSuite(appMailPort, { ...smtpAdapter, requires: [] }, appMailCases(readMailpit));

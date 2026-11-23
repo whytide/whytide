@@ -8,7 +8,8 @@
 // new sign-in says to reconnect through the provider's page. One whose owner has not accepted the
 // risk disclosure for sending shows its notice (disclosure-notice.tsx), and a toast once accepted;
 // a disconnected one leaves that to Connect's boxes. Its pause (pause-switch.tsx) sits above the
-// working hours. A failed action shows its code in words, with a retry of it.
+// working hours. A failed action shows its code in words, with a retry of it. The status's badge and
+// a fact's look serve a teammate's card too (teammate-card.tsx).
 import {
   Avatar,
   Badge,
@@ -63,7 +64,7 @@ const STATUS: Record<AccountResponse["status"], [tone: BadgeTone, Icon: LucideIc
 };
 const NOTE = "flex items-start gap-2.5 rounded-lg px-3 py-2.5";
 /** A fact: its label and value in a row, side by side with the others where the card is wide. */
-const FACT =
+export const FACT =
   "flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg bg-muted px-3 py-2.5 @lg:grid @lg:content-start @lg:justify-start";
 /** Every half hour of the day, `HH:MM`; a time saved off the grid is kept as an option. */
 const TIMES = Array.from({ length: 48 }, (_, half) => {
@@ -91,13 +92,6 @@ export function AccountCard({ workspaceId, account, refreshing, onRefresh, onCha
   /** The action that failed last, which the error's retry runs again. */
   const failed = useRef<() => Promise<void>>(undefined);
 
-  const status = {
-    pending: t("status.pending"),
-    connected: t("status.connected"),
-    credentials_required: t("status.credentials_required"),
-    error: t("status.error"),
-    disconnected: t("status.disconnected"),
-  }[account.status];
   const dayOptions = [
     { value: "1", label: t("days.mon") },
     { value: "2", label: t("days.tue") },
@@ -164,7 +158,6 @@ export function AccountCard({ workspaceId, account, refreshing, onRefresh, onCha
     if (done) await onChange();
   }
 
-  const [tone, StatusIcon] = STATUS[account.status];
   const busy = asking || refreshing;
   return (
     <section
@@ -192,10 +185,7 @@ export function AccountCard({ workspaceId, account, refreshing, onRefresh, onCha
         <div className={FACT}>
           <dt className="text-xs font-medium text-ink-muted">{t("status_label")}</dt>
           <dd className="flex">
-            <Badge tone={tone}>
-              <StatusIcon aria-hidden="true" />
-              {status}
-            </Badge>
+            <StatusBadge status={account.status} />
           </dd>
         </div>
         <div className={FACT}>
@@ -308,5 +298,24 @@ export function AccountCard({ workspaceId, account, refreshing, onRefresh, onCha
       ) : null}
       <Toast message={saved} />
     </section>
+  );
+}
+
+/** The account's status as a badge in its colour, with its icon and its words. */
+export function StatusBadge({ status }: { status: AccountResponse["status"] }) {
+  const t = useTranslations("linkedin.account");
+  const words = {
+    pending: t("status.pending"),
+    connected: t("status.connected"),
+    credentials_required: t("status.credentials_required"),
+    error: t("status.error"),
+    disconnected: t("status.disconnected"),
+  }[status];
+  const [tone, Icon] = STATUS[status];
+  return (
+    <Badge tone={tone}>
+      <Icon aria-hidden="true" />
+      {words}
+    </Badge>
   );
 }

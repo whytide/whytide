@@ -5,6 +5,8 @@
 // (domain/send/), queue on it; commit and release take that row too (holds.ts). The quota day and
 // the window come from the account's time zone and working hours, through platform's time helpers.
 // A refusal is an answer, not a throw, so the caller's run commits the action-log row that records it.
+// readsLeftToday reads what is left of the day's reads, for signals, and reserves nothing. A company
+// page's read (`read_company`) also stays within its share of the day's reads (domain/company/).
 import { tenantClient } from "@whytide/db";
 import { currentTenant, isWindowOpen, newId, nextWindowAt } from "@whytide/platform";
 import { linkedinConfig } from "../../config.ts";
@@ -19,6 +21,7 @@ import {
 import { findAccount } from "../accounts.ts";
 import { writeLog } from "../action-log/log.ts";
 import { now } from "../clock.ts";
+import { companyReadsLeft } from "../company/share.ts";
 import { readControls, stopOf } from "../controls/controls.ts";
 import { sendingDisclosureRequired } from "../disclosure/disclosure.ts";
 import { isPaused } from "../health/states.ts";
@@ -33,7 +36,15 @@ import {
 } from "./constants.ts";
 import { dayOf, invitesBefore } from "./days.ts";
 import { lockReservation, moveCounters, notOpen, settle, sweep } from "./holds.ts";
-import { actionsLeft, actionsUsed, dayEndsAt, limitsFor, readsLeft, windowLeft } from "./limits.ts";
+import {
+  actionsLeft,
+  actionsUsed,
+  dayEndsAt,
+  limitsFor,
+  readsGrantable,
+  readsLeft,
+  windowLeft,
+} from "./limits.ts";
 
 export type Reservation = { readonly reservationId: string; readonly granted: number };
 export type Refusal = {
@@ -57,6 +68,16 @@ export type Usage = {
   readonly weekInvites: Used & { readonly cap: number };
   readonly actions: Used & { readonly max: number };
 };
+/**
+ * What signals may still read today (readsLeftToday): the quota day in use, the reads left, and the
+ * account's window now and its next start.
+ */
+export type ReadsLeft = {
+  readonly quotaDay: string;
+  readonly left: number;
+  readonly windowOpen: boolean;
+  readonly nextWindowAt: Date;
+};
 /** What a campaign may still send today, and when today's window ends (null: none is left, or no send may go). */
 export type RemainingToday = {
   readonly invites: number;
@@ -71,13 +92,16 @@ export type RemainingToday = {
  * workspace's or the account's, docs/concepts.md "Kill switches"), while it is not connected, while
  * its retry_at lies ahead, outside its working hours, when the day's reads reserved and made would
  * pass the smaller of the day's read allowance and the account's cap, or when the day's actions
- * would pass the 200.
+ * would pass the 200, or for `read_company` its share (LINKEDIN_COMPANY_READS_PER_DAY, read_cap_reached
+ * with the next quota day's start); with `keep`, when it would leave fewer reads than that in the quota day
+ * (read_cap_reached, the next window's start), checked under the day's lock as the cap is, so two
+ * reservations at once cannot both pass.
  * One action-log row either way. The cap is the account's row as this reservation reads it, so a
  * lowered cap holds from here; the allowance was drawn with the day's row, so a raised one holds from
  * the next quota day.
  */
 export async function reserveReads(input: ReserveInput): Promise<Reservation | Refusal> {
-  const { accountId, count, kind, objectRef } = parseInput(reserveInput, input);
+  const { accountId, count, kind, objectRef, keep } = parseInput(reserveInput, input);
   const account = await findAccount(accountId);
   const at = now();
   const log = (outcome: ActionOutcome) =>
@@ -95,7 +119,17 @@ export async function reserveReads(input: ReserveInput): Promise<Reservation | R
       : count > actionsLeft(day)
         ? "daily_actions_cap_reached"
         : undefined;
-  if (refused !== undefined) return refuse({ refused, retryAt: dayEndsAt(day, account.timeZone) });
+  // A company page's reads stop at their share of the day's reads (LINKEDIN_COMPANY_READS_PER_DAY).
+  const share = kind === "read_company" && count > (await companyReadsLeft(account.id, day));
+  const over = refused ?? (share ? "read_cap_reached" : undefined);
+  if (over !== undefined)
+    return refuse({ refused: over, retryAt: dayEndsAt(day, account.timeZone) });
+  // The reads kept for the send path's checks: they come back with the next quota day, whose first
+  // read waits for the window, open now, to open again.
+  if (keep !== undefined && readsGrantable(account, day) - count < keep) {
+    const retryAt = nextWindowAt(at, account.timeZone, account.workingHours);
+    return refuse({ refused: "read_cap_reached", retryAt });
+  }
   const reservationId = newId(ids.sender_quota_reservation);
   const expiresAt = new Date(at.getTime() + RESERVATION_MS);
   await tenantClient.senderQuotaReservation.create({
@@ -166,6 +200,29 @@ export async function readUsage(accountId: string): Promise<Usage> {
     },
     weekInvites: { used: weekInvites, cap: INVITES_PER_WEEK.cap },
     actions: { used: actionsUsed(day), max: ACTIONS_PER_DAY_MAX },
+  };
+}
+
+/**
+ * What the account may still read today, for signals' scheduler (gamma-p5-015): the reads
+ * reserveReads would still grant in its quota day, the read budget less what is reserved and made
+ * within the 200, as the usage route counts them (a hold past its hour counts until the next
+ * reservation sweeps it); 0 while a refusal other than the window's holds, a kill switch, an account
+ * not connected, its health's pause or its retry_at; and its window now and its next start. It
+ * reserves nothing, and makes today's row when missing, as readUsage does.
+ */
+export async function readsLeftToday(accountId: string): Promise<ReadsLeft> {
+  const account = await findAccount(accountId);
+  const { timeZone, workingHours } = account;
+  const at = now();
+  const state = await readStateRefusal(account, at);
+  const day = await dayOf(account, at, false);
+  const held = state !== null && state.refused !== "outside_working_hours";
+  return {
+    quotaDay: day.quotaDay,
+    left: held ? 0 : readsGrantable(account, day),
+    windowOpen: isWindowOpen(at, timeZone, workingHours),
+    nextWindowAt: nextWindowAt(at, timeZone, workingHours),
   };
 }
 

@@ -1,19 +1,25 @@
 // The hard filters (docs/concepts.md): before any model sees a person, pure code decides whether the
-// title, the country and the company size can match the ICP at all, and says why not. Balanced mode
-// only: an unknown value passes to the assessment, a known mismatch fails. Nothing is imported from
-// outside this folder: the inputs are structural types that contacts' and icp's records satisfy as
-// they are (tests/hard-filters.test.ts proves it), so the signal run and the batch pass them in. A
-// caller with many persons prepares the filters for its ICP once (prepareHardFilters).
+// country and the company size can match the ICP at all, and says why not. The title is the
+// assessment's (title-check-ai): titles.ts stays for signals' read order only. Balanced mode only: an
+// unknown value passes to the assessment, a known mismatch fails. Nothing is imported from outside
+// this folder: the inputs are structural types that contacts' and icp's records satisfy as they are
+// (tests/hard-filters.test.ts proves it), so the signal run and the batch pass them in. A caller with
+// many persons prepares the filters for its ICP once (prepareHardFilters).
 import { type SizeRange, sizeRangesOf } from "./size.ts";
-import { icpTitleTokens, titleFits } from "./titles.ts";
 
-/** Why a person failed, a closed list: the lead's hard_filter_reason (alpha-p6-040). */
+/**
+ * Why a person failed, a closed list: the lead's hard_filter_reason (alpha-p6-040). title_mismatch
+ * names older rows only: no filter gives it since title-check-ai.
+ */
 export const HARD_FILTER_REASONS = ["title_mismatch", "country_mismatch", "size_mismatch"] as const;
 export type HardFilterReason = (typeof HARD_FILTER_REASONS)[number];
+/** The reasons no filter gives anymore: the batch assesses such a lead again (README "The batch"). */
+export const RETIRED_HARD_FILTER_REASONS = [
+  "title_mismatch",
+] as const satisfies readonly HardFilterReason[];
 
 /** What the filters read of a person; contacts' Person satisfies it. */
 export type HardFilterPerson = {
-  readonly title?: string | null;
   /** ISO 3166-1 alpha-2. */
   readonly locationCountry?: string | null;
 };
@@ -24,7 +30,6 @@ export type HardFilterCompany = {
 };
 /** The ICP's targeting the filters compare with; icp's Icp satisfies it. An empty list filters nothing. */
 export type HardFilterIcp = {
-  readonly titles: readonly string[];
   /** ISO 3166-1 alpha-2. */
   readonly countries: readonly string[];
   readonly sizeRanges: readonly SizeRange[];
@@ -49,10 +54,10 @@ export type PreparedHardFilters = (
 ) => HardFilterResult;
 
 /**
- * The three filters in the order title, country, company size; the first miss is the result. A value
- * the person or the company lacks (no title or one of noise only, no country, no company, a size that
- * reads as no count) passes, and so does a list the ICP leaves empty. It prepares the ICP on every
- * call: a caller with many persons prepares once (prepareHardFilters).
+ * The two filters in the order country, company size; the first miss is the result. A value the
+ * person or the company lacks (no country, no company, a size that reads as no count) passes, and so
+ * does a list the ICP leaves empty; any title passes. It prepares the ICP on every call: a caller with
+ * many persons prepares once (prepareHardFilters).
  */
 export function applyHardFilters(
   person: HardFilterPerson,
@@ -63,18 +68,14 @@ export function applyHardFilters(
 }
 
 /**
- * The filters for one ICP, its titles and countries read once: the signal run and the batch prepare
+ * The filters for one ICP, its countries and sizes read once: the signal run and the batch prepare
  * once per run or batch and keep the function, which holds a copy of what it read and nothing else.
  */
 export function prepareHardFilters(icp: HardFilterIcp): PreparedHardFilters {
-  const titles = [...icp.titles];
-  const targets = icpTitleTokens(titles);
   const countries = [...icp.countries];
   const codes = countries.map((code) => code.toUpperCase());
   const sizes = [...icp.sizeRanges];
   return (person, company) => {
-    const title = person.title?.trim() ?? "";
-    if (!titleFits(title, targets)) return miss("title_mismatch", title, titles);
     const country = person.locationCountry?.trim().toUpperCase() ?? "";
     if (country !== "" && codes.length > 0 && !codes.includes(country)) {
       return miss("country_mismatch", country, countries);

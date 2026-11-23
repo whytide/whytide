@@ -1,0 +1,59 @@
+{
+  "object": "PostList",
+  "items": [
+    {
+      "provider": "LINKEDIN",
+      "id": "7000000000000000401",
+      "share_url": "https://www.linkedin.com/posts/fixture_post-activity-7000000000000000401-AbCd?rcm=fixture-tracking-id",
+      "date": "1d",
+      "social_id": "urn:li:activity:7000000000000000401",
+      "text": "fixture-body-marker: what we shipped this week",
+      "parsed_datetime": "2026-10-02T10:00:00.000Z",
+      "is_repost": false,
+      "author": {
+        "public_identifier": "sam-sender",
+        "id": "fixture-member-self",
+        "name": "Sam Sender",
+        "is_company": false,
+        "headline": "Founder at Example Ltd"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000402",
+      "text": "fixture-body-marker: a question for founders",
+      "parsed_datetime": "2026-09-29T10:00:00.000Z",
+      "author": {
+        "public_identifier": "sam-sender",
+        "id": "fixture-member-self",
+        "name": "Sam Sender",
+        "is_company": false,
+        "headline": "Founder at Example Ltd"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000403",
+      "text": "fixture-body-marker: our first customer",
+      "parsed_datetime": "2026-09-25T00:00:00.000Z",
+      "author": {
+        "public_identifier": "sam-sender",
+        "id": "fixture-member-self",
+        "name": "Sam Sender",
+        "is_company": false,
+        "headline": "Founder at Example Ltd"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000404",
+      "text": "fixture-body-marker: an older post",
+      "parsed_datetime": "2026-09-24T23:59:59.000Z",
+      "author": {
+        "public_identifier": "sam-sender",
+        "id": "fixture-member-self",
+        "name": "Sam Sender",
+        "is_company": false,
+        "headline": "Founder at Example Ltd"
+      }
+    }
+  ],
+  "cursor": null
+}

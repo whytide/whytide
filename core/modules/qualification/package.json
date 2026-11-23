@@ -19,8 +19,8 @@
     "build": "pnpm run generate && tsc -b",
     "typecheck": "pnpm run generate && tsc -b",
     "lint": "node ../../../tools/lint/lint.ts .",
-    "test": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test tests/*.test.ts",
-    "test:tenancy": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake node --test tests/tenancy.test.ts",
+    "test": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake PROVIDER_APP_MAIL=fake node --test tests/*.test.ts",
+    "test:tenancy": "pnpm run build && APP_ENV=test PROVIDER_LLM=fake PROVIDER_APP_MAIL=fake node --test tests/tenancy.test.ts",
     "rescore": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/rescore.js",
     "export:golden": "pnpm run build && node --env-file-if-exists=../../../.env.local dist/cli/export-golden.js"
   },
@@ -33,6 +33,7 @@
     "@whytide/discovery": "workspace:*",
     "@whytide/icp": "workspace:*",
     "@whytide/platform": "workspace:*",
+    "@whytide/playbooks": "workspace:*",
     "@whytide/providers": "workspace:*",
     "@whytide/tenancy": "workspace:*",
     "@whytide/ui": "workspace:*",

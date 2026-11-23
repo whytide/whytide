@@ -2,12 +2,15 @@
 // core/modules/campaigns/README.md "Screens"), on leads and enrollments that the e2e api's test-only
 // module writes (core/apps/api/tests/fixtures/e2e) in wsp_e2e_enrollment, this spec's alone, whose
 // connected account sends from Europe/Paris while the browser runs in America/New_York: an active
-// enrollment's steps, each with its status, its time in the sender's zone with the zone named, and
-// why one waits, was skipped or is held; one just made, whose later steps say what they wait for; two
-// that never started, newest first, each with why in words; a person without one, the empty state;
-// the slot's loading state while the e2e api holds the read, and the panel's error state when it
-// fails it, whose Try again reads again (tests/e2e-hold.ts); and the active and the refused ones at a
-// phone's width, nothing wider than it. Every text from its key; axe on each state.
+// enrollment's campaign and version, and its steps, each with its status, its time in the sender's
+// zone with the zone named, and why one waits, was skipped or is held; one just made, whose later
+// steps say what they wait for; two that never started, newest first, each with why in words; a
+// person without one, the empty state; the slot's loading state while the e2e api holds the read,
+// and the panel's error state when it fails it, whose Try again reads again (tests/e2e-hold.ts);
+// Pause behind the kit's confirming dialog, then Resume, through campaigns' routes, the focus kept on
+// the button; a Pause the api refuses, the enrollment paused meanwhile until a time, in words, after
+// which the panel reads again and says when it resumes (gamma-p3-061); and the active and the
+// refused ones at a phone's width, nothing wider than it. Every text from its key; axe on each state.
 import { AxeBuilder } from "@axe-core/playwright";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { createTranslator } from "next-intl";
@@ -17,7 +20,8 @@ import ui from "../../../packages/ui/messages/en.json" with { type: "json" };
 import { expect, test } from "./sign-in.ts";
 
 const WORKSPACE = "wsp_e2e_enrollment";
-const E2E = `/api/v1/workspaces/${WORKSPACE}/e2e`;
+const API = `/api/v1/workspaces/${WORKSPACE}`;
+const E2E = `${API}/e2e`;
 /** The panel's read, whose path the e2e api's hold and fail cookies name. */
 const READ = "/campaigns/enrollments";
 /** The zone of the workspace's connected account (core/apps/api/tests/e2e-signals.ts). */
@@ -32,6 +36,8 @@ const LEADS = [
 const SENT = { at: "2026-10-27T08:30:00.000Z", paris: "Oct 27, 2026, 9:30 AM" };
 const SCHEDULED = { at: "2026-10-28T12:15:00.000Z", paris: "Oct 28, 2026, 1:15 PM" };
 const DUE = { at: "2026-10-29T16:45:00.000Z", paris: "Oct 29, 2026, 5:45 PM" };
+/** When a pause ends, in Paris (UTC+1 in December). */
+const UNTIL = { at: "2026-12-01T08:00:00.000Z", paris: "Dec 1, 2026, 9:00 AM" };
 
 /** The request sent; the first message waiting for another day; a follow-up skipped, one held. */
 const ACTIVE = {
@@ -87,7 +93,16 @@ const t = createTranslator({
   },
 }) as unknown as Translate;
 
-/** The workspace's four leads, and each person's enrollments replaced by its own; their ids. */
+/** The line that names an enrollment's campaign: the seeded one, whose name is empty. */
+const CAMPAIGN = t("campaigns.panel.campaign", {
+  name: t("campaigns.panel.default_campaign"),
+  version: "1",
+});
+
+/**
+ * The workspace's four leads, and each person's enrollments replaced by its own; their ids, and the
+ * id of the active person's enrollment.
+ */
 async function seed(page: Page, origin: string | undefined) {
   const headers = { origin: origin ?? "" };
   const leads = await page.request.post(`${E2E}/leads`, { data: { leads: LEADS }, headers });
@@ -100,12 +115,24 @@ async function seed(page: Page, origin: string | undefined) {
     [refused, REFUSED],
     [none, []],
   ];
+  let enrollment = "";
   for (const [personId, enrollments] of seeded) {
     const data = { personId, enrollments };
     const answer = await page.request.post(`${E2E}/enrollments`, { data, headers });
     expect(answer.status(), await answer.text()).toBe(200);
+    const { enrollmentIds } = (await answer.json()) as { enrollmentIds: string[] };
+    if (personId === active) enrollment = enrollmentIds[0] ?? "";
   }
-  return { active, fresh, refused, none };
+  return { active, fresh, refused, none, enrollment };
+}
+
+/** The enrollment paused until `until` through campaigns' route, as another member would. */
+async function pauseElsewhere(page: Page, origin: string | undefined, id: string, until: string) {
+  const answer = await page.request.post(`${API}/campaigns/enrollments/${id}/pause`, {
+    data: { until },
+    headers: { origin: origin ?? "" },
+  });
+  expect(answer.status(), await answer.text()).toBe(200);
 }
 
 /** The e2e api holds (`e2e_hold`) or fails (`e2e_fail`) each read of the panel's path. */
@@ -177,7 +204,9 @@ test("an active enrollment's steps by position, each with its status, its time i
     ],
     read,
   );
-  await expect(enrollment.locator("p").first()).toHaveText(t("campaigns.enrollment.status.active"));
+  // Its campaign and version, then its status.
+  await expect(enrollment.locator("p").nth(0)).toHaveText(CAMPAIGN);
+  await expect(enrollment.locator("p").nth(1)).toHaveText(t("campaigns.enrollment.status.active"));
   // Each time carries its instant; the words are Paris's, never the browser's New York.
   const times = steps.locator("time");
   await expect(times).toHaveCount(2);
@@ -211,12 +240,92 @@ test("enrollments that never started, newest first: each says Not started and wh
   const refusedWord = t("campaigns.enrollment.status.refused");
   await expect(enrollmentsOf(panel)).toHaveText(
     [
-      `${refusedWord} ${t("campaigns.reason.suppressed")} ${t("campaigns.reason.recently_contacted")}`,
-      `${refusedWord} ${t("campaigns.reason.no_sender")}`,
+      `${CAMPAIGN} ${refusedWord} ${t("campaigns.reason.suppressed")} ${t("campaigns.reason.recently_contacted")}`,
+      `${CAMPAIGN} ${refusedWord} ${t("campaigns.reason.no_sender")}`,
     ],
     read,
   );
   await expect(stepsOf(panel)).toHaveCount(0);
+  // Neither is running, so neither can be paused or resumed.
+  await expect(panel.getByRole("button")).toHaveCount(0);
+  await axe(page);
+});
+
+test("Pause asks first in the kit's dialog, whose Cancel changes nothing; confirmed, the enrollment is Paused by a member and its button Resume, which makes it Active again; the focus stays on the button; axe on each", async ({
+  page,
+  signInAs,
+  baseURL,
+}) => {
+  await signInAs();
+  const { active } = await seed(page, baseURL);
+  await page.goto(leadPath(active));
+  const enrollment = enrollmentsOf(panelOf(page));
+  const badge = enrollment.locator("p").nth(1);
+  const button = (key: string) =>
+    enrollment.getByRole("button", { name: t(`campaigns.panel.${key}`), exact: true });
+  const [pause, resume] = [button("pause"), button("resume")];
+  const dialog = page.getByRole("dialog", { name: t("campaigns.panel.pause_title") });
+  const byMember = enrollment.getByText(t("campaigns.panel.paused.user"), { exact: true });
+  await expect(badge).toHaveText(t("campaigns.enrollment.status.active"));
+  await expect(resume).toHaveCount(0);
+
+  await pause.click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(t("campaigns.panel.pause_body"));
+  await axe(page);
+  await dialog.getByRole("button", { name: t("ui.action.cancel"), exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(pause).toBeFocused();
+  await expect(badge).toHaveText(t("campaigns.enrollment.status.active"));
+
+  await pause.click();
+  await dialog.getByRole("button", { name: t("campaigns.panel.pause"), exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(badge).toHaveText(t("campaigns.enrollment.status.paused"));
+  await expect(byMember).toBeVisible();
+  await expect(resume).toBeFocused();
+  await expect(pause).toHaveCount(0);
+  await axe(page);
+  // It held: read anew, the panel still says so.
+  await page.reload();
+  await expect(badge).toHaveText(t("campaigns.enrollment.status.paused"));
+  await expect(byMember).toBeVisible();
+
+  await resume.click();
+  await expect(badge).toHaveText(t("campaigns.enrollment.status.active"));
+  await expect(byMember).toHaveCount(0);
+  await expect(pause).toBeFocused();
+  await expect(enrollment.getByRole("alert")).toHaveCount(0);
+  await axe(page);
+});
+
+test("a Pause the api refuses, the enrollment paused meanwhile until a time, says why in words; the panel reads again: Paused, when it resumes in the sender's zone, and Resume; axe", async ({
+  page,
+  signInAs,
+  baseURL,
+}) => {
+  await signInAs();
+  const { active, enrollment: id } = await seed(page, baseURL);
+  await page.goto(leadPath(active));
+  const enrollment = enrollmentsOf(panelOf(page));
+  const pause = enrollment.getByRole("button", { name: t("campaigns.panel.pause"), exact: true });
+  await expect(pause).toBeVisible();
+  // Behind the panel's back.
+  await pauseElsewhere(page, baseURL, id, UNTIL.at);
+
+  await pause.click();
+  const dialog = page.getByRole("dialog", { name: t("campaigns.panel.pause_title") });
+  await dialog.getByRole("button", { name: t("campaigns.panel.pause"), exact: true }).click();
+  const alert = enrollment.getByRole("alert");
+  await expect(alert).toContainText(t("ui.state.error"));
+  await expect(alert).toContainText(t("campaigns.errors.enrollment_not_active"));
+  const until = t("campaigns.panel.paused_until", { time: UNTIL.paris, zone: ZONE });
+  const paused = `${t("campaigns.panel.paused.user")} ${until}`;
+  await expect(enrollment.getByText(paused, { exact: true })).toBeVisible();
+  await expect(enrollment.locator("p").nth(1)).toHaveText(t("campaigns.enrollment.status.paused"));
+  await expect(
+    enrollment.getByRole("button", { name: t("campaigns.panel.resume"), exact: true }),
+  ).toBeVisible();
   await axe(page);
 });
 

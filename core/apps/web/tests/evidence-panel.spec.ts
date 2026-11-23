@@ -35,6 +35,15 @@ function chosen(key: string, value: string): string {
 }
 
 const AUTHOR = "Evidence Two";
+/** A Web research lead's page, company and reason (gamma-wr-061). */
+const RESEARCH_PAGE = "https://frio-aurora.example/team";
+const REASON_PAGE = "https://frio-aurora.example/";
+/** A person found by the managers' search (gamma-wr-090): the company's site and the result's title. */
+const SITE = "https://frio-austral.example/";
+const MANAGER_TITLE = "Rafael Duarte - Diretor de Operações - Frio Austral | LinkedIn";
+const COMPANY = "Frio Aurora Ltda";
+const REASON_LINE = "Sells cold rooms to restaurants.";
+const REASON_QUOTE = "vende câmaras frigoríficas para restaurantes";
 const COMMENT = "Exactly our problem.";
 const LEADS = [
   {
@@ -65,6 +74,59 @@ const LEADS = [
       {
         ...{ source: "Launch post", reaction: "comment", author: "Evidence Reduced" },
         ...{ occurredAt: "2026-09-01T09:00:00.000Z", reduced: true },
+      },
+    ],
+  },
+  {
+    ...{ slug: "e2e-evidence-research", firstName: "Evidence", lastName: "Research" },
+    sources: ["Cold rooms"],
+    events: [
+      {
+        source: "Cold rooms",
+        occurredAt: "2026-10-03T09:00:00.000Z",
+        research: {
+          page: RESEARCH_PAGE,
+          company: COMPANY,
+          domain: "frio-aurora.example",
+          reasons: [
+            {
+              ...{ kind: "focus", answer: "shown", line: REASON_LINE, quote: REASON_QUOTE },
+              url: REASON_PAGE,
+              readAt: "2026-10-03T08:00:00.000Z",
+            },
+          ],
+        },
+      },
+    ],
+  },
+  {
+    ...{ slug: "e2e-evidence-profile", firstName: "Evidence", lastName: "Profile" },
+    sources: ["Cold rooms"],
+    events: [
+      {
+        source: "Cold rooms",
+        occurredAt: "2026-10-04T09:00:00.000Z",
+        research: {
+          ...{ page: RESEARCH_PAGE, company: "Frio Boreal Ltda", domain: "frio-boreal.example" },
+          reasons: [],
+          foundBy: "search",
+        },
+      },
+    ],
+  },
+  {
+    ...{ slug: "e2e-evidence-managers", firstName: "Evidence", lastName: "Managers" },
+    sources: ["Cold rooms"],
+    events: [
+      {
+        source: "Cold rooms",
+        occurredAt: "2026-10-05T09:00:00.000Z",
+        research: {
+          ...{ page: SITE, company: "Frio Austral Ltda", domain: "frio-austral.example" },
+          reasons: [],
+          foundBy: "managers",
+          title: MANAGER_TITLE,
+        },
       },
     ],
   },
@@ -148,6 +210,90 @@ test("an imported lead without an event shows the Imported label and no evidence
     POST,
   );
   await axe(page);
+});
+
+test("a Web research lead shows its source, the page it was found on as a link in a new tab, and the company's reason with its quote and the page that holds it; no other person; axe passes, and at a phone's width nothing scrolls sideways", async ({
+  page,
+  request,
+  signInAs,
+}) => {
+  await signInAs();
+  const research = (await seed(request))[3];
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(leadPath(research));
+  const panel = panelOf(page);
+  await expect(panel.locator("dd")).toHaveText(["Cold rooms"]);
+  const line = panel.getByRole("listitem");
+  await expect(line.locator("strong")).toHaveText("Cold rooms");
+  const found = say("signals.evidence.research.found", { source: "Cold rooms", company: COMPANY });
+  await expect(line).toContainText(found.split(" · ")[1] ?? "");
+  await expect(line.locator("time")).toHaveAttribute("datetime", "2026-10-03T09:00:00.000Z");
+  await expect(line).toContainText(say("signals.evidence.research.reasons"));
+  await expect(line).toContainText(REASON_LINE);
+  await expect(line.locator("blockquote")).toHaveText(
+    say("signals.evidence.research.quote", { quote: REASON_QUOTE }),
+  );
+  const pageLink = line.getByRole("link", { name: say("signals.evidence.page") });
+  const reasonLink = line.getByRole("link", { name: say("signals.evidence.research.reason_page") });
+  for (const [link, href] of [
+    [pageLink, RESEARCH_PAGE],
+    [reasonLink, REASON_PAGE],
+  ] as const) {
+    await expect(link).toHaveAttribute("href", href);
+    await expect(link).toHaveAttribute("target", "_blank");
+    await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  }
+  // The post's link of the LinkedIn kinds is not here.
+  await expect(line.getByRole("link", { name: say("signals.evidence.post") })).toHaveCount(0);
+  const wide = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+  expect(wide, "the page scrolls sideways at 390 px").toBe(false);
+  await axe(page);
+});
+
+test("a Web research lead whose profile was found by a search says so, and one found on the page does not", async ({
+  page,
+  request,
+  signInAs,
+}) => {
+  await signInAs();
+  const ids = await seed(request);
+  const words = say("signals.evidence.research.profile_by_search");
+  await page.goto(leadPath(ids[4]));
+  await expect(panelOf(page).getByRole("listitem")).toContainText(words);
+  await page.goto(leadPath(ids[3]));
+  await expect(panelOf(page).getByRole("listitem")).not.toContainText(words);
+});
+
+test("a Web research lead found by the managers' search says so, with the result's title and the company's site as its link in a new tab, and can be checked before it is approved; a lead found on a page shows neither", async ({
+  page,
+  request,
+  signInAs,
+}) => {
+  await signInAs();
+  const ids = await seed(request);
+  await page.goto(leadPath(ids[5]));
+  const line = panelOf(page).getByRole("listitem");
+  const found = say("signals.evidence.research.found_by_managers", {
+    source: "Cold rooms",
+    company: "Frio Austral Ltda",
+  });
+  await expect(line).toContainText(found.split(" · ")[1] ?? "");
+  await expect(line).toContainText(say("signals.evidence.research.managers_by_search"));
+  await expect(line).toContainText(
+    say("signals.evidence.research.managers_title", { title: MANAGER_TITLE }),
+  );
+  const site = line.getByRole("link", { name: say("signals.evidence.research.company_site") });
+  await expect(site).toHaveAttribute("href", SITE);
+  await expect(site).toHaveAttribute("target", "_blank");
+  await expect(site).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(line.getByRole("link", { name: say("signals.evidence.page") })).toHaveCount(0);
+  await axe(page);
+  await page.goto(leadPath(ids[3]));
+  await expect(panelOf(page).getByRole("listitem")).not.toContainText(
+    say("signals.evidence.research.managers_by_search"),
+  );
 });
 
 test("a panel that throws shows the slot's message and the code in words, and the page and the other slots stay up", async ({

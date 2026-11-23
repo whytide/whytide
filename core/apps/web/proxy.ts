@@ -3,9 +3,10 @@
 // framed, no plugin, forms and the base URL to the origin only. One fresh nonce a request; the api's
 // own answers carry their own policy (core/apps/api/docs/security.md). The page asked for travels to
 // the workspace layout as x-whytide-path, where a visitor with no session is sent to sign in. The
-// sign-in confirm page (the auth port's AUTH_LINK_CONFIRM_PATH) has a link's token in its URL: no
-// request from it sends that on as a Referer.
+// pages of NO_REFERRER (constants.ts) hold a secret in their address: no request from them sends it
+// on as a Referer.
 import { type NextRequest, NextResponse } from "next/server";
+import { NO_REFERRER } from "./constants.ts";
 
 export function proxy(request: NextRequest) {
   const nonce = btoa(crypto.randomUUID());
@@ -27,7 +28,7 @@ export function proxy(request: NextRequest) {
   headers.set("x-whytide-path", `${request.nextUrl.pathname}${request.nextUrl.search}`);
   const response = NextResponse.next({ request: { headers } });
   response.headers.set("content-security-policy", policy);
-  if (request.nextUrl.pathname === "/sign-in/confirm") {
+  if (NO_REFERRER.has(request.nextUrl.pathname)) {
     response.headers.set("referrer-policy", "no-referrer");
   }
   return response;

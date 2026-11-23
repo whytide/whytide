@@ -1,0 +1,31 @@
+# The Draft's body (onboarding-setup; core/modules/onboarding/README.md "The documents", "The automatic
+# accept"): the texts of up to five documents the Company screen read in the browser, and autoAccept,
+# which the prompt at sign-in sends so that the run accepts its own draft. Both are optional: no body
+# drafts from the saved website as before. A record with neither a website nor a document answers 409
+# company_knowledge_no_website; a field off the rules is 400 validation_failed with its path
+# (documents.2.text), never its value. Each Idempotency-Key is an example UUID.
+
+### POST /v1/workspaces/{workspaceId}/onboarding/company-knowledge/draft: drafts from the documents given, and the saved website when there is one; 202, fetchStatus fetching
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/onboarding/company-knowledge/draft
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000401
+
+{
+  "documents": [
+    { "name": "deck.pdf", "mediaType": "application/pdf", "status": "read", "text": "Acme builds picking robots for mid-sized warehouses." },
+    { "name": "faq.md", "mediaType": "text/markdown", "status": "truncated", "text": "# Questions\n\nInstalls over a weekend." }
+  ]
+}
+
+### POST /v1/workspaces/{workspaceId}/onboarding/company-knowledge/draft: the prompt's Draft from the saved website, accepted as it lands, as Accept without replacing a person's fields
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/onboarding/company-knowledge/draft
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000402
+
+{ "autoAccept": true }

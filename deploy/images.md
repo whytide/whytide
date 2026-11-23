@@ -1,6 +1,6 @@
 # Images
 
-Every image `compose.yaml` runs and the base of `Dockerfile`, pinned by the digest of its multi-architecture index (amd64 and arm64), so a tag that moves cannot change what starts. `tests/stack.test.sh` checks that every `image:` in the file, but our own, and every `FROM` of `Dockerfile` is pinned and listed here, with the schema engine's pin below. Our own images, `api`, `worker` and `web`, are built from `Dockerfile` by `scripts/images-build.sh` and tagged with their commit (README.md "Images").
+Every image `compose.yaml` runs and the bases of `Dockerfile` and `browser/Dockerfile`, pinned by the digest of its multi-architecture index (amd64 and arm64), so a tag that moves cannot change what starts. `tests/stack.test.sh` checks that every `image:` in the file, but our own, and every `FROM` of `Dockerfile` is pinned and listed here, with the schema engine's pin below. Our own images, `api`, `worker` and `web`, are built from `Dockerfile` by `scripts/images-build.sh` and tagged with their commit (README.md "Images").
 
 | Service | Image | Digest | Pinned |
 |---|---|---|---|
@@ -13,6 +13,7 @@ Every image `compose.yaml` runs and the base of `Dockerfile`, pinned by the dige
 | otel-lgtm | `grafana/otel-lgtm:0.37.0` | `sha256:57b5ab1ca6619beb180174e2fccce04762470750669d043f544b4726d0582d07` | 2026-10-21 |
 | caddy | `caddy:2.11.7-alpine` | `sha256:24ec7b05bc532c7bb57f727030c5056e257ff7138b4b50460306819ff79362bd` | 2026-10-22 |
 | api, worker, web (`Dockerfile`'s base) | `node:26.12.0-trixie-slim` | `sha256:e556a144463cc8dc53afe8de6d2fa0db5c132fd39ffa232c17641bd40df2bf11` | 2026-10-22 |
+| browser (`browser/Dockerfile`'s base, at the version of providers' `playwright-core`) | `mcr.microsoft.com/playwright:v1.64.1-noble` | `sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f` | 2026-11-13 |
 
 ## Updating one
 

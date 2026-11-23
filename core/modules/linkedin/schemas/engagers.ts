@@ -37,8 +37,17 @@ export type EngagersRefused = {
     | "account_stopped";
 };
 
-/** The page file: the port's engagers as it answered them, newest first, `engagedAt` in ISO. */
+/**
+ * The page file: the port's engagers as it answered them, newest first, `engagedAt` in ISO.
+ * `dateKnown` may be absent, as in a page written before the port gave it (gamma-p5-010).
+ */
 export const engagersFile = z.strictObject({
-  engagers: z.array(z.strictObject({ ...linkedinEngager.shape, engagedAt: z.iso.datetime() })),
+  engagers: z.array(
+    z.strictObject({
+      ...linkedinEngager.shape,
+      engagedAt: z.iso.datetime(),
+      dateKnown: z.boolean().optional(),
+    }),
+  ),
 });
 export type EngagersFile = z.output<typeof engagersFile>;

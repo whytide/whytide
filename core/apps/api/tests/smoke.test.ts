@@ -51,5 +51,7 @@ test("the smoke step stops on a database with no organization; after the first i
   assert.equal(await runInvite([`first-${randomUUID()}@example.test`], say), 0);
   await smokeSignIn(api.url, email, say);
   const codes = lines.map((line) => line.split(":")[0]);
-  assert.deepEqual(codes, ["organization_created", "invite_created", "invite_created", "smoke"]);
+  // The first email is the new workspace's Owner; the step invites its own with no invite mail.
+  const made = ["organization_created", "already_member", "invite_created", "mail_skipped"];
+  assert.deepEqual(codes, [...made, "smoke"]);
 });

@@ -1,0 +1,24 @@
+# contacts' lead added by hand (lead-manual-create; core/modules/contacts/README.md "Routes"): a
+# member's session and contacts.write, every role's. The LinkedIn profile URL, normalized (no scheme,
+# `www.`, a capital or a trailing slash needed), and the first name are required; the other five
+# fields are optional, trimmed, and an empty one is left out. Each value given takes the `member`
+# stamp, which no later LinkedIn, import or website value overwrites. The lead is pending, its source
+# `manual` with your user id; qualification's next batch scores it: no model is called and no event
+# is published here. A write sends the cookie, so it sends Origin: {{appOrigin}} too. Put your
+# workspaceId in http-client.private.env.json.
+
+### POST /v1/workspaces/{workspaceId}/contacts/leads: a member adds one lead by hand, the person of a LinkedIn profile URL with its names, headline, title, company and location; 201 with the lead as GET …/leads/{personId} answers it, pending; 400 linkedin_url_invalid (no profile URL), contacts_input_invalid naming the fields (no first name, a value too long), validation_failed for another field; 409 person_erased, and lead_exists with details.personId when the person is a lead already
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{
+  "linkedinUrl": "linkedin.com/in/jane-doe",
+  "firstName": "Jane",
+  "lastName": "Doe",
+  "title": "Head of Data",
+  "companyName": "Blue Harbor Labs",
+  "locationText": "Berlin, Germany"
+}

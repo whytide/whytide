@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 /** The excerpt's length, in characters (RB-4.4.3). */
 export const EXCERPT_LENGTH = 500;
 /** A whole word: no letter or digit touches the match on either side. */
-const EDGE = "[\\p{L}\\p{N}]";
+export const EDGE = "[\\p{L}\\p{N}]";
 
 /**
  * Whether a text, a headline, a company or its page, names the workspace's own company: its domain
@@ -20,10 +20,12 @@ export function ownCompanyRule(own: {
     .map((term) => term?.trim() ?? "")
     .filter((term) => [...term].length >= 2);
   if (terms.length === 0) return () => false;
-  const words = terms.map((term) => term.split(/\s+/).map(escaped).join("\\s+"));
-  const pattern = new RegExp(`(?<!${EDGE})(?:${words.join("|")})(?!${EDGE})`, "iu");
+  const pattern = new RegExp(`(?<!${EDGE})(?:${terms.map(wordsOf).join("|")})(?!${EDGE})`, "iu");
   return (text) => typeof text === "string" && pattern.test(text);
 }
+
+/** A term as a pattern of its words, each escaped, any run of spaces between two of them. */
+export const wordsOf = (term: string): string => term.trim().split(/\s+/).map(escaped).join("\\s+");
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

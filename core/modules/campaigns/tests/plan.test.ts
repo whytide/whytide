@@ -2,13 +2,22 @@
 // daily plan"): which steps keep their times, which are placed again and which are candidates, in what
 // order; the capacity of each type and of the actions left; one touch per person a day; and the
 // times, a gap from each other and from every kept time, sorted, as many as the window holds, none
-// where a spring-forward closes the window. The plan through the database is tests/safety/ and the
-// worker's tests/campaigns-plan.test.ts.
+// where a spring-forward closes the window. gamma-p5-070: the leads' priorities inside messages
+// and invites, none last, withdrawals by due time, ties and no priorities in beta's order, and the
+// room, the kept steps and the touch rule whatever the priorities. The plan through the database
+// is tests/plan-priority.test.ts, tests/safety/ and the worker's tests/campaigns-plan.test.ts.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { instantAt, isWindowOpen, synthetic } from "@whytide/platform";
-import { MIN_ACTION_GAP_MS } from "../domain/plan/constants.ts";
-import { chooseSteps, type PlanStep, placeTimes, sortSteps } from "../domain/plan/place.ts";
+import { ACTION_ORDER, MIN_ACTION_GAP_MS } from "../domain/plan/constants.ts";
+import {
+  byPriority,
+  chooseSteps,
+  type PlanStep,
+  type Priorities,
+  placeTimes,
+  sortSteps,
+} from "../domain/plan/place.ts";
 
 const AT = new Date("2026-10-28T10:00:00Z");
 const TODAY = "2026-10-28";
@@ -17,6 +26,12 @@ const HOUR_MS = 3_600_000;
 const RANGE = 2 ** 32;
 const ROOMY = { invites: 25, messages: 80, withdrawals: 15, actions: 200 };
 const NONE = new Set<string>();
+/** No lead has an intent row: beta's order. */
+const NO_PRIORITIES: Priorities = new Map();
+/** Hot, Warm and Cool priorities, as gamma-p5-060's tiers start at 75 and 55. */
+const HOT = 90;
+const WARM = 60;
+const COOL = 30;
 
 const seeded = (seed: string) => {
   const s = synthetic(seed);
@@ -44,7 +59,7 @@ test("sortSteps: a time today ahead of the run, or less than a gap behind, is ke
     step("due_later", { dueAt: later(1) }),
     step("not_anchored", { dueAt: null }),
   ];
-  const sorted = sortSteps(steps, AT, TODAY);
+  const sorted = sortSteps(steps, AT, TODAY, NO_PRIORITIES);
   assert.deepEqual(idsOf(sorted.kept), ["ahead", "just_behind"]);
   assert.deepEqual(idsOf(sorted.stale), ["a_gap_behind", "stale", "yesterday"]);
   assert.deepEqual([...idsOf(sorted.candidates)].sort(), [
@@ -64,7 +79,7 @@ test("the order: messages, then withdrawals, then invites; within a type by due 
     step("m2a", { actionType: "message", dueAt: ago(HOUR_MS), position: 2 }),
     step("m0", { actionType: "message", dueAt: ago(2 * HOUR_MS), position: 4 }),
   ];
-  const { candidates } = sortSteps(steps, AT, TODAY);
+  const { candidates } = sortSteps(steps, AT, TODAY, NO_PRIORITIES);
   assert.deepEqual(idsOf(candidates), ["m0", "m2a", "m2b", "m3", "w1", "i1"]);
 });
 
@@ -78,7 +93,7 @@ test("the capacity: when it is short, messages are placed before invites; each t
   ];
   const sorted = (kept: PlanStep[]) => ({
     kept,
-    candidates: sortSteps(candidates, AT, TODAY).candidates,
+    candidates: sortSteps(candidates, AT, TODAY, NO_PRIORITIES).candidates,
   });
   const choose = (kept: PlanStep[], capacity: typeof ROOMY) =>
     idsOf(chooseSteps({ ...sorted(kept), capacity, touched: NONE }).chosen);
@@ -124,6 +139,7 @@ test("the touch rule: a person with a kept step today, or touched today, gets no
     ],
     AT,
     TODAY,
+    NO_PRIORITIES,
   ).candidates;
   const touched = new Set(["per_b"]);
   const chosen = chooseSteps({ kept, candidates, capacity: ROOMY, touched }).chosen;
@@ -215,4 +231,115 @@ test("a window whose end a spring-forward skips: no time is placed where isWindo
     times.map(({ item }) => item),
     items.slice(0, times.length),
   );
+});
+
+/** The priorities of the steps' default persons: `{ a: 90 }` gives per_a 90. */
+const prioritiesOf = (byStep: Record<string, number>): Priorities =>
+  new Map(Object.entries(byStep).map(([id, priority]) => [`per_${id}`, priority]));
+/** Beta's order before gamma-p5-070: the type, then the due time, the position and the id. */
+const betaOrder = (a: PlanStep, b: PlanStep) =>
+  ACTION_ORDER.indexOf(a.actionType) - ACTION_ORDER.indexOf(b.actionType) ||
+  (a.dueAt?.getTime() ?? 0) - (b.dueAt?.getTime() ?? 0) ||
+  a.position - b.position ||
+  (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+test("with priorities: messages, then withdrawals, then invites still; inside messages and invites the higher priority first, whatever the due times, a person with none after every person with one; withdrawals by due time, whatever their persons' priorities", () => {
+  const steps = [
+    step("i_none", { dueAt: ago(5 * HOUR_MS) }),
+    step("i_cool", { dueAt: ago(4 * HOUR_MS) }),
+    step("i_warm", { dueAt: ago(3 * HOUR_MS) }),
+    step("i_hot", { dueAt: ago(HOUR_MS) }),
+    step("w_hot", { actionType: "withdraw", dueAt: ago(HOUR_MS) }),
+    step("w_none", { actionType: "withdraw", dueAt: ago(3 * HOUR_MS) }),
+    step("w_cool", { actionType: "withdraw", dueAt: ago(2 * HOUR_MS) }),
+    step("m_none", { actionType: "message", dueAt: ago(3 * HOUR_MS) }),
+    step("m_60", { actionType: "message", dueAt: ago(2 * HOUR_MS) }),
+    step("m_90", { actionType: "message", dueAt: ago(HOUR_MS) }),
+  ];
+  const priorities = prioritiesOf({
+    ...{ i_cool: COOL, i_warm: WARM, i_hot: HOT },
+    ...{ w_hot: HOT, w_cool: COOL, m_60: 60, m_90: 90 },
+  });
+  const { candidates } = sortSteps(steps, AT, TODAY, priorities);
+  assert.deepEqual(idsOf(candidates), [
+    ...["m_90", "m_60", "m_none"],
+    ...["w_none", "w_cool", "w_hot"],
+    ...["i_hot", "i_warm", "i_cool", "i_none"],
+  ]);
+});
+
+test("equal priorities, and persons with none, keep beta's order inside a type: due time, then position, then id; byPriority, the comparison both plans take, ranks them the same", () => {
+  const steps = [
+    step("later", { dueAt: ago(HOUR_MS) }),
+    step("pos3", { dueAt: ago(2 * HOUR_MS), position: 3 }),
+    step("pos2_b", { dueAt: ago(2 * HOUR_MS), position: 2 }),
+    step("pos2_a", { dueAt: ago(2 * HOUR_MS), position: 2 }),
+    step("none_late", { dueAt: ago(HOUR_MS) }),
+    step("none_early", { dueAt: ago(4 * HOUR_MS) }),
+  ];
+  const priorities = prioritiesOf({ later: WARM, pos3: WARM, pos2_b: WARM, pos2_a: WARM });
+  const expected = ["pos2_a", "pos2_b", "pos3", "later", "none_early", "none_late"];
+  assert.deepEqual(idsOf(sortSteps(steps, AT, TODAY, priorities).candidates), expected);
+  assert.deepEqual(idsOf([...steps].sort(byPriority(priorities))), expected);
+});
+
+test("with no priorities, or all equal, the candidates are in beta's order, step for step, over seeded random steps", () => {
+  for (let seed = 1; seed <= 50; seed += 1) {
+    const s = synthetic(`plan-beta-order-${seed}`);
+    const steps = Array.from({ length: 30 }, (_, index) =>
+      step(`s${String(index).padStart(2, "0")}`, {
+        ...{ personId: `per_${s.int(10)}`, actionType: s.pick(ACTION_ORDER) },
+        ...{ position: 1 + s.int(4), dueAt: ago(s.int(6) * HOUR_MS) },
+      }),
+    );
+    const beta = idsOf([...steps].sort(betaOrder));
+    const none = sortSteps(steps, AT, TODAY, NO_PRIORITIES);
+    assert.deepEqual(idsOf(none.candidates), beta, `seed ${seed}: no priorities`);
+    const equal = new Map(steps.map(({ personId }) => [personId, WARM]));
+    const same = sortSteps(steps, AT, TODAY, equal);
+    assert.deepEqual(idsOf(same.candidates), beta, `seed ${seed}: equal priorities`);
+  }
+});
+
+test("room for one invite: the Hot lead's, due later, is taken and the Warm lead's waits; with no priorities, the earlier due, as before", () => {
+  const steps = [step("warm", { dueAt: ago(3 * HOUR_MS) }), step("hot", { dueAt: ago(HOUR_MS) })];
+  const chosen = (priorities: Priorities) => {
+    const sorted = sortSteps(steps, AT, TODAY, priorities);
+    const capacity = { ...ROOMY, invites: 1 };
+    return idsOf(chooseSteps({ ...sorted, capacity, touched: NONE }).chosen);
+  };
+  assert.deepEqual(chosen(prioritiesOf({ warm: WARM, hot: HOT })), ["hot"]);
+  assert.deepEqual(chosen(NO_PRIORITIES), ["warm"]);
+});
+
+test("a step placed earlier today keeps its time and its room when a Hot lead's step falls due: the Hot invite waits behind the kept Warm one, and takes the next room", () => {
+  const kept = step("kept_warm", placed(later(HOUR_MS)));
+  const steps = [kept, step("hot", { dueAt: ago(MINUTE_MS) })];
+  const sorted = sortSteps(steps, AT, TODAY, prioritiesOf({ kept_warm: WARM, hot: HOT }));
+  assert.deepEqual([idsOf(sorted.kept), idsOf(sorted.stale)], [["kept_warm"], []]);
+  const choose = (invites: number) => {
+    const plan = chooseSteps({ ...sorted, capacity: { ...ROOMY, invites }, touched: NONE });
+    return [idsOf(plan.kept), idsOf(plan.dropped), idsOf(plan.chosen)];
+  };
+  assert.deepEqual(choose(1), [["kept_warm"], [], []]);
+  assert.deepEqual(choose(2), [["kept_warm"], [], ["hot"]]);
+});
+
+test("a Hot lead with two due steps gets one a day, and none when touched today or with a step kept today; the room left goes to the next lead", () => {
+  const steps = [
+    step("hot_message", { personId: "per_hot", actionType: "message" }),
+    step("hot_invite", { personId: "per_hot" }),
+    step("warm_invite", { personId: "per_warm" }),
+  ];
+  const priorities = new Map([
+    ["per_hot", HOT],
+    ["per_warm", WARM],
+  ]);
+  const { candidates } = sortSteps(steps, AT, TODAY, priorities);
+  const chosen = (touched: ReadonlySet<string>, kept: PlanStep[] = []) =>
+    idsOf(chooseSteps({ kept, candidates, capacity: ROOMY, touched }).chosen);
+  assert.deepEqual(chosen(NONE), ["hot_message", "warm_invite"]);
+  assert.deepEqual(chosen(new Set(["per_hot"])), ["warm_invite"]);
+  const keptToday = step("hot_kept", { ...placed(later(HOUR_MS)), personId: "per_hot" });
+  assert.deepEqual(chosen(NONE, [keptToday]), ["warm_invite"]);
 });

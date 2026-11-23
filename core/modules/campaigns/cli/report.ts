@@ -4,6 +4,8 @@
 // campaigns service, never in one query across workspaces; the lines add them up. It loads campaigns,
 // approvals, contacts, linkedin and tenancy through their index.ts, calls no provider and writes
 // nothing. Each line starts with a code (lines.ts) and holds ids, codes, counts, days and instants.
+// gamma-p7-050: gamma's lines follow beta's (gamma-lines.ts); the exit code still reads the three
+// zeros, LinkedIn's, until email's two join them in the email phase.
 import { parseArgs } from "node:util";
 import { disconnectTenantClient, type PrismaClient, withTenant } from "@whytide/db";
 import { isAppError, servicePrincipal } from "@whytide/platform";
@@ -28,6 +30,7 @@ import {
   OPTIONS,
   REPORT_ACCEPTANCE_MIN_AGE_DAYS,
   REPORT_RUN_TIMEOUT_MS,
+  REVIEW_APPROVAL_WINDOW_DAYS,
   SERVICE,
   SINCE_DAY,
   USAGE,
@@ -68,6 +71,7 @@ export async function runReport(
     now: at,
     sentBefore: new Date(at.getTime() - REPORT_ACCEPTANCE_MIN_AGE_DAYS * MS_PER_DAY),
     decisionWindowDays: DECISION_WINDOW_DAYS,
+    reviewWindowDays: REVIEW_APPROVAL_WINDOW_DAYS,
   };
   const reports: WorkspaceReport[] = [];
   for (const workspaceId of workspaceIds) {

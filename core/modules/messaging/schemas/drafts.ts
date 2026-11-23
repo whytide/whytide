@@ -1,21 +1,34 @@
 // The draft routes' shapes (README.md "Routes"; core/apps/api/README.md "OpenAPI and the client"):
 // the path parameters, the two bodies, and a draft as the lead page reads it (alpha-p9-030): its
 // kind, status, plan, texts, generation record and gate results. Its texts are the lead's personal
-// data. A sequence step's draft (beta-p3-010) reads back the same way, `approved` included.
+// data. A sequence step's draft (beta-p3-010) reads back the same way, `approved` included. An
+// email draft (gamma-p3-070) adds its subject, its edit and the kind it is written as.
 import { z } from "zod";
+import { APPROVAL_TEXT_MAX, WRITTEN_STEP_KINDS } from "../domain/drafts/constants.ts";
 import { ANGLES, CHANNELS, CTAS, GATES, gateIssue } from "./writer.ts";
 
 const id = z.string().min(1).max(64);
 export const leadParams = z.strictObject({ personId: id });
 export const draftParams = z.strictObject({ id });
 
-export const createDraftBody = z.strictObject({ channel: z.enum(CHANNELS) });
+/**
+ * The channel, and the kind to write the draft as, which fits it (none for a note): without one, a
+ * lead's first message, or a first email.
+ */
+export const createDraftBody = z.strictObject({
+  channel: z.enum(CHANNELS),
+  stepKind: z.enum(WRITTEN_STEP_KINDS).optional(),
+});
 export type CreateDraftBody = z.output<typeof createDraftBody>;
 /**
- * The member's own text; the channel's limit is the draft's, and the text, trimmed, passes
- * checkText's gates (domain/drafts/store.ts, domain/gates/check-text.ts; beta-p3-020).
+ * The member's own text, and a first email's subject; the channel's limit is the draft's, and the
+ * text and the subject, trimmed, pass checkText's gates (domain/drafts/store.ts,
+ * domain/gates/check-text.ts; beta-p3-020).
  */
-export const editDraftBody = z.strictObject({ editedText: z.string().min(1).max(4_000) });
+export const editDraftBody = z.strictObject({
+  editedText: z.string().min(1).max(APPROVAL_TEXT_MAX),
+  editedSubject: z.string().min(1).max(APPROVAL_TEXT_MAX).optional(),
+});
 export type EditDraftBody = z.output<typeof editDraftBody>;
 
 export const DRAFT_STATUSES = [
@@ -42,6 +55,11 @@ export const draftResponse = z.strictObject({
   text: z.string().nullable(),
   editedText: z.string().nullable(),
   editedAt: time.nullable(),
+  /** An email's subject as written, and the member's; null but for a first email. */
+  subject: z.string().nullable(),
+  editedSubject: z.string().nullable(),
+  /** The kind it is written as: a step's by its key, a lead's as asked; null for a note or none. */
+  stepKind: z.enum(WRITTEN_STEP_KINDS).nullable(),
   /** The last call's model and prompt version, and the dossier's hash, as the draft was written. */
   modelId: z.string().nullable(),
   promptVersion: z.int().nullable(),

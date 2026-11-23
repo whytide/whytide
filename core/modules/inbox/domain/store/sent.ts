@@ -3,7 +3,9 @@
 // the delivery's tenant run (tenantClient is its transaction), from rows only: campaigns' sentStep,
 // approvals' approvedContent and linkedin's sentMessageRef, the provider's refs linkedin's alone. No
 // file, no provider. Stored once by its provider ref, whichever comes first, the step's event or the
-// echo (echo.ts); the step's event always leaves the campaign's row, with the approved text.
+// echo (echo.ts); the step's event always leaves the campaign's row, with the approved text. The
+// step was sent, so its approval is taken as the send took it: a person's, or the campaign's mode's,
+// stored with no `approved_by` (gamma-p4-090).
 import { approvedContent } from "@whytide/approvals";
 import { sentStep } from "@whytide/campaigns";
 import { findSenderAccount, sentMessageRef } from "@whytide/linkedin";
@@ -45,7 +47,8 @@ export async function storeSent(input: SentInput, now: Date): Promise<SentOutcom
   // Before the reads: linkedin's refs answer the person's last send only, a later one's after it.
   if (await storedMessage({ stepExecutionId })) return "repeat";
   const step = await sentStep(stepExecutionId);
-  const approved = step === null ? null : await approvedContent(stepExecutionId);
+  const approved =
+    step === null ? null : await approvedContent(stepExecutionId, { allowMode: true });
   const refs = approved === null ? null : await sentMessageRef(stepExecutionId);
   const matched = step?.personId === personId && step.actionType === SENT_ACTION;
   if (step === null || approved === null || refs === null || !matched) return unmatched(input);

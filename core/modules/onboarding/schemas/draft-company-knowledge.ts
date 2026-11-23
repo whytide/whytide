@@ -2,14 +2,17 @@
 // Draft read; the output, every content field with its page and a quote of it per value. A key the
 // output schema does not declare is dropped when parsed: the record never takes it (security §6).
 import { z } from "zod";
+import { DOCUMENT_LIMITS } from "../domain/constants.ts";
 
 /** The task's name in the agent registry. */
 export const DRAFT_COMPANY_KNOWLEDGE = "onboarding.draft-company-knowledge";
-/** The characters of an entry's text the drafter reads, its start: ten stay within its budget. */
-export const DRAFT_PAGE_CHARS = 6_000;
 
-/** The pages in the order read, then the documents: what they say, never an id or a time. */
-const text = z.string().max(DRAFT_PAGE_CHARS);
+/**
+ * The pages in the order read, then the documents: what they say, never an id or a time. Each text
+ * whole, as stored: at most the 50,000 characters a page and a document keep (DOCUMENT_LIMITS.text,
+ * the fetch's FETCH_LIMITS.text).
+ */
+const text = z.string().max(DOCUMENT_LIMITS.text);
 export const draftInput = z.object({
   pages: z.array(z.object({ url: z.string(), title: z.string(), text })).min(1),
 });

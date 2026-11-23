@@ -4,8 +4,10 @@
 // business days, the touch, campaigns.step_sent, sentStep, and a history holding no text, note or
 // member ref; the refusals before the call and their retryAt, a paused account's included; an
 // invite refused for the pending invitations, with no loop; insufficient_credits; the price from its setting and from credits' override; the last step
-// completing the enrollment; a send past its credits' lease logged uncharged. The safety cases are
-// tests/safety/sender-workflow.test.ts.
+// completing the enrollment; a send past its credits' lease logged uncharged; an invite to a person
+// who is a connection already skipped, message_1 due, its reason a code in the history
+// (connect-already-connected). The safety cases are tests/safety/sender-workflow.test.ts and
+// tests/safety/already-connected.test.ts.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -13,6 +15,7 @@ import {
   app,
   contacts,
   DAY_MS,
+  fake,
   historyOf,
   leasesEnd,
   linkedin,
@@ -199,17 +202,18 @@ test("insufficient_credits: the step waits unplaced with the code, no slot taken
   assert.deepEqual(sends(), []);
 });
 
-test("the price: CAMPAIGNS_CREDITS_PER_LINKEDIN_SEND=2 commits 2 for a send, and credits' PRICE_CAMPAIGNS_LINKEDIN_SEND=3 overrides it", async () => {
-  const setting = { CAMPAIGNS_CREDITS_PER_LINKEDIN_SEND: "2" };
+test("the price: CAMPAIGNS_CREDITS_PER_LINKEDIN_SEND=3 commits 3 for a send, and credits' PRICE_CAMPAIGNS_LINKEDIN_SEND=2 overrides it", async () => {
+  const setting = { CAMPAIGNS_CREDITS_PER_LINKEDIN_SEND: "3" };
   const s = await sender(100, setting);
-  const first = await s.ready("price-2");
+  const first = await s.ready("price-3");
   assert.equal((await s.send()).result.sent, 1);
-  assert.deepEqual(await usagesOf(first.id), [":1 committed 2"]);
+  assert.deepEqual(await usagesOf(first.id), [":1 committed 3"]);
 
-  await writePrices({ ...setting, PRICE_CAMPAIGNS_LINKEDIN_SEND: "3" });
-  const second = await s.ready("price-3", "connect", "", afterSend());
+  // A drop applies at once; a rise would wait its 30 days' notice (credits' README "Decided here").
+  await writePrices({ ...setting, PRICE_CAMPAIGNS_LINKEDIN_SEND: "2" });
+  const second = await s.ready("price-2", "connect", "", afterSend());
   assert.equal((await s.send()).result.sent, 1);
-  assert.deepEqual(await usagesOf(second.id), [":1 committed 3"]);
+  assert.deepEqual(await usagesOf(second.id), [":1 committed 2"]);
 });
 
 test("follow_up_2 sent completes the enrollment and finishes the lead", async () => {
@@ -236,4 +240,32 @@ test("a send that went out past its credits' lease stays succeeded and is logged
   assert.equal(line.level, "warn");
   assert.equal(line.step_execution_id, step.id);
   assert.equal(line.credit_usage_id, row.creditUsageId);
+});
+
+test("an invite to a person who is a connection already: one call, the step skipped already_connected, message_1 due an hour or more after it, no invitation pending; the history holds the reason as a code, no note and no member ref", async () => {
+  const s = await sender();
+  const lead = await s.ready("connected", "connect", NOTE);
+  fake.seedRelation(s.ref, lead.memberRef);
+  const at = now().getTime();
+  const { result, workflowId } = await s.send();
+
+  assert.deepEqual(result, { sent: 0, blocked: 0, refused: 1, end: "no_step" });
+  assert.deepEqual(
+    sends().map(({ method }) => method),
+    ["sendInvite"],
+  );
+  const row = await stepOf(lead.id);
+  assert.deepEqual(
+    [row.status, row.skipReason, row.errorCode],
+    ["skipped", "already_connected", null],
+  );
+  const message = await stepOf(lead.steps.message_1 as string);
+  assert.ok((message.dueAt?.getTime() ?? 0) >= at + 60 * 60_000, "message_1 not due after an hour");
+  const account = await app.senderAccount.findUniqueOrThrow({ where: { id: s.accountId } });
+  assert.equal(account.pendingInvites, 0);
+  const history = await historyOf(workflowId);
+  assert.ok(history.includes('"refused":"linkedin_send_refused","reason":"already_connected"'));
+  for (const secret of [NOTE, lead.memberRef]) {
+    assert.ok(!history.includes(secret), "the history holds a note or a member ref");
+  }
 });

@@ -16,7 +16,7 @@ const email = "isolated@example.test";
 isolationTest("invites", {
   async createRow(workspaceId) {
     await createOrganizationWithWorkspace({ workspaceId });
-    return createInvite({ workspaceId, email });
+    return createInvite({ workspaceId, email, role: "Member", invitedBy: null });
   },
   readAs: (workspaceId) =>
     withTenant(

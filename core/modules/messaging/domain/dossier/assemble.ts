@@ -44,7 +44,8 @@ export type DossierInputs = {
       readonly url: string;
       readonly excerpt: string | null;
       readonly commentText: string | null;
-      readonly reaction: string;
+      /** Null for a research event (gamma-wr-060), which has no reaction to cite. */
+      readonly reaction: string | null;
     } | null;
   }[];
 };
@@ -102,7 +103,7 @@ export function assembleDossier(inputs: DossierInputs): Dossier {
           },
     whyNow: newestFirst(inputs.events).flatMap(({ id, occurredAt, evidence }) => {
       // An event without evidence has nothing to cite; neither has one without its post.
-      if (evidence === null || !evidence.url.trim() || !evidence.reaction.trim()) return [];
+      if (evidence === null || !evidence.url.trim() || !evidence.reaction?.trim()) return [];
       const evd = `evidence/${evidence.id}`;
       return [
         {

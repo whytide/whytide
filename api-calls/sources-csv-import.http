@@ -1,0 +1,28 @@
+# signals' source imports (core/modules/signals/README.md "Importing sources"), under the workspace. The
+# file travels as base64 in `file`: the one below is
+#   kind,url,name,phrase,roles,label
+#   creator,https://www.linkedin.com/in/example-creator,,,,A creator
+#   topic,,,revenue operations,author;commenter,
+# One variable besides the usual ones goes in http-client.private.env.json: `senderAccountId`, a
+# sender account of the workspace (GET …/linkedin/accounts).
+
+### POST /v1/workspaces/{workspaceId}/signals/sources/imports/check: checks the file row by row, creating nothing; 200 with the valid rows and each row's error
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/imports/check
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "fileName": "sources.csv", "file": "a2luZCx1cmwsbmFtZSxwaHJhc2Uscm9sZXMsbGFiZWwKY3JlYXRvcixodHRwczovL3d3dy5saW5rZWRpbi5jb20vaW4vZXhhbXBsZS1jcmVhdG9yLCwsLEEgY3JlYXRvcgp0b3BpYywsLHJldmVudWUgb3BlcmF0aW9ucyxhdXRob3I7Y29tbWVudGVyLAo=", "senderAccountId": "{{senderAccountId}}" }
+
+### POST /v1/workspaces/{workspaceId}/signals/sources/imports: checks the file again, creates each valid row in the file's order, disabled past the limits, and records the import; 201 with the import and every row not imported
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/imports
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "fileName": "sources.csv", "file": "a2luZCx1cmwsbmFtZSxwaHJhc2Uscm9sZXMsbGFiZWwKY3JlYXRvcixodHRwczovL3d3dy5saW5rZWRpbi5jb20vaW4vZXhhbXBsZS1jcmVhdG9yLCwsLEEgY3JlYXRvcgp0b3BpYywsLHJldmVudWUgb3BlcmF0aW9ucyxhdXRob3I7Y29tbWVudGVyLAo=", "senderAccountId": "{{senderAccountId}}" }
+
+### GET /v1/workspaces/{workspaceId}/signals/sources/imports: the workspace's source imports, the newest first, 100 at most
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/sources/imports
+Accept: application/json
+Cookie: {{sessionCookie}}

@@ -5,7 +5,7 @@ GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/credits/balance
 Accept: application/json
 Cookie: {{sessionCookie}}
 
-### GET /v1/workspaces/{workspaceId}/credits/usage: the workspace's usage rows, newest first, a page at a time (from, to, cursor, limit)
+### GET /v1/workspaces/{workspaceId}/credits/usage: the workspace's usage rows, newest first, a page at a time (from, to, cursor, limit), each with the priceListVersion its reserve charged (gamma-p2-060)
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/credits/usage?limit=20
 Accept: application/json
 Cookie: {{sessionCookie}}

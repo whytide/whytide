@@ -12,7 +12,8 @@ export const QUALIFICATION_STATUSES = [
   "needs_review",
   "ai_failed",
 ] as const;
-export const SOURCE_KINDS = ["signal", "imported"] as const;
+/** A signal's, an import's or a member's by hand (lead-create.ts), whose `ref` is their user id. */
+export const SOURCE_KINDS = ["signal", "imported", "manual"] as const;
 export const CONFIDENCES = ["high", "medium", "low"] as const;
 export const TIERS = ["hot", "warm", "cool"] as const;
 /** By descending fit, newest first, or the leads without a review decision first, then by fit. */
@@ -24,9 +25,10 @@ export type Tier = (typeof TIERS)[number];
 export type LeadSort = (typeof LEAD_SORTS)[number];
 
 /**
- * One source of a lead: its kind, the id of what brought it (an import job, a signal source), when,
- * and, as the module that adds it gives them, its name as that module shows it and an https URL (a
- * signal source's label and post). An entry stored before has neither.
+ * One source of a lead: its kind, the id of what brought it (an import job, a signal source, the
+ * member who added it by hand), when, and, as the module that adds it gives them, its name as that
+ * module shows it and an https URL (a signal source's label and post). An entry stored before has
+ * neither, and a member's has none.
  */
 export type LeadSource = {
   readonly kind: SourceKind;
@@ -73,6 +75,15 @@ export function mergeSource(
   const renamed = { ...known, ...named(source) };
   if (renamed.label === known.label && renamed.url === known.url) return sources;
   return sources.map((entry) => (entry === known ? renamed : entry));
+}
+
+/**
+ * The ref of the lead's first source of kind `signal`, the signal source that found it first; none
+ * for a lead no signal brought. leadsPendingQualification's filters read it in SQL the same way
+ * (FIRST_SIGNAL_PATH), so qualification's audience of a lead and its batch's selection agree.
+ */
+export function firstSignalSource(sources: readonly LeadSource[]): string | undefined {
+  return sources.find(({ kind }) => kind === "signal")?.ref;
 }
 
 /** Where a page ends in its sort: the last lead's sort key and person id. */

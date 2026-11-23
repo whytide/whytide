@@ -1,0 +1,27 @@
+{
+  "status": 200,
+  "likelihood": 9,
+  "id": "fixtureCompanyId0000000000001",
+  "name": "copper harbor labs",
+  "display_name": "Copper Harbor Labs",
+  "size": "11-50",
+  "employee_count": 42,
+  "founded": 2019,
+  "industry": "computer software",
+  "website": "copper-harbor.example",
+  "linkedin_url": "linkedin.com/company/copper-harbor-labs",
+  "linkedin_id": "1000001",
+  "location": {
+    "name": "bristol, england, united kingdom",
+    "locality": "bristol",
+    "region": "england",
+    "metro": null,
+    "country": "united kingdom",
+    "continent": "europe",
+    "street_address": "1 example street",
+    "postal_code": "bs1 1aa",
+    "geo": "51.45,-2.58"
+  },
+  "summary": "copper harbor labs is a synthetic company of the contract suite.",
+  "tags": ["synthetic"]
+}

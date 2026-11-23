@@ -9,7 +9,10 @@
 // A failing activity fails its workflow, and the metrics count both by name and code (alpha-p10-060).
 // cancelWorkflow cancels fixture_hold, started under a known id, which its activity saw in its
 // context: its cancellation handler runs and it ends cancelled; an unknown or a closed id answers
-// `{ cancelled: false }`.
+// `{ cancelled: false }`. The fixture module's `alerts` is read at start: its event, delivered,
+// reaches the alerts fake with its id; a module naming an unknown event stops the start (gamma-p7-040).
+// A run queued before the start, its one attempt of an activity calling startWorkflow, cancelWorkflow
+// and pauseSchedule, finds them bound: the host binds them before the worker polls.
 // The fixture modules load from their build, dist/tests/fixtures, as the worker loads a module's.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -27,13 +30,17 @@ import {
   checkLogLines,
   collectLogs,
   createLogger,
+  DEFAULT_TASK_QUEUE,
+  defineWorkflows,
   type LogSchema,
   logSchema,
   outboxConfig,
   publish,
   recordedMetrics,
   servicePrincipal,
+  workflowInput,
 } from "@whytide/platform";
+import { type AlertsFake, alertsPort, getAdapter } from "@whytide/providers";
 import { workerConfig } from "../src/config.ts";
 import type { ModuleLoader } from "../src/modules.ts";
 import { type StartOptions, start, type WorkerHost } from "../src/start.ts";
@@ -65,9 +72,12 @@ const options = (more: StartOptions = {}): StartOptions => ({
   taskQueue: `test-${randomUUID()}`,
   healthPort: 0,
   client: asRole("app"),
+  alerts: "fake",
   log,
   ...more,
 });
+const CROWD = 250;
+const channel = (await getAdapter(alertsPort, "fake")) as unknown as AlertsFake;
 
 /** A TCP proxy to the slice's Temporal: closing it puts Temporal out of the worker's reach. */
 function temporalProxy() {
@@ -242,6 +252,52 @@ test("cancelWorkflow answers { cancelled: false } for an id no workflow has and 
   assert.deepEqual(await cancelWorkflow({ workflowId: unknown }), { cancelled: false });
 });
 
+test("the starter, the canceller and the scheduler are bound before the worker polls: a run queued before the start calls them on its one attempt", async () => {
+  // The bindings are the process's, so the file's own host steps aside, then starts again.
+  await host.close();
+  const workspaceId = `ws_${randomUUID()}`;
+  const taskQueue = `test-${randomUUID()}`;
+  // As many schedules as the real host upserts: the start spends its time there, which, before the
+  // binds, was the gap in which a run waiting on the queue found nothing bound.
+  const crowd = Array.from({ length: CROWD }, (_, index) => `crowd_${index}`);
+  const crowded: ModuleLoader = {
+    name: "crowd",
+    workflows: async () => ({
+      workflows: defineWorkflows({
+        crowd_tick: { input: workflowInput, taskQueue: DEFAULT_TASK_QUEUE },
+      }),
+      schedules: crowd.map((id) => ({
+        id,
+        workflow: "crowd_tick",
+        spec: { intervals: [{ every: "365 days" }] },
+        input: { workspaceId: "ws_fixture" },
+      })),
+    }),
+  };
+  const queued = await temporal.workflow.start("fixture_binds", {
+    args: [{ workspaceId }],
+    taskQueue,
+    workflowId: `fixture.binds-run:${workspaceId}`,
+    workflowExecutionTimeout: "1 minute",
+  });
+  let second: WorkerHost | undefined;
+  try {
+    second = await start(options({ taskQueue, schedules: "off", modules: [...modules, crowded] }));
+    assert.deepEqual(await queued.result(), { started: true, found: false });
+  } finally {
+    await second?.close();
+    await Promise.all(
+      crowd.map((id) =>
+        temporal.schedule
+          .getHandle(`crowd.${id}`)
+          .delete()
+          .catch(() => undefined),
+      ),
+    );
+    host = await start(options({ address: `127.0.0.1:${proxy.port}`, schedules: "off" }));
+  }
+});
+
 test("the schedules are created at start by their ids, a global one's too, never twice, and paused with WORKER_SCHEDULES=off", async () => {
   const handle = temporal.schedule.getHandle("fixture.tick");
   const global = temporal.schedule.getHandle("fixture.global_tick");
@@ -264,13 +320,35 @@ test("the schedules are created at start by their ids, a global one's too, never
   }
 });
 
+test("the modules' alerts are read at start: the fixture's event, delivered, reaches the team channel with its id; a module naming an unknown event stops the start with worker_module_invalid", async () => {
+  const workspaceId = `ws_${randomUUID()}`;
+  const tenant = { workspaceId, principal: servicePrincipal("test") };
+  const pingId = "png_01JAB3K5ZQ7W9R2M4T6V8X0Y1C";
+  await withTenant(
+    tenant,
+    (tx) => publish(outboxWriter(tx, workspaceId), events["fixture.pinged"], { ping_id: pingId }),
+    { client: asRole("app") },
+  );
+  const text = `[test] event fixture.pinged ping_id=${pingId}`;
+  const deadline = Date.now() + 10 * outboxConfig.OUTBOX_POLL_MS;
+  while (!channel.sent().includes(text) && Date.now() < deadline) await sleep(20);
+  assert.ok(channel.sent().includes(text), "the alert never reached the channel");
+
+  const unknown = { name: "probe", workflows: async () => ({ alerts: ["probe.missing"] }) };
+  const details = { module: "probe", field: "alerts", event: "probe.missing" };
+  await assert.rejects(start(options({ modules: [unknown] })), {
+    code: "worker_module_invalid",
+    details,
+  });
+});
+
 test("GET /health reports ok with the namespace and the workflow count, 503 once Temporal is out of reach", async () => {
   const ok = await fetch(host.healthUrl);
   const body = (await ok.json()) as Record<string, unknown>;
   assert.equal(ok.status, 200);
   assert.equal(body.status, "ok");
   assert.equal(body.namespace, workerConfig.TEMPORAL_NAMESPACE);
-  assert.equal(body.workflow_count, 4);
+  assert.equal(body.workflow_count, 5);
   assert.equal(typeof body.last_poll_at, "string");
   await proxy.close();
   try {

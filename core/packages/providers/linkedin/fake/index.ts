@@ -7,8 +7,11 @@
 // visit connects a new account, emits the account.connected webhook and sends the browser to the
 // success URL. Its webhooks are webhooks.ts's, signed, its helpers emit every kind the port reads
 // (README.md "Events"), each changing the fake's state as its event says, and every account has a
-// member id of its own, derived from its ref. create() refuses APP_ENV=production: the fake never
-// stands in for LinkedIn on a server.
+// member id of its own, derived from its ref. The posts it reads are seeded by phrase, by author and
+// by account, each answered newest first and cut to its excerpt (README.md "Posts"); its company
+// pages by their link, in any case (README.md "Company pages"); the email addresses of a member's
+// "Contact info" by the member's ref (gamma-en-087), answered lower case, each once, three at most. create()
+// refuses APP_ENV=production: the fake never stands in for LinkedIn on a server.
 import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { AppError, platformConfig } from "@whytide/platform";
@@ -18,14 +21,19 @@ import {
   type FakeContext,
   patternErrors,
 } from "../../_pattern/index.ts";
+import { AUTHOR_PATHS, CONTACT_EMAILS_MAX } from "../constants.ts";
 import {
   type AccountStatus,
   type AccountStatusEvent,
   type Engager,
+  type LinkedinCompany,
+  type LinkedinPost,
   type LinkedinWebhook,
   type LinkedinWebhookEvent,
   linkedinPort,
+  type PostsPage,
   type Profile,
+  postExcerpt,
   type RecentMessage,
 } from "../port.ts";
 import {
@@ -71,6 +79,10 @@ type Link = {
   readonly expiresAt: number;
 };
 type Chat = { readonly memberRef: string; readonly messages: RecentMessage[] };
+/** An engager seedPost takes: dated, unless `dateKnown` is false. */
+export type FakeEngager = Omit<Engager, "dateKnown"> & { readonly dateKnown?: boolean };
+/** The page a post read asks for. */
+type PostsQuery = { readonly postedSince: Date; readonly cursor?: string; readonly limit: number };
 /** A message emitMessage reports, to or from the member. */
 export type FakeMessage = {
   readonly memberRef: string;
@@ -93,7 +105,17 @@ type State = {
   readonly links: Map<string, Link>;
   readonly accounts: Map<string, Status>;
   readonly posts: Map<string, readonly Engager[]>;
+  /** The posts searchPosts finds, by the phrase's key (phraseKey). */
+  readonly searches: Map<string, readonly LinkedinPost[]>;
+  /** The posts listAuthorPosts reads, by the author's key (authorKey). */
+  readonly authorPosts: Map<string, readonly LinkedinPost[]>;
+  /** The posts listOwnPosts reads, by providerAccountRef. */
+  readonly ownPosts: Map<string, readonly LinkedinPost[]>;
   readonly profiles: Map<string, Omit<Profile, "fetchedAt">>;
+  /** The company pages getCompany reads, by the page's key (authorKey). */
+  readonly companies: Map<string, Omit<LinkedinCompany, "fetchedAt">>;
+  /** The addresses getContactEmails reads, by the member's ref (gamma-en-087). */
+  readonly contactEmails: Map<string, readonly string[]>;
   /** Each account's network, by providerAccountRef. */
   readonly networks: Map<string, Network>;
 };
@@ -112,7 +134,12 @@ export const linkedinFake = createFake(linkedinPort, {
     links: new Map(),
     accounts: new Map(),
     posts: new Map(),
+    searches: new Map(),
+    authorPosts: new Map(),
+    ownPosts: new Map(),
     profiles: new Map(),
+    companies: new Map(),
+    contactEmails: new Map(),
     networks: new Map(),
   }),
   methods: (fake) => ({
@@ -143,7 +170,10 @@ export const linkedinFake = createFake(linkedinPort, {
       readable(fake, providerAccountRef);
       const profile = fake.state.profiles.get(profileUrl);
       if (!profile) throw new AppError(errors.linkedin_not_found);
-      return { ...structuredClone(profile), fetchedAt: new Date() };
+      // A 1st-degree connection when the account's network holds the member as a relation.
+      const { relations } = networkOf(fake, providerAccountRef);
+      const connected = relations.has(profile.providerMemberRef);
+      return { ...structuredClone(profile), connected, fetchedAt: new Date() };
     },
     parseWebhook: async (webhook) => verifiedEvent(webhook),
     sendInvite: async ({ providerAccountRef, memberRef }) => {
@@ -201,17 +231,74 @@ export const linkedinFake = createFake(linkedinPort, {
       const { relations, invitations } = connectedNetwork(fake, providerAccountRef);
       return { connected: relations.has(memberRef), invitationPending: invitations.has(memberRef) };
     },
+    searchPosts: async ({ providerAccountRef, phrase, ...query }) => {
+      readable(fake, providerAccountRef);
+      const posts = fake.state.searches.get(phraseKey(phrase)) ?? [];
+      return postsPage(posts, query, "searchPosts");
+    },
+    listAuthorPosts: async ({ providerAccountRef, authorUrl, ...query }) => {
+      readable(fake, providerAccountRef);
+      const posts = fake.state.authorPosts.get(authorKey(authorUrl));
+      if (posts === undefined) throw notFound("listAuthorPosts");
+      return postsPage(posts, query, "listAuthorPosts");
+    },
+    listOwnPosts: async ({ providerAccountRef, ...query }) => {
+      readable(fake, providerAccountRef);
+      const posts = fake.state.ownPosts.get(providerAccountRef) ?? [];
+      return postsPage(posts, query, "listOwnPosts");
+    },
+    getCompany: async ({ providerAccountRef, companyUrl }) => {
+      readable(fake, providerAccountRef);
+      const company = fake.state.companies.get(authorKey(companyUrl));
+      if (company === undefined) throw notFound("getCompany");
+      return { ...structuredClone(company), fetchedAt: new Date() };
+    },
+    getContactEmails: async ({ providerAccountRef, memberRef }) => {
+      readable(fake, providerAccountRef);
+      const seeded = fake.state.contactEmails.get(memberRef) ?? [];
+      const emails = [...new Set(seeded.map((address) => address.trim().toLowerCase()))];
+      return { emails: emails.slice(0, CONTACT_EMAILS_MAX) };
+    },
   }),
   helpers: (fake) => ({
-    /** The post's engagers, which listPostEngagers pages newest first, ties in the order given. */
-    seedPost: (postUrl: string, engagers: readonly Engager[]): void =>
+    /**
+     * The post's engagers, which listPostEngagers pages newest first, ties in the order given, each
+     * dated (`dateKnown: true`) unless it says false.
+     */
+    seedPost: (postUrl: string, engagers: readonly FakeEngager[]): void =>
       void fake.state.posts.set(
         postUrl,
-        structuredClone(engagers).toSorted((a, b) => b.engagedAt.getTime() - a.engagedAt.getTime()),
+        structuredClone(engagers)
+          .map((engager) => ({ ...engager, dateKnown: engager.dateKnown ?? true }))
+          .toSorted((a, b) => b.engagedAt.getTime() - a.engagedAt.getTime()),
       ),
-    /** A profile getProfile returns, fetchedAt set at each read. */
+    /**
+     * The posts searchPosts finds for the phrase, in any case and spacing; each post's excerpt is
+     * its text, cut to POST_EXCERPT_MAX_CHARS as an adapter cuts it. Paged newest first.
+     */
+    seedSearch: (phrase: string, posts: readonly LinkedinPost[]): void =>
+      void fake.state.searches.set(phraseKey(phrase), seeded(posts)),
+    /** A member's (/in/) or a company page's (/company/) posts, as seedSearch's. */
+    seedAuthorPosts: (authorUrl: string, posts: readonly LinkedinPost[]): void =>
+      void fake.state.authorPosts.set(authorKey(authorUrl), seeded(posts)),
+    /** The account's own posts, as seedSearch's. */
+    seedOwnPosts: (providerAccountRef: string, posts: readonly LinkedinPost[]): void =>
+      void fake.state.ownPosts.set(providerAccountRef, seeded(posts)),
+    /** A profile getProfile returns, `connected` from the reading account's relations and fetchedAt set at each read. */
     seedProfile: (profile: Omit<Profile, "fetchedAt">): void =>
       void fake.state.profiles.set(profile.profileUrl, structuredClone(profile)),
+    /**
+     * A company page getCompany reads, by its link in any case, a trailing slash aside, `fetchedAt`
+     * set at each read; an unseeded page is linkedin_not_found.
+     */
+    seedCompany: (companyUrl: string, company: Omit<LinkedinCompany, "fetchedAt">): void =>
+      void fake.state.companies.set(authorKey(companyUrl), structuredClone(company)),
+    /**
+     * The email addresses a member shows in "Contact info", which getContactEmails answers lower
+     * case, each once, three at most (gamma-en-087); an unseeded member answers none.
+     */
+    seedContactEmails: (memberRef: string, emails: readonly string[]): void =>
+      void fake.state.contactEmails.set(memberRef, [...emails]),
     /** The account changes state, created if need be, and the vendor's signed webhook says so. */
     emitWebhook: (kind: AccountKind, providerAccountRef: string): LinkedinWebhook =>
       emitAccount(fake, kind, providerAccountRef),
@@ -381,6 +468,39 @@ const refused = (method: string, reason: string) =>
   new AppError(errors.linkedin_send_refused, { details: { method, reason } });
 
 const cursorOf = (offset: number) => Buffer.from(`offset:${offset}`).toString("base64url");
+
+/** The posts at or after postedSince, a page of them: the last one's next cursor is null. */
+function postsPage(posts: readonly LinkedinPost[], query: PostsQuery, method: string): PostsPage {
+  const since = posts.filter(({ postedAt }) => postedAt.getTime() >= query.postedSince.getTime());
+  const start = query.cursor === undefined ? 0 : offsetOf(query.cursor, method);
+  const end = start + query.limit;
+  const nextCursor = end < since.length ? cursorOf(end) : null;
+  return { posts: structuredClone(since.slice(start, end)), nextCursor };
+}
+
+/** Seeded posts, each excerpt cut, newest first, ties in the order given. */
+const seeded = (posts: readonly LinkedinPost[]): LinkedinPost[] =>
+  structuredClone(posts)
+    .map((post) => ({ ...post, excerpt: postExcerpt(post.excerpt) }))
+    .toSorted((a, b) => b.postedAt.getTime() - a.postedAt.getTime());
+
+/** A phrase as the fake matches it: its words, one space between them, in lower case. */
+const phraseKey = (phrase: string) =>
+  phrase
+    .split(/\s+/u)
+    .filter((word) => word !== "")
+    .join(" ")
+    .toLowerCase();
+
+/** An author as the fake keys it: the kind and the id of its link, in lower case; else its link. */
+function authorKey(authorUrl: string): string {
+  const path = URL.parse(authorUrl)?.pathname ?? "";
+  for (const [kind, pattern] of Object.entries(AUTHOR_PATHS)) {
+    const id = pattern.exec(path)?.[1];
+    if (id !== undefined) return `${kind}:${id.toLowerCase()}`;
+  }
+  return authorUrl;
+}
 
 function offsetOf(cursor: string, method: string): number {
   const offset = /^offset:(\d{1,9})$/.exec(Buffer.from(cursor, "base64url").toString("utf8"))?.[1];

@@ -1,5 +1,6 @@
 // The shapes of credits (README "Public interface"): what the credits client takes, and the query and
-// answers of the balance and usage routes, from which the api host writes the OpenAPI document.
+// answers of the balance, usage and prices routes, from which the api host writes the OpenAPI
+// document.
 // Amounts are decimal strings, the way Postgres numeric holds them, never a float.
 import { z } from "zod";
 
@@ -57,9 +58,35 @@ export const usageResponse = z.strictObject({
       createdAt: z.iso.datetime(),
       leaseExpiresAt: z.iso.datetime(),
       settledAt: z.iso.datetime().nullable(),
+      /** The price list's version the reserve charged; null for a row from before gamma-p2-060. */
+      priceListVersion: z.number().int().nullable(),
     }),
   ),
   /** The cursor of the next page; null on the last. */
   nextCursor: z.string().nullable(),
 });
 export type UsageResponse = z.infer<typeof usageResponse>;
+
+/** A price: credits per unit, in a version of the price list, from the instant it applies. */
+const price = {
+  credits: amount,
+  unit: z.string(),
+  version: z.number().int(),
+  effectiveFrom: z.iso.datetime(),
+};
+
+export const pricesResponse = z.strictObject({
+  /** Every priced action in the version in effect, by action. */
+  prices: z.array(
+    z.strictObject({
+      action: z.string(),
+      ...price,
+      /**
+       * The pending version's price, when it changes the action's: a rise announced ahead, from its
+       * `effectiveFrom`; `announcedAt` is the start that announced it. Null otherwise.
+       */
+      next: z.strictObject({ ...price, announcedAt: z.iso.datetime().nullable() }).nullable(),
+    }),
+  ),
+});
+export type PricesResponse = z.infer<typeof pricesResponse>;

@@ -2,9 +2,9 @@
 // "Screen"), as e2e-read-cap@example.com, whose account no other spec touches: connected once through
 // the fake's hosted link and set back to the default cap first. The warning and the bound show,
 // 100 at most (beta-p1-020); a limit above the bound is refused under the field and stores nothing; a
-// lower one saves and is at once the limit of the reads today and the cap of the card; a member
-// without linkedin.manage, which the account's canManage says (alpha's can() never does: here
-// through Playwright's routing), sees the value only.
+// lower one saves and is at once the limit of the reads today and the cap of the card; a viewer who
+// is not the account's owner, which the account's canEdit says (an Owner reading a teammate's
+// account, gamma-p6-070: here through Playwright's routing), sees the value only.
 // Every text from its key, and axe.
 import { AxeBuilder } from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
@@ -15,7 +15,7 @@ const EMAIL = "e2e-read-cap@example.com";
 const WORKSPACE = "wsp_fixture_a"; // the one workspace the api's fixture module knows
 const ACCOUNTS = `/api/v1/workspaces/${WORKSPACE}/linkedin/accounts`;
 const messages: Record<string, string> = linkedin;
-type Account = { id: string; mine: boolean; status: string; canManage: boolean };
+type Account = { id: string; mine: boolean; status: string; canEdit: boolean };
 
 /** The text of a key, its arguments in place; a key missing from the messages fails the test. */
 function say(key: string, values: Record<string, string> = {}): string {
@@ -30,7 +30,7 @@ async function expectNoSeriousViolation(page: Page): Promise<void> {
   expect(blocking.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(", ")}`)).toEqual([]);
 }
 
-test("the daily read limit: the warning and the bound, a refusal under the field, then a limit saved; without linkedin.manage, the value only", async ({
+test("the daily read limit: the warning and the bound, a refusal under the field, then a limit saved; for anyone but the account's owner, the value only", async ({
   page,
   signInAs,
   baseURL,
@@ -92,7 +92,7 @@ test("the daily read limit: the warning and the bound, a refusal under the field
   await page.route(`**${ACCOUNTS}`, async (route) => {
     const response = await route.fetch();
     const json = await response.json();
-    for (const account of json.accounts as Account[]) account.canManage = false;
+    for (const account of json.accounts as Account[]) account.canEdit = false;
     await route.fulfill({ response, json });
   });
   await page.reload();

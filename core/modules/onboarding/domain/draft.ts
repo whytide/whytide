@@ -2,8 +2,9 @@
 // fetching under a new run and publishes onboarding.draft_requested in the same transaction, and the
 // fetch activity's, which read the run's website and write its pages and status only while the run is
 // still the record's latest; the drafter's (README "The drafter") read the pages and write the draft
-// the same way. Each runs in the caller's tenant run, through tenantClient. A Draft's documents (README
-// "The documents") are the record's, replaced by each Draft: the drafter reads them after the pages.
+// the same way, and a run of the prompt at sign-in accepts it there (README "The automatic accept").
+// Each runs in the caller's tenant run, through tenantClient. A Draft's documents (README "The
+// documents") are the record's, replaced by each Draft: the drafter reads them after the pages.
 import { createHash } from "node:crypto";
 import { outboxWriter, Prisma, tenantClient } from "@whytide/db";
 import { AppError, currentTenant, newId, publish, tenantErrors } from "@whytide/platform";
@@ -11,6 +12,7 @@ import { errors } from "../errors.ts";
 import { events } from "../events.ts";
 import { ids } from "../ids.ts";
 import type { PendingDraft } from "../schemas/draft-company-knowledge.ts";
+import { settings } from "../settings.ts";
 import { type CompanyKnowledge, lockedRecordId, toRecord } from "./commands.ts";
 import {
   type DocumentRead,
@@ -19,6 +21,8 @@ import {
   documentSource,
 } from "./documents.ts";
 import type { FetchStatus } from "./fields.ts";
+import { acceptDraft } from "./review.ts";
+import { draftHasValue } from "./rules.ts";
 
 /** What a Draft's workflow carries: the record and the run the Draft started. Ids only. */
 export type DraftRun = {
@@ -77,26 +81,39 @@ export type DraftState = {
 
 /**
  * Starts a Draft: the record becomes `fetching` under a new run, its error and draft cleared, its
- * documents replaced by `documents` (none from the screen), and onboarding.draft_requested carries
- * the ids to the worker, in the same transaction. A record without a website is
+ * documents replaced by `documents`, and onboarding.draft_requested carries the ids to the worker, in
+ * the same transaction. More documents than ONBOARDING_MAX_FILES is documents_too_many, before
+ * anything is read or written. With `autoAccept` the run accepts its own draft as it lands
+ * (recordDraft).
+ * A record without a website drafts from its documents alone; with neither, it is
  * company_knowledge_no_website. A Draft while one is fetching starts a new run: the older one can no
  * longer write.
  */
 export async function requestDraft(
   workspaceId: string,
   documents: readonly DraftDocument[] = [],
+  options: { readonly autoAccept?: boolean } = {},
 ): Promise<CompanyKnowledge> {
   if (currentTenant().workspaceId !== workspaceId) throw new AppError(tenantErrors.tenant_mismatch);
+  const files = settings.ONBOARDING_MAX_FILES;
+  if (documents.length > files)
+    throw new AppError(errors.documents_too_many, { details: { files } });
   const id = await lockedRecordId();
   const { sourceUrl } = await tenantClient.companyKnowledge.findFirstOrThrow({
     where: { id },
     select: { sourceUrl: true },
   });
-  if (sourceUrl === null) throw new AppError(errors.company_knowledge_no_website);
+  if (sourceUrl === null && documents.length === 0) {
+    throw new AppError(errors.company_knowledge_no_website);
+  }
   const draftRunId = newId(ids.draft_run);
+  const draftAutoAccept = options.autoAccept ?? false;
   const row = await tenantClient.companyKnowledge.update({
     where: { id },
-    data: { fetchStatus: "fetching", fetchError: null, draftRunId, pendingDraft: Prisma.DbNull },
+    data: {
+      ...{ fetchStatus: "fetching", fetchError: null, draftRunId, draftAutoAccept },
+      pendingDraft: Prisma.DbNull,
+    },
   });
   await tenantClient.companyDocument.deleteMany({ where: { companyKnowledgeId: id } });
   // Made in the order given, the ids sort in it: draftDocuments reads by them.
@@ -116,13 +133,18 @@ export async function requestDraft(
   return toRecord(row);
 }
 
-/** The website `run` fetches, while it is the record's latest Draft; null once a later one started. */
-export async function draftWebsite(run: DraftRun): Promise<string | null> {
+/**
+ * The website `run` fetches while it is the record's latest Draft, `website` null when the record has
+ * none (a Draft from documents alone); null once a later Draft started.
+ */
+export async function draftWebsite(
+  run: DraftRun,
+): Promise<{ readonly website: string | null } | null> {
   const row = await tenantClient.companyKnowledge.findFirst({
     where: { id: run.companyKnowledgeId },
     select: { sourceUrl: true, draftRunId: true },
   });
-  return row?.draftRunId === run.draftRunId ? row.sourceUrl : null;
+  return row?.draftRunId === run.draftRunId ? { website: row.sourceUrl } : null;
 }
 
 /**
@@ -132,7 +154,7 @@ export async function draftWebsite(run: DraftRun): Promise<string | null> {
  * when the run ended, either way.
  */
 export async function recordFetch(run: DraftRun, outcome: FetchOutcome): Promise<FetchResult> {
-  if (!(await isLatest(run))) return { status: "superseded", pages: 0 };
+  if ((await latestRun(run)) === null) return { status: "superseded", pages: 0 };
   const id = run.companyKnowledgeId;
   const { workspaceId } = currentTenant();
   const fetchedAt = new Date();
@@ -219,29 +241,44 @@ export async function draftState(): Promise<DraftState> {
 
 /**
  * Writes what the drafter of `run` ended with while `run` is the record's latest Draft, the row
- * locked: the pending draft and `drafted`, or `failed` with the code. Only an accept writes a field.
+ * locked: the pending draft and `drafted`, or `failed` with the code. Only an accept writes a field:
+ * a run with the automatic accept accepts its draft here, in the same transaction, as Accept does
+ * without replacing the fields a person wrote (review.ts acceptDraft); its draft with no value saves
+ * nothing and fails with draft_empty.
  */
-export async function recordDraft(run: DraftRun, outcome: DraftOutcome, pages: number) {
-  const superseded: RunResult = { status: "superseded", pages: 0 };
-  if (!(await isLatest(run))) return superseded;
-  const data = outcome.ok
-    ? { fetchStatus: "drafted", fetchError: null, pendingDraft: outcome.draft }
-    : { fetchStatus: "failed", fetchError: outcome.code, pendingDraft: Prisma.DbNull };
-  await tenantClient.companyKnowledge.update({ where: { id: run.companyKnowledgeId }, data });
-  const result: RunResult = outcome.ok
-    ? { status: "drafted", pages }
-    : { status: "failed", pages, code: outcome.code };
-  return result;
+export async function recordDraft(
+  run: DraftRun,
+  outcome: DraftOutcome,
+  pages: number,
+): Promise<RunResult> {
+  const latest = await latestRun(run);
+  if (latest === null) return { status: "superseded", pages: 0 };
+  const where = { id: run.companyKnowledgeId };
+  const failed = async (code: string): Promise<RunResult> => {
+    const data = { fetchStatus: "failed", fetchError: code, pendingDraft: Prisma.DbNull };
+    await tenantClient.companyKnowledge.update({ where, data });
+    return { status: "failed", pages, code };
+  };
+  if (!outcome.ok) return failed(outcome.code);
+  if (latest.autoAccept && !draftHasValue(outcome.draft.fields)) return failed("draft_empty");
+  const data = { fetchStatus: "drafted", fetchError: null, pendingDraft: outcome.draft };
+  await tenantClient.companyKnowledge.update({ where, data });
+  if (latest.autoAccept) await acceptDraft(false);
+  return { status: "drafted", pages };
 }
 
-/** Locks the record's row until the run commits; true while `run` is still its latest Draft. */
-async function isLatest(run: DraftRun): Promise<boolean> {
+/**
+ * Locks the record's row until the run commits; while `run` is still its latest Draft, whether that
+ * run accepts its own draft; else null.
+ */
+async function latestRun(run: DraftRun): Promise<{ readonly autoAccept: boolean } | null> {
   const id = await lockedRecordId();
-  const { draftRunId } = await tenantClient.companyKnowledge.findFirstOrThrow({
+  const row = await tenantClient.companyKnowledge.findFirstOrThrow({
     where: { id },
-    select: { draftRunId: true },
+    select: { draftRunId: true, draftAutoAccept: true },
   });
-  return id === run.companyKnowledgeId && draftRunId === run.draftRunId;
+  const latest = id === run.companyKnowledgeId && row.draftRunId === run.draftRunId;
+  return latest ? { autoAccept: row.draftAutoAccept } : null;
 }
 
 /** The pages the last fetch read, in the order it read them. */

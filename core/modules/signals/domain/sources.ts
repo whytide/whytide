@@ -2,22 +2,34 @@
 // each runs inside the request's tenant run, on its transaction (tenantClient), so every query is
 // scoped to the workspace currentTenant() names (core/packages/db README). A write checks its kind
 // against the registry, and a create its config against the kind's schema and its sender account
-// against linkedin's; the create route reads the config outside any run first (addSource).
+// against linkedin's; the create route reads the config outside any run first (addSource). The
+// enabled limit counts by group, an agent's sources or those in no agent (agents.ts, gamma-p5-045).
+// A write of a source, its edit, delete, run and stop, is its creator's or signals.manage's
+// (writableSource, gamma-p6-015), and a create or an import reads through the caller's own sender
+// account unless signals.manage's (assertSenderAccount). A paused agent's sources read nothing: Run
+// now refuses them, and the pause stops their open runs (paused-agent-sources). A kind that reads no
+// LinkedIn account (web_research, gamma-wr-030) takes none at its create, its source has none, and its
+// config may be edited.
 import { outboxWriter, type Prisma, tenantClient, withTenant } from "@whytide/db";
-import { findSenderAccount, errors as linkedinErrors } from "@whytide/linkedin";
+import { findSenderAccount, errors as linkedinErrors, type SenderAccount } from "@whytide/linkedin";
 import {
   AppError,
+  canWriteOwned,
   currentTenant,
   isAppError,
   newId,
   publish,
   type TenantContext,
 } from "@whytide/platform";
+import { detachSource } from "@whytide/playbooks";
 import { errors } from "../errors.ts";
 import { events } from "../events.ts";
 import { ids } from "../ids.ts";
+import { permissions } from "../permissions.ts";
 import { settings } from "../settings.ts";
-import { parseSourceConfig, sourceKind } from "../sources/registry.ts";
+import { isPostsReader, readsThroughAccount, type SourceKind } from "../sources/_contract.ts";
+import { parseSourceConfig, registeredSourceKinds, sourceKind } from "../sources/registry.ts";
+import { agentStateOf, groupOf, pausedSourcesOf } from "./agents.ts";
 import { givenClient } from "./client.ts";
 import { ENDED, runNowWorkflowIdOf } from "./constants.ts";
 
@@ -27,12 +39,15 @@ export type SignalSource = {
   readonly kind: string;
   readonly config: unknown;
   readonly label: string;
-  readonly senderAccountId: string;
+  /** The LinkedIn account it reads through; null for a kind that reads through none. */
+  readonly senderAccountId: string | null;
   readonly enabled: boolean;
   readonly createdBy: string;
   readonly createdAt: Date;
   readonly lastRunAt: Date | null;
   readonly watermark: unknown;
+  /** The CSV import that created it (sources-csv-import); null for one added from the form. */
+  readonly importId: string | null;
 };
 export type SignalRunStatus = "scheduled" | "running" | "waiting" | "done" | "failed" | "cancelled";
 export type SignalRun = {
@@ -60,8 +75,17 @@ export type NewSource = {
   readonly kind: string;
   readonly config: unknown;
   readonly label: string;
-  readonly senderAccountId: string;
+  /** Required for a kind that reads through a LinkedIn account, refused for one that does not. */
+  readonly senderAccountId?: string | undefined;
+  /** The CSV import it comes from, of the workspace (sources-csv-import). */
+  readonly importId?: string;
 };
+/**
+ * A create past SIGNALS_MAX_ENABLED_SOURCES in no agent or SIGNALS_MAX_TRACKED_PER_ACCOUNT: refused
+ * with the limit's code (the form's), or the source created disabled (a CSV import's,
+ * sources-csv-import).
+ */
+export type OverLimit = "refuse" | "disable";
 
 /** A run in these states is open: run now answers signal_run_open until it ends. */
 const OPEN: SignalRunStatus[] = ["running", "waiting"];
@@ -78,16 +102,22 @@ export async function addSource(tenant: TenantContext, input: NewSource): Promis
 }
 
 /**
- * A source of a registered kind, enabled, created by the principal, on a sender account of the
- * workspace, connected or not (a disconnected one blocks its runs); publishes signals.source_created.
+ * A source of a registered kind, enabled, in no agent, created by the principal, on a sender account
+ * of the workspace, connected or not (a disconnected one blocks its runs); publishes
+ * signals.source_created. Past a limit, refused, or created disabled when `overLimit` says so: its
+ * schedule is made paused, as a disabled source's is, and an enable counts it against the limits
+ * then.
  */
-export async function createSource(input: NewSource): Promise<ListedSource> {
+export async function createSource(
+  input: NewSource,
+  overLimit: OverLimit = "refuse",
+): Promise<ListedSource> {
   const kind = sourceKind(input.kind);
   const config = (await parseSourceConfig(kind, input.config)) as Prisma.InputJsonValue;
-  await assertSenderAccount(input.senderAccountId);
+  const senderAccountId = await accountOf(kind, input.senderAccountId);
   const { workspaceId, principal } = currentTenant();
   await lockEnabledSources(workspaceId);
-  await assertRoomForOneMore();
+  const enabled = await roomForOne(kind, config, senderAccountId, overLimit);
   const source = await tenantClient.signalSource.create({
     data: {
       id: newId(ids.signal_source),
@@ -95,8 +125,10 @@ export async function createSource(input: NewSource): Promise<ListedSource> {
       kind: kind.kind,
       config,
       label: input.label,
-      senderAccountId: input.senderAccountId,
+      senderAccountId,
+      enabled,
       createdBy: principal.userId,
+      importId: input.importId ?? null,
     },
   });
   const created = { source_id: source.id };
@@ -112,19 +144,39 @@ export async function listSources(): Promise<ListedSource[]> {
 }
 
 /**
- * Enables or disables a source, or relabels it; enabling one counts against the limit. A change of
- * `enabled` publishes signals.source_updated, on which the worker pauses or resumes its schedule.
+ * Enables or disables a source, or relabels it; enabling one counts against the limits, its sender
+ * account's tracked sources first, then its group's enabled sources (its agent's, or those in no
+ * agent), and reads its config again by its kind's schema: one the erasure scrubbed is
+ * signal_config_invalid. A new `config` is for a kind that allows it, which reads it by its schema and
+ * stores the result; for any other kind it is signal_config_invalid naming `config`. A change of
+ * `enabled` publishes signals.source_updated, on which the worker
+ * pauses or resumes its schedule.
  */
 export async function updateSource(
   id: string,
-  patch: { readonly enabled?: boolean; readonly label?: string },
+  patch: { readonly enabled?: boolean; readonly label?: string; readonly config?: unknown },
 ): Promise<ListedSource> {
   // Locked before the source is read: two enables at once count one after the other.
   if (patch.enabled === true) await lockEnabledSources(currentTenant().workspaceId);
-  const source = await findSource(id);
-  sourceKind(source.kind);
-  if (patch.enabled === true && !source.enabled) await assertRoomForOneMore();
-  const updated = await tenantClient.signalSource.update({ where: { id: source.id }, data: patch });
+  const source = await writableSource(id);
+  const kind = sourceKind(source.kind);
+  const { config: given, ...fields } = patch;
+  let config: Prisma.InputJsonValue | undefined;
+  if (given !== undefined) {
+    if (kind.configEditable !== true) {
+      throw new AppError(errors.signal_config_invalid, { details: { fields: ["config"] } });
+    }
+    config = (await parseSourceConfig(kind, given)) as Prisma.InputJsonValue;
+  }
+  if (patch.enabled === true && !source.enabled) {
+    const stored = await parseSourceConfig(kind, source.config);
+    if (source.senderAccountId !== null && tracks(kind, stored)) {
+      await assertRoomForOneTracked(source.senderAccountId);
+    }
+    await assertRoomForOneMore(source.id);
+  }
+  const data = { ...fields, ...(config === undefined ? {} : { config }) };
+  const updated = await tenantClient.signalSource.update({ where: { id: source.id }, data });
   if (patch.enabled !== undefined && patch.enabled !== source.enabled) {
     const outbox = outboxWriter(tenantClient, source.workspaceId);
     await publish(outbox, events["signals.source_updated"], { source_id: source.id });
@@ -133,11 +185,12 @@ export async function updateSource(
 }
 
 /**
- * Deletes a source and its runs; publishes signals.source_deleted with its open runs' workflow ids,
- * read first, as the delete takes the rows: the worker cancels them (fix-run-stop).
+ * Deletes a source and its runs, and its agent's link through playbooks' detachSource in the same
+ * run; publishes signals.source_deleted with its open runs' workflow ids, read first, as the delete
+ * takes the rows: the worker cancels them (fix-run-stop).
  */
 export async function deleteSource(id: string): Promise<void> {
-  const source = await findSource(id);
+  const source = await writableSource(id);
   const open = await tenantClient.signalRun.findMany({
     where: { sourceId: source.id, status: { in: OPEN } },
     select: { id: true, workflowId: true },
@@ -146,6 +199,7 @@ export async function deleteSource(id: string): Promise<void> {
     (run) => run.workflowId ?? runNowWorkflowIdOf(source.workspaceId, run.id),
   );
   await tenantClient.signalSource.delete({ where: { id: source.id } });
+  await detachSource(source.id);
   const deleted = {
     source_id: source.id,
     ...(workflowIds.length > 0 ? { workflow_ids: workflowIds } : {}),
@@ -160,10 +214,16 @@ export async function deleteSource(id: string): Promise<void> {
 /**
  * A run by hand: its row `scheduled`, and signals.run_requested, on which the worker starts it;
  * signal_run_open while one of the source's runs is `running` or `waiting`, which a second run
- * would read the same pages beside.
+ * would read the same pages beside; signal_source_expired once its kind's runs ended (endsAt);
+ * signal_agent_paused while its agent is paused, whatever the reason, as a paused agent's sources
+ * read nothing (paused-agent-sources). Each refusal comes before anything is written.
  */
-export async function requestRun(sourceId: string): Promise<SignalRun> {
-  const source = await findSource(sourceId);
+export async function requestRun(sourceId: string, now = new Date()): Promise<SignalRun> {
+  const source = await writableSource(sourceId);
+  const endsAt = sourceKind(source.kind).endsAt?.(source.createdAt);
+  if (endsAt !== undefined && now > endsAt) throw new AppError(errors.signal_source_expired);
+  const agent = await agentStateOf(source.id);
+  if (agent?.active === false) throw new AppError(errors.signal_agent_paused);
   if ((await openRuns(source.id)).size > 0) throw new AppError(errors.signal_run_open);
   const { workspaceId } = source;
   const run = await tenantClient.signalRun.create({
@@ -185,7 +245,7 @@ export async function requestRun(sourceId: string): Promise<SignalRun> {
  * source is not found, as its source would be. A second stop publishes again, which is harmless.
  */
 export async function stopRun(sourceId: string, runId: string): Promise<SignalRun> {
-  const source = await findSource(sourceId);
+  const source = await writableSource(sourceId);
   // As findSource: an empty id would drop out of the where.
   const where = { id: runId, sourceId: source.id };
   const run = runId ? await tenantClient.signalRun.findFirst({ where }) : null;
@@ -202,6 +262,39 @@ export async function stopRun(sourceId: string, runId: string): Promise<SignalRu
     requested,
   );
   return { ...run, stopRequestedAt };
+}
+
+/**
+ * The open runs of a paused agent's sources stopped as Stop stops them (paused-agent-sources), on
+ * playbooks.playbook_updated in the delivery's run: each `running` or `waiting` run whose stop is not
+ * asked yet gets its `stop_requested_at` and signals.run_stop_requested, on which the worker cancels
+ * it. A run whose stop was asked, by Stop or an earlier delivery, is left as it is, so a redelivery
+ * publishes no second stop; an agent active again by the delivery stops nothing; a scheduled run is
+ * its start's to end (runs.ts startRun). The count of the runs stopped.
+ */
+export async function stopPausedAgentRuns(playbookId: string, now = new Date()): Promise<number> {
+  const sourceIds = await pausedSourcesOf(playbookId);
+  if (sourceIds.length === 0) return 0;
+  const unasked = { status: { in: OPEN }, stopRequestedAt: null };
+  const runs = await tenantClient.signalRun.findMany({
+    where: { sourceId: { in: sourceIds }, ...unasked },
+    select: { id: true, sourceId: true },
+    orderBy: { id: "asc" },
+  });
+  const outbox = outboxWriter(tenantClient, currentTenant().workspaceId);
+  let stopped = 0;
+  for (const run of runs) {
+    // Conditioned on the row as it is now: a stop asked meanwhile is not asked again.
+    const asked = await tenantClient.signalRun.updateMany({
+      where: { id: run.id, ...unasked },
+      data: { stopRequestedAt: now },
+    });
+    if (asked.count === 0) continue;
+    const requested = { source_id: run.sourceId, run_id: run.id };
+    await publish(outbox, events["signals.run_stop_requested"], requested);
+    stopped += 1;
+  }
+  return stopped;
 }
 
 /** A source's runs, newest first: those not started yet, then by their start. */
@@ -241,15 +334,53 @@ async function findSource(id: string): Promise<SignalSource> {
   return found;
 }
 
-/** signal_sender_account_invalid unless the account is one of the workspace's. */
-async function assertSenderAccount(id: string): Promise<void> {
+/**
+ * The source with the id once the caller may write it (README "Decided here"): its creator, a
+ * member, or a holder of signals.manage, through platform's canWriteOwned; anyone else is forbidden,
+ * before anything is written. A service's run, the worker's or the erasure's, writes every one.
+ */
+async function writableSource(id: string): Promise<SignalSource> {
+  const source = await findSource(id);
+  const owned = { ownerUserId: source.createdBy, manageAction: permissions["signals.manage"] };
+  const decision = canWriteOwned(currentTenant().principal, owned);
+  if (decision !== "allow") throw new AppError(decision);
+  return source;
+}
+
+/**
+ * The sender account a source of the kind is created with: the one given, checked by assertSenderAccount,
+ * for a kind that reads through a LinkedIn account, and none when it is missing, which is
+ * signal_sender_account_invalid naming `senderAccountId`; for a kind that reads through none, null,
+ * and one given is the same refusal.
+ */
+async function accountOf(kind: SourceKind, given: string | undefined): Promise<string | null> {
+  if (readsThroughAccount(kind) === (given !== undefined)) {
+    if (given === undefined) return null;
+    await assertSenderAccount(given);
+    return given;
+  }
+  const details = { fields: ["senderAccountId"] };
+  throw new AppError(errors.signal_sender_account_invalid, { details });
+}
+
+/**
+ * signal_sender_account_invalid unless the account is one of the workspace's; then forbidden unless
+ * the caller may read through it (README "Decided here"): its owner, a member, or a holder of
+ * signals.manage, through platform's canWriteOwned, before anything is written. A service's run
+ * reads through every one.
+ */
+export async function assertSenderAccount(id: string): Promise<void> {
+  let account: SenderAccount;
   try {
-    await findSenderAccount(id);
+    account = await findSenderAccount(id);
   } catch (error) {
     if (!isAppError(error) || error.code !== linkedinErrors.sender_account_not_found) throw error;
     const details = { fields: ["senderAccountId"] };
     throw new AppError(errors.signal_sender_account_invalid, { details });
   }
+  const owned = { ownerUserId: account.ownerUserId, manageAction: permissions["signals.manage"] };
+  const decision = canWriteOwned(currentTenant().principal, owned);
+  if (decision !== "allow") throw new AppError(decision);
 }
 
 /**
@@ -261,9 +392,67 @@ async function lockEnabledSources(workspaceId: string): Promise<void> {
   await tenantClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
 }
 
-/** signal_sources_limit when SIGNALS_MAX_ENABLED_SOURCES are enabled already. */
-async function assertRoomForOneMore(): Promise<void> {
+/**
+ * Whether one more source of the kind may be enabled, under the workspace's lock: the sender
+ * account's tracked sources first, then the enabled sources in no agent, where a new one is; past
+ * either, false for `disable`, else the limit's code.
+ */
+async function roomForOne(
+  kind: SourceKind,
+  config: unknown,
+  senderAccountId: string | null,
+  overLimit: OverLimit,
+): Promise<boolean> {
+  try {
+    if (senderAccountId !== null && tracks(kind, config)) {
+      await assertRoomForOneTracked(senderAccountId);
+    }
+    await assertRoomForOneMore();
+    return true;
+  } catch (error) {
+    const limits: string[] = [errors.signal_tracked_limit, errors.signal_sources_limit];
+    if (overLimit === "disable" && isAppError(error) && limits.includes(error.code)) return false;
+    throw error;
+  }
+}
+
+/**
+ * signal_sources_limit when SIGNALS_MAX_ENABLED_SOURCES of the source's group are enabled already:
+ * its agent's sources, or, for one in no agent (a new one, no id), the sources in no agent.
+ */
+async function assertRoomForOneMore(sourceId?: string): Promise<void> {
   const limit = settings.SIGNALS_MAX_ENABLED_SOURCES;
-  const enabled = await tenantClient.signalSource.count({ where: { enabled: true } });
+  const where = { enabled: true, ...(await groupOf(sourceId)) };
+  const enabled = await tenantClient.signalSource.count({ where });
   if (enabled >= limit) throw new AppError(errors.signal_sources_limit, { details: { limit } });
+}
+
+/**
+ * A source of the kind tracks a creator or a page for its sender account (RB-4.2.1): its posts reader
+ * reads an author's posts, a member's or a company page's, as the competitor and creator kinds do.
+ * Read from the kind, so no list of kinds is kept here.
+ */
+function tracks(kind: SourceKind, config: unknown): boolean {
+  return isPostsReader(kind.reader) && kind.reader.source(config).by === "author";
+}
+
+/**
+ * signal_tracked_limit when SIGNALS_MAX_TRACKED_PER_ACCOUNT enabled sources of the sender account
+ * track an author already; counted under the workspace's lock (lockEnabledSources), the account's
+ * own workspace.
+ */
+async function assertRoomForOneTracked(senderAccountId: string): Promise<void> {
+  const limit = settings.SIGNALS_MAX_TRACKED_PER_ACCOUNT;
+  const enabled = await tenantClient.signalSource.findMany({
+    where: { enabled: true, senderAccountId },
+    select: { kind: true, config: true },
+  });
+  const kinds = registeredSourceKinds();
+  const tracked = enabled.filter(({ kind, config }) => {
+    const registered = kinds.get(kind);
+    return registered !== undefined && tracks(registered, config);
+  });
+  if (tracked.length >= limit) {
+    throw new AppError(errors.signal_tracked_limit, { details: { limit } });
+  }
 }

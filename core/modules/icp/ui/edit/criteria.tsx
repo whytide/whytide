@@ -1,6 +1,6 @@
 // The criteria card of the ICP screen: one row per criterion, its name, its weight with a bar of its
 // share, whether it is a must and whether it counts; then the sum of the weights with its bar, in the
-// danger colour while it is not 100, and the api's error about them.
+// danger colour while it is not 100, and the api's error about them. Disabled, every row is read-only.
 "use client";
 
 import { Checkbox, Meter, TextField } from "@whytide/ui";
@@ -9,9 +9,14 @@ import { useTranslations } from "next-intl";
 import type { Criterion, CriterionKey } from "../../domain/lists.ts";
 import { criterionLabels } from "../labels.ts";
 
-type Props = { criteria: Criterion[]; error?: string; onChange: (criteria: Criterion[]) => void };
+type Props = {
+  criteria: Criterion[];
+  error?: string;
+  disabled?: boolean;
+  onChange: (criteria: Criterion[]) => void;
+};
 
-export function CriteriaTable({ criteria, error, onChange }: Props) {
+export function CriteriaTable({ criteria, error, disabled, onChange }: Props) {
   const t = useTranslations("icp.screen");
   const names = criterionLabels(useTranslations());
   const sum = criteria.reduce((total, row) => total + row.weight, 0);
@@ -32,6 +37,7 @@ export function CriteriaTable({ criteria, error, onChange }: Props) {
         {criteria.map((row) => (
           <fieldset
             key={row.key}
+            disabled={disabled}
             className="grid grid-cols-[6rem_minmax(0,1fr)] items-end gap-x-6 gap-y-3 border-t border-line py-4 first:border-t-0 first:pt-0 sm:grid-cols-[minmax(0,12rem)_6rem_minmax(0,1fr)] lg:grid-cols-[14rem_6rem_minmax(0,1fr)_auto_auto] lg:[&:not(:first-child)_.wt-field>label]:sr-only [&_.wt-field]:min-w-0"
           >
             {/* Floated, so that the legend is a cell of the row's grid; its weight's field, narrow. In

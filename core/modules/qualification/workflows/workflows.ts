@@ -1,13 +1,16 @@
 // qualification's workflows, run in Temporal's sandbox (README "The batch"): the batch of one
 // workspace, lead by lead, each step an activity of its own (reserve, assess, then commit or
-// release), and the global tick, which starts one batch per workspace; the re-score, page by page.
-// Ids, the ICP version, codes and counts in and out.
+// release), and the global tick, which starts one batch per workspace; the re-score, page by page;
+// the nightly decay's tick and each workspace's decay, page by page (README "Intent and priority");
+// one entry's Hot alert, its mail (README "The Hot alert"). Ids, the audience and its version,
+// codes, the decay's time and counts in and out.
 import {
   ActivityCancellationType,
   ActivityFailure,
   ApplicationFailure,
   CancellationScope,
   isCancellation,
+  patched,
   proxyActivities,
 } from "@temporalio/workflow";
 import type { ActivityFunctions } from "@whytide/platform";
@@ -48,13 +51,31 @@ const providerFailed = (error: unknown) =>
   error.cause instanceof ApplicationFailure &&
   (error.cause.type ?? "").startsWith("llm_");
 
+/**
+ * The workspace's leads, each against its own audience (gamma-p5-050), audience by audience. A
+ * batch in flight at the deploy replays on its old path: no audience in its steps, the default's,
+ * and its reservations under the key of before.
+ */
 export async function qualification_batch(input: { workspaceId: string }): Promise<BatchResult> {
   const { workspaceId } = input;
-  const { icpVersion, personIds, filtered } = await steps.qualification_filter_leads(input);
-  const counts = { selected: personIds.length + filtered, filtered, scored: 0, failed: 0 };
+  const audiences = patched("audience");
+  const read = await steps.qualification_filter_leads(
+    audiences ? { ...input, audiences: true } : input,
+  );
+  const { filtered } = read;
+  const groups: { icpId?: string; icpVersion: number; personIds: string[] }[] =
+    "groups" in read ? read.groups : [{ icpVersion: read.icpVersion, personIds: read.personIds }];
+  const selected = groups.reduce((sum, { personIds }) => sum + personIds.length, filtered);
+  const counts = { selected, filtered, scored: 0, failed: 0 };
   const stop = (stopped: BatchStop): BatchResult => ({ ...counts, stopped });
-  for (const personId of personIds) {
-    const lead = { workspaceId, personId, icpVersion };
+  const leads = groups.flatMap(({ icpId, icpVersion, personIds }) =>
+    personIds.map((personId) =>
+      icpId === undefined
+        ? { workspaceId, personId, icpVersion }
+        : { workspaceId, personId, icpId, icpVersion },
+    ),
+  );
+  for (const lead of leads) {
     const reserved = await steps.qualification_reserve(lead);
     if (reserved.status === "insufficient_credits") return stop("insufficient_credits");
     const held = { ...lead, usageId: reserved.usageId, attempt: reserved.attempt };
@@ -131,4 +152,34 @@ export async function qualification_rescore(input: {
   let after = await page({});
   while (after !== null) after = await page({ after });
   return counts;
+}
+
+/** The tick's time, the workflow's clock as its history holds it unless the input gives one. */
+export async function qualification_intent_decay_tick(input: {
+  at?: string;
+}): Promise<{ workspaces: number; started: number }> {
+  const at = input.at ?? new Date().toISOString();
+  return steps.qualification_start_intent_decays({ at });
+}
+
+/** What a workspace's decay did, counted: the rows recomputed or deleted. */
+export type IntentDecayResult = { readonly updated: number };
+
+/** The workspace's decaying intents as of `at`, page by page, each page one activity. */
+export async function qualification_intent_decay(input: {
+  workspaceId: string;
+  at: string;
+}): Promise<IntentDecayResult> {
+  let updated = 0;
+  for (let more = true; more; ) {
+    const page = await steps.qualification_intent_decay_page(input);
+    updated += page.updated;
+    more = page.more;
+  }
+  return { updated };
+}
+
+/** One entry into Hot, claimed by the subscriber: its mail, whose result says why none went. */
+export async function qualification_hot_alert(input: { workspaceId: string; personId: string }) {
+  return steps.qualification_mail_hot_lead(input);
 }

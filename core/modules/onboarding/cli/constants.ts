@@ -1,4 +1,5 @@
 // The fixed values of `pnpm knowledge:draft` (README "The script"), beside the code that reads them.
+import { DRAFT_RUN_MS } from "../domain/constants.ts";
 
 export const DRAFT_USAGE =
   "usage: pnpm knowledge:draft --workspace <id or slug> [--url <https://…>] [--file <path>]... [--accept [--replace-edited]]";
@@ -18,35 +19,11 @@ export const EXIT = {
   notFound: 6,
 } as const;
 
-export const DOCUMENT_LIMITS = {
-  /** Files per Draft. */
-  files: 5,
-  /** Bytes per file, 10 MB. */
-  bytes: 10 * 1024 * 1024,
-  /**
-   * Characters of text kept per document: the website fetch's FETCH_LIMITS.text, which the lint
-   * keeps cli/ from importing from workflows/ (tests/documents.test.ts compares the two).
-   */
-  text: 50_000,
-} as const;
-
-/** The media type of each extension the script reads, in lower case. */
-export const MEDIA_TYPES: Readonly<Record<string, string>> = {
-  ".pdf": "application/pdf",
-  ".txt": "text/plain",
-  ".md": "text/markdown",
-};
-
 /**
- * PDF.js's options (docs/security.md "The documents"), with `data` and never a `url`: no fetch by its
- * worker side, the one way to a request with no font, character map or WebAssembly address set (none
- * is); no WebAssembly, so a type 4 function runs in PDF.js's interpreter; no warning on the console.
- * PDF.js 6.4 has no `isEvalSupported` any more: it runs no eval.
+ * The wait for the worker's run: a read of the record every two seconds, twenty minutes at most, as
+ * long as the screens give a run before they call it stuck (DRAFT_RUN_MS).
  */
-export const PDF_OPTIONS = { useWorkerFetch: false, useWasm: false, verbosity: 0 } as const;
-
-/** The wait for the worker's run: a read of the record every two seconds, ten minutes at most. */
-export const WAIT = { everyMs: 2_000, forMs: 600_000 } as const;
+export const WAIT = { everyMs: 2_000, forMs: DRAFT_RUN_MS.stuck } as const;
 
 /** The characters of a drafted text field the summary prints: its start. */
 export const FIELD_START = 60;

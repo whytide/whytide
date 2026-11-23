@@ -1,9 +1,9 @@
 // The package's test entries, imported as another package's tests import them: through the package
 // name, from the build that `tsc -b` writes before the tests run. `./testing` is the contract
 // harness; `./*/testing` in package.json exports each port's helpers as
-// `@whytide/providers/<port>/testing`.
+// `@whytide/providers/<port>/testing`; `./mailbox/constants` the mailbox port's constants alone.
 import assert from "node:assert/strict";
-import { existsSync, globSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,15 @@ test("the contract harness and each port's test helpers import through the packa
   // The pattern opens testing/ folders only: a fake or an adapter stays the registry's.
   const fake = () => import.meta.resolve("@whytide/providers/llm/fake");
   assert.throws(fake, { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" });
+});
+
+test("the mailbox port's constants import through their own entry, from dist/, and import nothing: a screen's client code reads them", async () => {
+  const entry = "@whytide/providers/mailbox/constants";
+  const built = new URL("../dist/mailbox/constants.js", import.meta.url);
+  assert.equal(import.meta.resolve(entry), built.href);
+  const { MAILBOX_PROVIDERS } = await import(entry);
+  assert.deepEqual(MAILBOX_PROVIDERS, ["google", "microsoft"]);
+  assert.doesNotMatch(readFileSync(built, "utf8"), /^\s*import\b/m);
 });
 
 test("a testing/ folder is the package's or a port's, beside its port.ts: the pattern exports no other", () => {

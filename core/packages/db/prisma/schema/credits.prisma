@@ -11,6 +11,16 @@
 // the amounts, `app`'s UPDATE on four columns of credit_usage only, the trigger that settles a usage
 // row once and never above its reservation, and credits_seed_self_hosted skipping a cancelled
 // subscription.
+// Migration 20261105085249_credits_price_notice (gamma-p2-060), hand-written too: the CHECK
+// price_list_withdrawn_before_effect, `billing_writer`'s UPDATE on price_list narrowed to
+// withdrawn_at, and credit_usage.price_list_version filled for the rows written before.
+// Migration 20261113025150_credits_alerts (gamma-p7-020), hand-written too: credit_alerts' CHECKs
+// on threshold and tries, and `app`'s grants on it: SELECT, INSERT, and UPDATE of notified_at and
+// tries only.
+// Migration 20261113051853_credits_alert_mails (review-gaps-2), hand-written too: `app`'s grants on
+// credit_alert_mails, SELECT and INSERT only.
+// Migration 20261115121624_credits_alert_thresholds (env-settings-b), hand-written: credit_alerts'
+// CHECK on threshold widened to any whole percent from 1 to 100, for CREDITS_ALERT_THRESHOLDS.
 
 model Plan {
   id               String         @id
@@ -61,19 +71,21 @@ model CreditGrant {
 // belongs to one organization (coding §5: workspace_id in every unique key of a tenant table).
 /// tenant
 model CreditUsage {
-  id             String            @id
-  organizationId String            @map("organization_id")
-  workspaceId    String            @map("workspace_id")
-  action         String
-  quantity       Decimal
-  credits        Decimal
-  status         CreditUsageStatus @default(reserved)
-  idempotencyKey String            @map("idempotency_key")
-  leaseExpiresAt DateTime          @map("lease_expires_at") @db.Timestamptz()
+  id               String            @id
+  organizationId   String            @map("organization_id")
+  workspaceId      String            @map("workspace_id")
+  action           String
+  quantity         Decimal
+  credits          Decimal
+  status           CreditUsageStatus @default(reserved)
+  idempotencyKey   String            @map("idempotency_key")
+  leaseExpiresAt   DateTime          @map("lease_expires_at") @db.Timestamptz()
   /// The object the action is for, as an id (`lead_…`), never a person's data.
-  subjectRef     String            @map("subject_ref")
-  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz()
-  settledAt      DateTime?         @map("settled_at") @db.Timestamptz()
+  subjectRef       String            @map("subject_ref")
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  settledAt        DateTime?         @map("settled_at") @db.Timestamptz()
+  /// The price list's version the reserve charged; `app` never changes it (credits_price_notice).
+  priceListVersion Int?              @map("price_list_version")
 
   @@unique([workspaceId, organizationId, idempotencyKey])
   @@index([workspaceId, createdAt])
@@ -94,16 +106,62 @@ model CreditBalance {
   @@map("credit_balances")
 }
 
+// A version is the whole list, in effect from effective_from; a rise waits 30 days, announced at
+// announced_at, and a pending version withdrawn before its date never takes effect (core/modules/
+// credits/docs/data.md).
 model PriceListEntry {
-  id            String   @id
+  id            String    @id
   action        String
   credits       Decimal
   unit          String
   version       Int
-  effectiveFrom DateTime @map("effective_from") @db.Timestamptz()
+  effectiveFrom DateTime  @map("effective_from") @db.Timestamptz()
+  /// When the start that wrote a pending rise announced it; null for a version in effect at once.
+  announcedAt   DateTime? @map("announced_at") @db.Timestamptz()
+  /// When a pending version was withdrawn, always before effective_from (CHECK); null otherwise.
+  withdrawnAt   DateTime? @map("withdrawn_at") @db.Timestamptz()
 
   @@unique([action, version])
   @@map("price_list")
+}
+
+// A credit alert (gamma-p7-020; core/modules/credits README "Alerts"): an organization reached a
+// threshold of its period's granted credits, one row per organization, period and threshold, the
+// "once per threshold per period" key; the figures at the crossing, and when its mail went.
+model CreditAlert {
+  id             String    @id
+  organizationId String    @map("organization_id")
+  /// The period's first instant, the subscription's period_start at the crossing.
+  periodStart    DateTime  @map("period_start") @db.Timestamptz()
+  /// One of CREDITS_ALERT_THRESHOLDS when written: a whole percent from 1 to 100 (CHECK
+  /// credit_alerts_threshold).
+  threshold      Int
+  /// The period's reserved and committed credits at the crossing.
+  used           Decimal
+  /// The period's granted credits at the crossing, carry-over aside.
+  granted        Decimal
+  /// When the Owners' mail went, this row's or a higher threshold's of the same check; null until then.
+  notifiedAt     DateTime? @map("notified_at") @db.Timestamptz()
+  /// The mail's rounds that failed past their attempts; the check stops at CREDIT_ALERT_MAX_TRIES.
+  tries          Int       @default(0)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  mails          CreditAlertMail[]
+
+  @@unique([organizationId, periodStart, threshold])
+  @@map("credit_alerts")
+}
+
+// A recipient an alert's mail went to (review-gaps-2; core/modules/credits README "Alerts"), recorded
+// right after their send, so that a retry, in the same check or a later one, mails only the others.
+model CreditAlertMail {
+  alertId  String      @map("alert_id")
+  /// tenancy's user, a plain id: the Owner or Admin mailed.
+  userId   String      @map("user_id")
+  mailedAt DateTime    @default(now()) @map("mailed_at") @db.Timestamptz()
+  alert    CreditAlert @relation(fields: [alertId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([alertId, userId])
+  @@map("credit_alert_mails")
 }
 
 enum SubscriptionStatus {

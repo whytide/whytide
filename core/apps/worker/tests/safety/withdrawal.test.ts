@@ -4,8 +4,10 @@
 // fake's recorded withdrawals: a connection request 20 days old stays, one 21 days old is withdrawn
 // once, a second run of the job and a second send included; at most 15 a day, the 16th the next
 // working day; withdrawals in the 200; the same reservation's window, weekdays and kill switch; no
-// approval and no credits; no withdrawal of an accepted request; and no new enrollment for 90 days.
+// approval and no credits; no withdrawal of an accepted request; and no new enrollment for 90 days,
+// contacts' CONTACTS_RECENT_TOUCH_DAYS, whose default and value unset are 90 (env-settings-a).
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { newId } from "@whytide/platform";
 import {
@@ -36,6 +38,20 @@ const built = (path: string) =>
   import(new URL(`../../../../modules/${path}`, import.meta.url).href);
 const { enrollApproved } = await built("campaigns/dist/domain/enroll/enroll.js");
 const { RECENT_TOUCH_DAYS } = await built("contacts/dist/domain/suppression/constants.js");
+/** CONTACTS_RECENT_TOUCH_DAYS as contacts' build reads it with the variable unset, in a process of its own. */
+function recentTouchDaysUnset(): number {
+  const env = { ...process.env };
+  delete env.CONTACTS_RECENT_TOUCH_DAYS;
+  const href = new URL("../../../../modules/contacts/dist/settings.js", import.meta.url).href;
+  const script = `const { touchSettings } = await import(${JSON.stringify(href)});
+console.log(touchSettings.CONTACTS_RECENT_TOUCH_DAYS);`;
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    env,
+    encoding: "utf8",
+  });
+  assert.equal(child.status, 0, child.stderr);
+  return Number(child.stdout);
+}
 const { remainingToday } = await built("linkedin/dist/index.js");
 
 useSenderTests();
@@ -204,7 +220,8 @@ test("a withdrawn person is refused a new enrollment for 90 days: the touch at t
 
   const touched: Date | null = await s.run(() => contacts.lastTouchAt(lead.personId));
   assert.equal(touched?.getTime(), step.executedAt.getTime());
-  assert.equal(RECENT_TOUCH_DAYS, 90);
+  assert.equal(RECENT_TOUCH_DAYS.default, 90);
+  assert.equal(recentTouchDaysUnset(), 90);
   const suppression = await s.run(() =>
     contacts.suppressionOf(lead.personId, { newEnrollment: true }),
   );

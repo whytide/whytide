@@ -48,6 +48,12 @@ export type FetchSafeOptions = {
   readonly lists?: EgressLists;
   /** Supplies addresses only: every check runs on what it returns. */
   readonly resolve?: Resolver;
+  /**
+   * The caller's own refusal, asked with the host (lower case) of the first URL and of every redirect
+   * hop, before that hop is requested: true refuses it as egress_denied_host, with no request to it.
+   * It adds to the egress rules and never replaces one.
+   */
+  readonly refuseHost?: (host: string) => boolean;
 };
 
 export type FetchSafeResponse = {
@@ -71,6 +77,7 @@ type Settings = {
   readonly headers: Readonly<Record<string, string>>;
   readonly lists: EgressLists;
   readonly resolve: Resolver;
+  readonly refuseHost: ((host: string) => boolean) | undefined;
 };
 
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
@@ -134,7 +141,7 @@ export function fetchSafe(
     const started = performance.now();
     try {
       // A copy of its own: a URL object the caller holds could change between a check and the use.
-      let url = checkUrl(String(input), settings.lists);
+      let url = checkedUrl(checkUrl(String(input), settings.lists), settings);
       // The host is the one attribute outside the log schema: the span names where the call went,
       // and a log line never carries a host. The path and the query never reach the span.
       span.setAttribute("host", url.hostname);
@@ -160,7 +167,7 @@ export function fetchSafe(
         if (hops >= settings.maxRedirects) {
           throw new AppError(egressErrors.egress_too_many_redirects);
         }
-        const next = checkUrl(redirectTarget(location, url), settings.lists);
+        const next = checkedUrl(checkUrl(redirectTarget(location, url), settings.lists), settings);
         // No step down: what was asked for over TLS never goes on in clear.
         if (url.protocol === "https:" && next.protocol !== "https:") {
           throw new AppError(egressErrors.egress_insecure_redirect);
@@ -174,6 +181,14 @@ export function fetchSafe(
       span.setAttribute("duration_ms", Math.round(performance.now() - started));
     }
   });
+}
+
+/** The URL, unless the caller's refuseHost refuses its host: egress_denied_host, before any request. */
+function checkedUrl(url: URL, { refuseHost }: Settings): URL {
+  if (refuseHost?.(canonicalHost(url.hostname).toLowerCase()) === true) {
+    throw new AppError(egressErrors.egress_denied_host);
+  }
+  return url;
 }
 
 /** The options with the config's defaults; a bound not a whole number in range fails closed. */
@@ -207,6 +222,7 @@ function settle(options: FetchSafeOptions): Settings {
       denyHosts: [...egressConfig.EGRESS_DENY_HOSTS, ...denyHosts],
     },
     resolve: options.resolve ?? dnsResolver(timeoutMs),
+    refuseHost: options.refuseHost,
   };
 }
 

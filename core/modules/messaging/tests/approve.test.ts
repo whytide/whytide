@@ -2,7 +2,9 @@
 // README.md "Public interface"; beta-p3-020), each in a tenant run as approvals calls them, against
 // the worktree's database: the refusals, the final text and its trim, the gates on every approval,
 // the empty note, the edit ratio and edited_by_user, the content hash and two approvals at once; the
-// frozen content; the step drafts as approvals reads them.
+// frozen content; the step drafts as approvals reads them. A first email's subject frozen with its
+// body, the email's hash, the subject's refusals and the email gates at approval (gamma-p3-070). A
+// person's approval answers disclosureApplied false (gamma-p4-080; tests/disclosure.test.ts).
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
@@ -15,7 +17,7 @@ import {
   editRatioOf,
 } from "../domain/drafts/approve.ts";
 import { stepDrafts } from "../domain/drafts/step.ts";
-import { GATES } from "../schemas/writer.ts";
+import { gatesOf } from "../domain/gates/index.ts";
 import { createMessageDraft, createStepDraft, useMessagingClient } from "../testing/index.ts";
 import { COLLEAGUE, GROUNDED, PLAN, run, seed, seedColleague } from "./fixtures/draft.ts";
 
@@ -144,7 +146,11 @@ test("an empty text approves a step's note, hashed as \"\", and is refused for a
   const { step, approve, row, content } = await seeded();
   const note = await step("sx_note", { stepKey: "connect", text: "" });
   assert.deepEqual(await approve(note, "sx_note", ""), { contentHash: EMPTY_HASH, editRatio: 0 });
-  assert.deepEqual(await content(note), { text: "", contentHash: EMPTY_HASH });
+  assert.deepEqual(await content(note), {
+    text: "",
+    contentHash: EMPTY_HASH,
+    disclosureApplied: false,
+  });
   const left = await step("sx_left", { stepKey: "connect", text: "" });
   assert.deepEqual(await approve(left, "sx_left", "   "), {
     contentHash: EMPTY_HASH,
@@ -204,7 +210,11 @@ test("two approvals at once leave one approved row and one refusal, draft_not_ed
     ["draft_not_editable"],
   );
   const winner = texts[won] ?? "";
-  assert.deepEqual(await content(raced), { text: winner, contentHash: sha256(winner) });
+  assert.deepEqual(await content(raced), {
+    text: winner,
+    contentHash: sha256(winner),
+    disclosureApplied: false,
+  });
 });
 
 test("approvedContent answers the frozen text and its hash for an approved step draft only: null for every other status, a lead's draft and an unknown id", async () => {
@@ -225,7 +235,11 @@ test("approvedContent answers the frozen text and its hash for an approved step 
   );
   const own = `${GROUNDED} Thanks!`;
   const approved = await step("sx_approved", { status: "approved", editedText: own });
-  assert.deepEqual(await content(approved), { text: own, contentHash: sha256(own) });
+  assert.deepEqual(await content(approved), {
+    text: own,
+    contentHash: sha256(own),
+    disclosureApplied: false,
+  });
 });
 
 test("stepDrafts: the workspace's step drafts of the ids, in their order and once, each with its final text, limits, gates, reasons, plan's facts and edit measure; a lead's draft and an unknown id left out", async () => {
@@ -244,7 +258,7 @@ test("stepDrafts: the workspace's step drafts of the ids, in their order and onc
     [note, ready, failed],
   );
   const [noteView, readyView, failedView] = views;
-  const passed = GATES.map((gate) => ({ gate, issues: [] }));
+  const passed = gatesOf("linkedin_message").map((gate) => ({ gate, issues: [] }));
   assert.deepEqual(readyView, {
     id: ready,
     personId,
@@ -255,6 +269,9 @@ test("stepDrafts: the workspace's step drafts of the ids, in their order and onc
     text: GROUNDED,
     minCharacters: 1,
     maxCharacters: 1_900,
+    subject: null,
+    maxSubjectWords: null,
+    maxSubjectCharacters: null,
     gates: passed,
     flagReasons: [],
     factIds: PLAN.factIds,
@@ -280,4 +297,141 @@ test("stepDrafts: the workspace's step drafts of the ids, in their order and onc
   );
   assert.ok(noteView?.approvedAt instanceof Date);
   assert.deepEqual(await run(workspaceId, () => stepDrafts([])), []);
+});
+
+test("an email: a first one's subject frozen with its body, the owner's when given, trimmed, edited_subject when it differs, edited_by_user when either changed; the hash of { body, subject } changes with either; approvedContent answers the subject, null for a follow-up; a failed first email needs a typed subject and body", async () => {
+  const { workspaceId, personId, row, content } = await seeded();
+  const SUBJECT = "Warm leads at Acme";
+  const email = (stepExecutionId: string, stepKey: "email_1" | "email_2", columns = {}) =>
+    createStepDraft({
+      ...{ workspaceId, personId, stepExecutionId, stepKey, mailboxId: `mbx_${stepExecutionId}` },
+      ...{ text: GROUNDED, subject: stepKey === "email_1" ? SUBJECT : null, ...columns },
+    });
+  const approve = (id: string, stepExecutionId: string, input: object = {}) =>
+    run(workspaceId, () => approveStepDraft(id, { stepExecutionId, ...input }));
+  const hash = (body: string, subject: string | null) => sha256(JSON.stringify({ body, subject }));
+
+  const own = await email("sx_own", "email_1");
+  assert.deepEqual(await approve(own, "sx_own"), {
+    contentHash: hash(GROUNDED, SUBJECT),
+    editRatio: 0,
+  });
+  const frozen = {
+    text: GROUNDED,
+    subject: SUBJECT,
+    contentHash: hash(GROUNDED, SUBJECT),
+    disclosureApplied: false,
+  };
+  assert.deepEqual(await content(own), frozen);
+  const untouched = await row(own);
+  assert.deepEqual([untouched.editedSubject, untouched.editedByUser], [null, false]);
+
+  const titled = await email("sx_titled", "email_1");
+  const subject = "Warm leads, sooner";
+  assert.deepEqual(await approve(titled, "sx_titled", { subject: `  ${subject} ` }), {
+    contentHash: hash(GROUNDED, subject),
+    editRatio: 0,
+  });
+  const stored = await row(titled);
+  assert.deepEqual(
+    [stored.subject, stored.editedSubject, stored.editedByUser],
+    [SUBJECT, subject, true],
+  );
+  assert.equal((await content(titled))?.subject, subject);
+  const bodied = await email("sx_bodied", "email_1");
+  const body = `${GROUNDED} Thanks!`;
+  assert.equal(
+    (await approve(bodied, "sx_bodied", { text: body })).contentHash,
+    hash(body, SUBJECT),
+  );
+  assert.equal(
+    new Set([hash(GROUNDED, SUBJECT), hash(GROUNDED, subject), hash(body, SUBJECT)]).size,
+    3,
+  );
+
+  const later = await email("sx_later", "email_2");
+  assert.equal((await approve(later, "sx_later")).contentHash, hash(GROUNDED, null));
+  assert.deepEqual(await content(later), {
+    text: GROUNDED,
+    subject: null,
+    contentHash: hash(GROUNDED, null),
+    disclosureApplied: false,
+  });
+
+  const failed = await email("sx_failed", "email_1", {
+    status: "failed",
+    text: null,
+    subject: null,
+  });
+  const empty = { gate: "length", length: 0, min: 1, max: 1_900, unit: "characters" };
+  const missing = { gate: "subject", problem: "missing" };
+  await assert.rejects(approve(failed, "sx_failed"), refusedWith(empty, missing));
+  await assert.rejects(approve(failed, "sx_failed", { text: GROUNDED }), refusedWith(missing));
+  const typed = await approve(failed, "sx_failed", { text: GROUNDED, subject: SUBJECT });
+  assert.deepEqual(typed, { contentHash: hash(GROUNDED, SUBJECT), editRatio: 1 });
+  const done = await row(failed);
+  assert.deepEqual(
+    [done.editedText, done.editedSubject, done.editedByUser],
+    [GROUNDED, SUBJECT, true],
+  );
+});
+
+test("a subject on a follow-up or a LinkedIn draft is draft_subject_not_allowed; at approval a first email's link, any act phrase and a near duplicate of the mailbox are draft_text_refused; a follow-up may hold a link", async () => {
+  const { workspaceId, personId, step, row } = await seeded();
+  const approve = (id: string, stepExecutionId: string, input: object = {}) =>
+    run(workspaceId, () => approveStepDraft(id, { stepExecutionId, ...input }));
+  const email = (
+    stepExecutionId: string,
+    stepKey: "email_1" | "email_2",
+    mailboxId: string,
+    text = GROUNDED,
+  ) =>
+    createStepDraft({
+      workspaceId,
+      personId,
+      stepExecutionId,
+      stepKey,
+      mailboxId,
+      text,
+      ...(stepKey === "email_1" && { subject: "Warm leads at Acme" }),
+    });
+
+  const later = await email("sx_later", "email_2", "mbx_1");
+  const message = await step("sx_message");
+  for (const [id, sx] of [
+    [later, "sx_later"],
+    [message, "sx_message"],
+  ] as const) {
+    await assert.rejects(approve(id, sx, { subject: "Hi" }), { code: "draft_subject_not_allowed" });
+    assert.equal((await row(id)).status, "ready");
+  }
+  const first = await email("sx_first", "email_1", "mbx_2");
+  const linked = `${GROUNDED} More at acme.io.`;
+  await assert.rejects(
+    approve(first, "sx_first", { text: linked }),
+    refusedWith({ gate: "links", link: "acme.io" }),
+  );
+  const act = refusedWith({ gate: "signal_act", phrase: "Saw you liked" });
+  await assert.rejects(approve(first, "sx_first", { subject: "Saw you liked it" }), act);
+  await assert.rejects(
+    approve(message, "sx_message", { text: `Saw you liked it. ${GROUNDED}` }),
+    act,
+  );
+  const linkedLater = await email("sx_linked", "email_2", "mbx_3", linked);
+  assert.ok((await approve(linkedLater, "sx_linked")).contentHash);
+
+  // The first email of mbx_2 is approved: another draft of that mailbox with its body is refused.
+  await approve(first, "sx_first");
+  const twin = await email("sx_twin", "email_1", "mbx_2");
+  await assert.rejects(
+    approve(twin, "sx_twin"),
+    refusedWith({ gate: "near_duplicate", similarity: 1 }),
+  );
+  assert.ok(
+    (
+      await approve(twin, "sx_twin", {
+        text: `Ines, a question for Acme: how does your team follow up on warm leads before they go cold?`,
+      })
+    ).contentHash,
+  );
 });

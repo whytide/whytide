@@ -1,16 +1,23 @@
 // contacts' never-contact routes end to end (beta-p2-010; core/modules/contacts/README.md "Routes"):
 // the host started with identity, whose resolver guards the workspace, and contacts, on the fake
-// authentication adapter, in a schema of the worktree's database, answering real HTTP. It lives
-// here: a module never imports a host.
+// authentication adapter, in a schema of the worktree's database, answering real HTTP; per channel
+// (gamma-p2-040), the channel and the relationship, their refusals, and each handler's permission;
+// a person by an email address (gamma-rf-040), named by the person who holds it.
+// It lives here: a module never imports a host.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
-import { upsertCompany, upsertPersonFromSource } from "@whytide/contacts";
+import { recordPersonEmail, upsertCompany, upsertPersonFromSource } from "@whytide/contacts";
 import { useHashSalt } from "@whytide/contacts/testing";
 import { databaseUrl, withTenant } from "@whytide/db";
 import { asRole, withTestDb } from "@whytide/db/testing";
 import { useIdentityClient } from "@whytide/identity/testing";
-import { collectLogs, createLogger, servicePrincipal } from "@whytide/platform";
+import {
+  collectLogs,
+  createLogger,
+  registeredPermissions,
+  servicePrincipal,
+} from "@whytide/platform";
 import { signInAs } from "@whytide/providers/auth/testing";
 import {
   createTwoWorkspaces,
@@ -24,6 +31,12 @@ const APP_ORIGIN = "https://app.whytide.test";
 // The host reads it as its config loads: set before anything of the host is imported.
 process.env.APP_PUBLIC_ORIGIN = APP_ORIGIN;
 const { start } = await import("../src/start.ts");
+// The never-contact controller by its build's path, as inbox-exports.test.ts reads its handlers'
+// permissions; the same build the host loads.
+type Controllers = typeof import("../../../modules/contacts/dist/api/suppression.controller.js");
+const { SuppressionController }: Controllers = await import(
+  new URL("../../../../modules/contacts/dist/api/suppression.controller.js", import.meta.url).href
+);
 
 const db = withTestDb();
 useTenancyClient(asRole("app"));
@@ -115,6 +128,9 @@ test("POST …/suppression adds a person and a company, each by id and by value,
     matchType: "linkedin_url",
     linkedinUrl: "https://linkedin.com/in/rae-moss",
     domain: null,
+    email: null,
+    channel: "all",
+    relationship: null,
     source: "manual",
     reason: null,
     createdBy: a.user.id,
@@ -273,6 +289,49 @@ test("POST refuses invalid targets: 400 suppression_target_invalid for a value t
   assert.equal(await asRole("app").suppressionEntry.count({ where: { workspaceId } }), 0);
 });
 
+test("POST …/suppression adds a person by an email address (gamma-rf-040): 201 with an email entry, the address trimmed and in lower case, named by the person who holds it; an address no person holds names no one; a text that is neither a profile nor an address is 400 suppression_target_invalid", async () => {
+  const [a] = await createTwoWorkspaces();
+  const rae = await person(a, "rae-address", "Rae", "Moss");
+  await asService(a, () => recordPersonEmail({ personId: rae.id, address: "rae@harbor.example" }));
+
+  const held = await add(a, { kind: "person", value: " Rae@Harbor.example " });
+  const { id, createdAt, ...stored } = held.body;
+  assert.equal(held.status, 201);
+  assert.deepEqual(stored, {
+    layer: "blocklist",
+    matchType: "email",
+    linkedinUrl: null,
+    domain: null,
+    email: "rae@harbor.example",
+    channel: "all",
+    relationship: null,
+    source: "manual",
+    reason: null,
+    createdBy: a.user.id,
+    personId: rae.id,
+    companyId: null,
+    displayName: "Rae Moss",
+  });
+  const nobody = await add(a, { kind: "person", value: "nobody@harbor.example", channel: "email" });
+  const { email, channel, personId, displayName } = nobody.body;
+  assert.deepEqual(
+    [nobody.status, email, channel, personId, displayName],
+    [201, "nobody@harbor.example", "email", null, null],
+  );
+  const { body } = await call(a, "GET");
+  assert.deepEqual(
+    body.entries.map((entry: Record<string, unknown>) => [entry.id, entry.email, entry.personId]),
+    [
+      [nobody.body.id, "nobody@harbor.example", null],
+      [id, "rae@harbor.example", rae.id],
+    ],
+  );
+  const invalid = await add(a, { kind: "person", value: "rae at harbor.example" });
+  assert.deepEqual([invalid.status, invalid.body], [400, { code: "suppression_target_invalid" }]);
+  const workspaceId = a.workspace.id;
+  assert.equal(await asRole("app").suppressionEntry.count({ where: { workspaceId } }), 2);
+});
+
 test("a signed-in user who is no member of the workspace is 403 forbidden on the three routes; another workspace's entry is no entry of this one", async () => {
   const [a, b] = await createTwoWorkspaces();
   const theirs = await person(a, "lin-theirs", "Lin");
@@ -294,4 +353,126 @@ test("a signed-in user who is no member of the workspace is 403 forbidden on the
     replayed: null,
   });
   assert.deepEqual(await listed(a), [entry.id]);
+});
+
+test("POST takes the channel and a company's relationship: a person on LinkedIn only, a company by email only, a competitor by its domain and a customer by its id, answered and listed with both; an opt-out is on every channel; a relationship is lifted as a block is; each event carries its channel", async () => {
+  const [a] = await createTwoWorkspaces();
+  const ivy = await person(a, "ivy-linkedin-only", "Ivy");
+  const client = await company(a, "Client Co", { domain: "client.example" });
+  const onLinkedin = await add(a, { kind: "person", personId: ivy.id, channel: "linkedin" });
+  const byEmail = await add(a, { kind: "company", value: "quiet.example", channel: "email" });
+  const rival = await add(a, {
+    kind: "company",
+    value: "https://www.rival.example/",
+    relationship: "competitor",
+  });
+  const customer = await add(a, {
+    kind: "company",
+    companyId: client.id,
+    relationship: "customer",
+  });
+  const optOut = await add(a, { kind: "person", personId: ivy.id, layer: "opt_out" });
+  const fields = ({ status, body }: Answer) => [
+    status,
+    body.layer,
+    body.channel,
+    body.relationship,
+    body.matchType,
+    body.domain,
+  ];
+  assert.deepEqual([onLinkedin, byEmail, rival, customer, optOut].map(fields), [
+    [201, "blocklist", "linkedin", null, "linkedin_url", null],
+    [201, "blocklist", "email", null, "domain", "quiet.example"],
+    [201, "relationship", "all", "competitor", "domain", "rival.example"],
+    [201, "relationship", "all", "customer", "domain", "client.example"],
+    [201, "opt_out", "all", null, "linkedin_url", null],
+  ]);
+  const { body } = await call(a, "GET");
+  assert.deepEqual(
+    body.entries.map((entry: Record<string, unknown>) => [
+      entry.id,
+      entry.channel,
+      entry.relationship,
+    ]),
+    [
+      [optOut.body.id, "all", null],
+      [customer.body.id, "all", "customer"],
+      [rival.body.id, "all", "competitor"],
+      [byEmail.body.id, "email", null],
+      [onLinkedin.body.id, "linkedin", null],
+    ],
+  );
+  const lifted = await call(a, "DELETE", `/${rival.body.id}`);
+  assert.deepEqual([lifted.status, lifted.body], [204, undefined]);
+  assert.deepEqual(await listed(a), [
+    optOut.body.id,
+    customer.body.id,
+    byEmail.body.id,
+    onLinkedin.body.id,
+  ]);
+  const where = { workspaceId: a.workspace.id, eventName: "contacts.suppression_added" };
+  const published = await asRole("app").outboxEntry.findMany({ where });
+  assert.deepEqual(published.map((row) => (row.payload as { channel: string }).channel).sort(), [
+    "all",
+    "all",
+    "all",
+    "email",
+    "linkedin",
+  ]);
+});
+
+test("POST refuses an opt-out on one channel, a relationship on a person or a company page, and a channel, relationship or layer off the lists: 400, nothing written", async () => {
+  const [a] = await createTwoWorkspaces();
+  const kai = await person(a, "kai-channels", "Kai");
+  const page = await company(a, "Page Only", {
+    linkedinUrl: "https://linkedin.com/company/page-only",
+  });
+  const invalid = (fields: string[]) => ({
+    status: 400,
+    body: { code: "contacts_input_invalid", details: { fields } },
+    replayed: null,
+  });
+  const failed = (fields: string[]) => ({
+    status: 400,
+    body: { code: "validation_failed", details: { fields } },
+    replayed: null,
+  });
+  const optOut = { kind: "person", personId: kai.id, layer: "opt_out" } as const;
+  const cases = [
+    [{ ...optOut, channel: "linkedin" }, invalid(["channel"])],
+    [{ ...optOut, channel: "email" }, invalid(["channel"])],
+    [{ kind: "person", personId: kai.id, relationship: "customer" }, invalid(["relationship"])],
+    [
+      { kind: "company", companyId: page.id, relationship: "competitor" },
+      invalid(["relationship"]),
+    ],
+    [
+      { kind: "company", value: "linkedin.com/company/page-only", relationship: "customer" },
+      invalid(["relationship"]),
+    ],
+    [{ kind: "company", value: "rival.example", channel: "sms" }, failed(["channel"])],
+    [
+      { kind: "company", value: "rival.example", relationship: "partner" },
+      failed(["relationship"]),
+    ],
+    [{ kind: "company", value: "rival.example", layer: "relationship" }, failed(["layer"])],
+  ] as const;
+  for (const [body, answer] of cases) {
+    assert.deepEqual(await add(a, body), answer, JSON.stringify(body));
+  }
+  const workspaceId = a.workspace.id;
+  assert.equal(await asRole("app").suppressionEntry.count({ where: { workspaceId } }), 0);
+});
+
+test("each handler declares its permission: the list suppression.read, an add suppression.write, the removal suppression.remove; contacts declares suppression.read and suppression.write for every role and suppression.remove for Owner and Admin", () => {
+  const permission = (handler: "list" | "add" | "remove") =>
+    Reflect.getMetadata("whytide:permission", SuppressionController.prototype[handler]);
+  assert.deepEqual(
+    [permission("list"), permission("add"), permission("remove")],
+    ["suppression.read", "suppression.write", "suppression.remove"],
+  );
+  const roles = (action: string) => registeredPermissions().get(action)?.roles;
+  assert.deepEqual(roles("suppression.read"), ["Owner", "Admin", "Member"]);
+  assert.deepEqual(roles("suppression.write"), ["Owner", "Admin", "Member"]);
+  assert.deepEqual(roles("suppression.remove"), ["Owner", "Admin"]);
 });

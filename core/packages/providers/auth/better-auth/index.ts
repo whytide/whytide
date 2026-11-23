@@ -71,6 +71,8 @@ type Answer = { readonly status: number; readonly headers: Readonly<Record<strin
 
 export const betterAuthAdapter = defineAdapter(authPort, {
   name: "better-auth",
+  // What betterAuthSettings() requires under APP_ENV=production, for deploy:check (gamma-en-105).
+  requires: ["AUTH_SECRET", "AUTH_BASE_URL"],
   create: () => {
     const settings = betterAuthSettings();
     let hooks = NOBODY;

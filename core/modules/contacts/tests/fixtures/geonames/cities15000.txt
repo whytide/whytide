@@ -1,0 +1,3 @@
+1	Boston	Boston	Beantown	42.36	-71.06	P	PPLA	US		MA	025			653833		14	America/New_York	2026-01-01
+2	Montréal	Montreal		45.5	-73.6	P	PPLA2	CA		10				1600000		30	America/Toronto	2026-01-01
+3	Ghost	Ghost		0	0	P	PPL	ZZ		01				20000		0	UTC	2026-01-01

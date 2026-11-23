@@ -1,8 +1,8 @@
 // The planner (README.md beside this file): the angle, the facts and the call to action of one
-// LinkedIn message, a lead's first or a sequence step's, from the dossier. A host's loadAgentTasks() imports this file from the sources
-// while the worker runs the module from dist/, so it imports no registry of the module (index.ts,
-// events.ts, ids.ts, errors.ts) and the module never imports it: writeDraft takes the task from the
-// agent registry.
+// message, a LinkedIn text or an email, a lead's first or a sequence step's, from the dossier. A
+// host's loadAgentTasks() imports this file from the sources while the worker runs the module from
+// dist/, so it imports no registry of the module (index.ts, events.ts, ids.ts, errors.ts) and the
+// module never imports it: writeDraft takes the task from the agent registry.
 import { defineAgentTask } from "@whytide/ai";
 import { PLAN_MESSAGE, planInput, planOutput } from "../../schemas/writer.ts";
 import { settings } from "../../settings.ts";
@@ -13,7 +13,7 @@ export const planMessageTask = defineAgentTask(
     module: "messaging",
     kind: "generation",
     model: settings.AI_MODEL_MESSAGING_PLAN_MESSAGE,
-    promptVersion: 2,
+    promptVersion: 3,
     inputSchema: planInput,
     outputSchema: planOutput,
     // Not priced in credits in alpha: the cost event alone records it.

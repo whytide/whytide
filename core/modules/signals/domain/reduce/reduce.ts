@@ -1,9 +1,10 @@
 // The evidence reduction (README.md "Reduction"; security §2; RB-4.4.3): an evidence row captured
 // longer ago than its kind's lookback keeps its post's URL, its author, its reaction and its
-// captured_at, and loses its excerpt and comment; reduced_at is set. No summary is stored: the lead
-// page words the line from signals.evidence.reduced with the reaction and the date (decisions.md,
-// 2026-10-27). A batch of REDUCE_BATCH rows per tenant run, the daily workflow's and the command's
-// alike; the daily tick starts one reduction per workspace, one at a time.
+// captured_at, and loses its excerpt, its comment and its post's excerpt; reduced_at is set. Its
+// event loses its rating's rationale and keeps its relevance and class (gamma-p5-030). No summary
+// is stored: the lead page words the line from signals.evidence.reduced with the reaction and the
+// date (decisions.md, 2026-10-27). A batch of REDUCE_BATCH rows per tenant run, the daily workflow's
+// and the command's alike; the daily tick starts one reduction per workspace, one at a time.
 import { tenantClient } from "@whytide/db";
 import { startWorkflow, type WorkflowStart } from "@whytide/platform";
 import { listWorkspaceIds } from "@whytide/tenancy";
@@ -74,7 +75,11 @@ export async function reduceBatch(
   });
   const { count } = await tenantClient.evidence.updateMany({
     where: { id: { in: due.map((row) => row.id) }, reducedAt: null },
-    data: { excerpt: null, commentText: null, reducedAt: now },
+    data: { excerpt: null, commentText: null, postExcerpt: null, reducedAt: now },
+  });
+  await tenantClient.signalEvent.updateMany({
+    where: { id: { in: due.map((row) => row.eventId) }, relevanceRationale: { not: null } },
+    data: { relevanceRationale: null },
   });
   return { reduced: count, last: rows.length === REDUCE_BATCH ? (rows.at(-1)?.id ?? null) : null };
 }

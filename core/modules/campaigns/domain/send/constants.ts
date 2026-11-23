@@ -58,3 +58,14 @@ export const GATE_FRESH_MS = 60_000;
 export const MS_PER_SECOND = 1000;
 /** A request off the port's schema: a defect, the step failed and its enrollment ended. */
 export const INPUT_INVALID = "linkedin_input_invalid";
+/**
+ * A LinkedIn step of a person known by an email address alone (gamma-rf-050): no read, no request,
+ * the step failed and its enrollment ended, the code its exit detail.
+ */
+export const NO_LINKEDIN_PROFILE = "no_linkedin_profile";
+
+/**
+ * A connection request whose person is a connection already (connect-already-connected): the step's
+ * skip reason, linkedin's refusal reason and the answer of the read before it.
+ */
+export const ALREADY_CONNECTED = "already_connected";

@@ -94,9 +94,15 @@ async function deliver(): Promise<void> {
   }
 }
 
-/** A workspace with the approver's connected account, in UTC with the default hours. */
+/**
+ * A workspace whose Owner is the approver, so the seeded campaign sends from their connected account
+ * (gamma-p6-040), in UTC with the default hours.
+ */
 async function workspaceWithAccount(): Promise<{ workspaceId: string; accountId: string }> {
   const { workspace } = await tenancy.createOrganizationWithWorkspace();
+  const user = { id: APPROVER, email: `${APPROVER}@example.com` };
+  await app.user.upsert({ where: { id: APPROVER }, create: user, update: {} });
+  await tenancy.createMembership({ userId: APPROVER, workspaceId: workspace.id, role: "Owner" });
   const { id } = await linkedin.createConnectedAccount(workspace.id, { ownerUserId: APPROVER });
   return { workspaceId: workspace.id, accountId: id };
 }

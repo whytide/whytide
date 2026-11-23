@@ -10,7 +10,7 @@ export const workerErrors = defineErrors({
   worker_duplicate_registration: {},
   /** An activity's input off its schema; `details.fields` lists the paths. Not retried. */
   activity_input_invalid: {},
-  /** An attempt past its kind's limit, after a timeout the server retried. Not retried. */
+  /** An attempt past its activity's own bound, after a timeout the server retried. Not retried. */
   activity_attempts_exhausted: {},
   /** A thrown value that is not an AppError: the log line has its type and frames. */
   activity_failed: {},

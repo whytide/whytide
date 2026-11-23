@@ -14,21 +14,32 @@ export {
   type CompanyProfile,
   getCompany,
   linkPersonToCompany,
+  refreshCompany,
   upsertCompany,
   type WorkspaceCompany,
 } from "./domain/companies.ts";
-export { countryOf } from "./domain/countries.ts";
+export { PENDING_SNAPSHOTS_MAX, SOURCE_LABEL_MAX } from "./domain/constants.ts";
+export { cleanLocation, countryCode, countryOf, namesNoPlace } from "./domain/countries.ts";
+export {
+  type EmailHolder,
+  normalizeEmail,
+  type RecordedEmail,
+  recordPersonEmail,
+} from "./domain/emails.ts";
+export { csvLine } from "./domain/export/csv.ts";
 export { fields, type PiiClass } from "./domain/fields.ts";
 export type { HashKind } from "./domain/hash.ts";
 export { isHashed, purgeExpiredHashes, recordHash } from "./domain/hashes.ts";
-export type {
-  Confidence,
-  LeadSort,
-  LeadSource,
-  QualificationStatus,
-  SourceKind,
-  Tier,
-  WhyBullet,
+export { leadsHeldForEnrichment, releaseEnrichmentHold } from "./domain/hold.ts";
+export {
+  type Confidence,
+  firstSignalSource,
+  type LeadSort,
+  type LeadSource,
+  type QualificationStatus,
+  type SourceKind,
+  type Tier,
+  type WhyBullet,
 } from "./domain/lead.ts";
 export {
   applyQualification,
@@ -48,32 +59,45 @@ export {
   lockLeadStatus,
   recordLeadStatus,
 } from "./domain/outreach/status.ts";
+export { type CountryStamp, recordPersonCountry } from "./domain/person-country.ts";
+export { findPersonsByNameAtCompany } from "./domain/person-match.ts";
 export {
   type Colleague,
   colleaguesOf,
   erasePerson,
+  findPersonByEmail,
   findPersonByLinkedinUrl,
   getPerson,
+  type LockedPerson,
   listPersons,
   type Person,
   type PersonErasure,
   type PersonFromSource,
+  type PersonName,
   type PersonProfile,
+  personNames,
   upsertPersonFromSource,
 } from "./domain/persons.ts";
 export type { Provenance, ProvenanceMap, Provider, Source } from "./domain/provenance.ts";
 export { type LatestReview, latestReviews } from "./domain/review/reviews.ts";
+export type { SourceFilter } from "./domain/rules.ts";
 export {
+  type CheckOptions,
   lastTouchAt,
   recordTouch,
   suppressedAt,
   suppressionOf,
+  suppressionsOf,
 } from "./domain/suppression/checks.ts";
-export type {
-  SuppressionLayer,
-  SuppressionReason,
-  SuppressionSource,
+export {
+  SUPPRESSION_BATCH_SIZE,
+  type SuppressionChannel,
+  type SuppressionLayer,
+  type SuppressionReason,
+  type SuppressionRelationship,
+  type SuppressionSource,
 } from "./domain/suppression/constants.ts";
+export { type DomainStop, suppressedDomains } from "./domain/suppression/domains.ts";
 export { type AddedEntry, addOptOut, type SuppressionEntry } from "./domain/suppression/entries.ts";
 export type { Suppression } from "./domain/suppression/matching.ts";
 export { errors } from "./errors.ts";

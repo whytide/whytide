@@ -2,7 +2,9 @@
 // for each step key, one draft per step execution in the code and in SQL, the table's CHECKs, the
 // earlier drafts the writer reads, its last write while the draft is `drafting` only, the sweep, and
 // messaging.step_draft_ready on each end. On the LLM fake, against the worktree's database; the
-// workflow end to end is the worker's test, the failures without text the safety suite's.
+// workflow end to end is the worker's test, the failures without text the safety suite's. An email
+// key's draft and its mailbox, and the email columns' CHECKs (gamma-p3-070). A step the campaign's
+// mode approved read without its AI disclosure line (gamma-p4-090).
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import { setTimeout } from "node:timers/promises";
@@ -10,6 +12,8 @@ import type { Prisma } from "@whytide/db";
 import { asRole, withTestDb } from "@whytide/db/testing";
 import { newId } from "@whytide/platform";
 import { useTenancyClient } from "@whytide/tenancy/testing";
+import { DISCLOSURE_LOCALE } from "../domain/disclosure/constants.ts";
+import { disclosureLine, withDisclosure } from "../domain/disclosure/line.ts";
 import type { StepKey } from "../domain/drafts/constants.ts";
 import { requestStepDraft } from "../domain/drafts/step.ts";
 import { markFailed } from "../domain/drafts/store.ts";
@@ -45,7 +49,12 @@ const row = (workspaceId: string, id: string) =>
 async function seeded() {
   const { workspaceId, personId, userId } = await seed();
   // Any key, so that a test can send one of no step.
-  const request = (stepExecutionId: string, stepKey: string, earlierDraftIds: string[] = []) =>
+  const request = (
+    stepExecutionId: string,
+    stepKey: string,
+    earlierDraftIds: string[] = [],
+    mailboxId?: string,
+  ) =>
     run(workspaceId, () =>
       requestStepDraft({
         personId,
@@ -53,6 +62,7 @@ async function seeded() {
         stepKey: stepKey as StepKey,
         senderUserId: userId,
         earlierDraftIds,
+        ...(mailboxId !== undefined && { mailboxId }),
       }),
     );
   const write = (draftId: string, earlierDraftIds: string[] = []) =>
@@ -105,14 +115,22 @@ test("each step key: connect an empty note `ready` at once with its step_draft_r
   assert.equal(fake.recordedCalls.length, 0);
 });
 
-test("an unknown step key or more than three earlier ids is messaging_input_invalid, a person without a lead dossier_lead_not_found: nothing written, nothing published", async () => {
+test("an unknown step key, more than six earlier ids, an email key without a mailbox or another key with one is messaging_input_invalid, a person without a lead dossier_lead_not_found: nothing written, nothing published", async () => {
   const { workspaceId, request } = await seeded();
   const invalid = (fields: string[]) => ({ code: "messaging_input_invalid", details: { fields } });
   await assert.rejects(request("sx_1", "follow_up_3"), invalid(["stepKey"]));
   await assert.rejects(
-    request("sx_1", "follow_up_1", ["a", "b", "c", "d"]),
+    request("sx_1", "follow_up_1", ["a", "b", "c", "d", "e", "f", "g"]),
     invalid(["earlierDraftIds"]),
   );
+  for (const [stepKey, mailboxId] of [
+    ["email_1", undefined],
+    ["email_3", undefined],
+    ["message_1", "mbx_1"],
+    ["connect", "mbx_1"],
+  ] as const) {
+    await assert.rejects(request("sx_1", stepKey, [], mailboxId), invalid(["mailboxId"]), stepKey);
+  }
   const gone = { personId: "per_gone", stepExecutionId: "sx_1", senderUserId: "usr_any" };
   await assert.rejects(
     run(workspaceId, () => requestStepDraft({ ...gone, stepKey: "connect" })),
@@ -173,6 +191,57 @@ test("one draft per step execution: a second request answers the first and creat
   await insert({ ...outbound, status: "approved", approvedAt: new Date(), editRatio: 0.25 });
 });
 
+test("email_1, email_2 and email_3: a `drafting` email from the mailbox the request names, and draft_requested; the CHECKs keep a subject and a mailbox to an email draft, a mailbox to a step's, step_kind to a lead's and to the written kinds", async () => {
+  const { workspaceId, personId, request } = await seeded();
+  const emails = [];
+  for (const [stepKey, earlier] of [
+    ["email_1", []],
+    ["email_2", ["mdr_first"]],
+    ["email_3", ["mdr_first", "mdr_second"]],
+  ] as const) {
+    const { draftId } = await request(`sx_${stepKey}`, stepKey, [...earlier], `mbx_${stepKey}`);
+    const { channel, status, mailboxId, subject, text } = await row(workspaceId, draftId);
+    assert.deepEqual(
+      { channel, status, mailboxId, subject, text },
+      {
+        channel: "email",
+        status: "drafting",
+        mailboxId: `mbx_${stepKey}`,
+        subject: null,
+        text: null,
+      },
+    );
+    emails.push(draftId);
+  }
+  const requested = (await published(workspaceId, REQUESTED)) as { draftId: string }[];
+  assert.deepEqual(
+    requested.map(({ draftId }) => draftId),
+    emails.sort((a, b) => a.localeCompare(b)),
+  );
+
+  const refusedBy = (constraint: string) => (error: unknown) =>
+    `${String(error)} ${JSON.stringify(error)}`.includes(constraint);
+  const insert = (data: Partial<Prisma.MessageDraftUncheckedCreateInput>) =>
+    asRole("app").messageDraft.create({
+      data: { id: newId("mdr"), workspaceId, personId, channel: "email", ...data },
+    });
+  const step = { kind: "outbound_step", stepExecutionId: "sx_check", stepKey: "email_1" } as const;
+  const refused = [
+    [{ channel: "linkedin_message", subject: "Warm leads" }, "message_drafts_email_columns"],
+    [{ channel: "linkedin_note", editedSubject: "Warm leads" }, "message_drafts_email_columns"],
+    [{ ...step, channel: "linkedin_message", mailboxId: "mbx_1" }, "message_drafts_email_columns"],
+    [{ mailboxId: "mbx_1" }, "message_drafts_email_columns"],
+    [{ ...step, mailboxId: "mbx_1", stepKind: "email_first" }, "message_drafts_step_kind"],
+    [{ stepKind: "note" }, "message_drafts_step_kind"],
+  ] as const;
+  for (const [data, constraint] of refused) {
+    await assert.rejects(insert(data), refusedBy(constraint), JSON.stringify(data));
+  }
+  await insert({ ...step, mailboxId: "mbx_1", subject: "Warm leads", editedSubject: "Leads" });
+  await insert({ subject: "Warm leads", stepKind: "email_first" });
+  await insert({ channel: "linkedin_message", stepKind: "follow_up" });
+});
+
 test("a follow-up reads the person's approved step drafts it names; another person's, one not approved, a lead's draft or an unknown id fails it with earlier_draft_invalid, no text and no model call", async () => {
   const { workspaceId, personId, request, write } = await seeded();
   const base = { workspaceId, personId, status: "approved" as const, text: GROUNDED };
@@ -203,6 +272,24 @@ test("a follow-up reads the person's approved step drafts it names; another pers
   const block = (index: number) =>
     JSON.stringify(fake.recordedCalls[index]?.input).split(GROUNDED).length - 1;
   assert.deepEqual([block(0), block(1)], [1, 1]);
+});
+
+test("a follow-up after a step the campaign's mode approved reads the writer's text, never the frozen one with its AI disclosure line (gamma-p4-090)", async () => {
+  const { workspaceId, personId, request, write } = await seeded();
+  const base = { workspaceId, personId, status: "approved" as const, text: GROUNDED };
+  const earlier = await createStepDraft({ ...base, stepExecutionId: "sx_mode" });
+  const line = disclosureLine("linkedin_message", DISCLOSURE_LOCALE);
+  const data = { editedText: withDisclosure(GROUNDED, "linkedin_message", DISCLOSURE_LOCALE) };
+  await asRole("app").messageDraft.update({
+    where: { id: earlier },
+    data: { ...data, disclosureApplied: true },
+  });
+  const { draftId } = await request("sx_after_mode", "follow_up_1", [earlier]);
+  fake.script(PLAN, { text: GROUNDED });
+  assert.deepEqual(await write(draftId, [earlier]), { status: "ready" });
+  const inputs = JSON.stringify(fake.recordedCalls.map((call) => call.input));
+  assert.equal(inputs.split(GROUNDED).length - 1, 2, "the writer's text, in each call");
+  assert.equal(inputs.includes(line), false, "the line in no call");
 });
 
 test("the last write is the writer's only while the draft is `drafting`: a draft the sweep failed meanwhile stays failed, draft_stuck, with no text, and the late answer is dropped", async () => {

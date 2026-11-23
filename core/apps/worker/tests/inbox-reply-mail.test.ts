@@ -6,9 +6,12 @@
 // the thread's link, never the reply's text, the person's other names or the company; the marker is
 // set. The event delivered again, and the activity run again after the marker: no second mail. No
 // APP_PUBLIC_ORIGIN: the mail goes without a link, and a person without a first name is "a lead". A
-// disabled owner, or none: no mail, and the workflow ends without an error. The recorded history
-// replays. Contacts', linkedin's, tenancy's and inbox's code and helpers come from their builds, the
-// files the loader's modules import. It lives here: a module never imports a host.
+// disabled owner, or none: no mail, and the workflow ends without an error. A member removed from
+// the workspace: no mail, the log line with ids only, while an active member's mail goes
+// (gamma-p6-060). A mail the server refused for good, or one the port refused as input, is tried
+// once, one that found no server five times (gamma-p0-085). The recorded history replays. Contacts', linkedin's, tenancy's and inbox's
+// code and helpers come from their builds, the files the loader's modules import. It lives here: a
+// module never imports a host.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -45,11 +48,13 @@ const app = asRole("app");
 useHashSalt("test-salt-".repeat(4));
 linkedin.useLinkedinClient(app);
 tenancy.useTenancyClient(app);
-const log = platform.createLogger({ destination: platform.collectLogs().destination });
+const logs = platform.collectLogs();
+const log = platform.createLogger({ destination: logs.destination });
 const files = await getAdapter(filesPort, "fake");
 /** The app-mail fake's helpers, which the bound adapter keeps (providers/app-mail/README.md). */
 type AppMailFake = {
   sent(): readonly { to: string; subject: string; text: string }[];
+  failNext(code: "mail_rejected" | "mail_unreachable"): void;
 };
 const mails = (await getAdapter(appMailPort, "fake")) as unknown as AppMailFake;
 const principal = platform.servicePrincipal("inbox_test");
@@ -79,11 +84,12 @@ async function until<T>(probe: () => Promise<T>): Promise<NonNullable<T>> {
   }
 }
 
-/** A workspace, its owner, the owner's account and a person, named as `profile` says. */
+/** A workspace, its owner, a member, the owner's account and a person as `profile` names them. */
 async function workspaceWithOwner(profile: Record<string, string> = PERSON) {
   const { workspace } = await tenancy.createOrganizationWithWorkspace();
   const workspaceId: string = workspace.id;
   const owner: { id: string; email: string } = await tenancy.createUser();
+  await tenancy.createMembership({ userId: owner.id, workspaceId });
   const { id: senderAccountId } = await linkedin.createConnectedAccount(workspaceId, {
     ownerUserId: owner.id,
   });
@@ -171,6 +177,7 @@ test("one reply: one mail to the sender account's owner, with the person's first
     const link = `${ORIGIN}/w/${workspaceId}/inbox/${threadId}`;
     assert.deepEqual(mail.text.match(/https?:\/\/\S+/g), [link], "the thread's link, alone");
     assert.match(mail.text, /^Noor replied to your message on LinkedIn\./);
+    assert.match(mail.text, /To answer, reply from your Whytide inbox:/, "answered from the inbox");
     for (const kept of ["Thursday at ten", "555 0100", PERSON.lastName, PERSON.companyName]) {
       assert.ok(!`${mail.subject}\n${mail.text}`.includes(kept), `the mail holds no ${kept}`);
     }
@@ -244,6 +251,82 @@ test("a disabled owner, or an owner who is no user, gets no mail, and the workfl
       const row = await app.message.findUniqueOrThrow({ where: { id: messageId } });
       assert.equal(row.ownerNotifiedAt, null, "no marker: no mail went");
     }
+    assert.equal(mails.sent().length, before, "no mail");
+  }));
+
+test("a member removed from the workspace gets no mail for a reply on their thread, the workflow ends without an error and the log line carries ids only; an active member's mail goes as before", () =>
+  withHost(async (run) => {
+    const { workspaceId, owner, personId } = await workspaceWithOwner();
+    // A member once, with their own account: removed as tenancy's removeMember leaves the row.
+    const removed: { id: string; email: string } = await tenancy.createUser();
+    const membership = await tenancy.createMembership({
+      userId: removed.id,
+      workspaceId,
+      role: "Member",
+    });
+    await linkedin.createConnectedAccount(workspaceId, { ownerUserId: removed.id });
+    await app.membership.update({
+      where: { id: membership.id },
+      data: { removedAt: new Date(), removedBy: owner.id },
+    });
+    const theirs = await storedReply(workspaceId, personId, removed.id);
+    const before = mails.sent().length;
+
+    const input: MailInput = { workspaceId, messageId: theirs.messageId };
+    assert.deepEqual(await run("inbox_reply_mail", input), {
+      sent: false,
+      reason: "owner_unavailable",
+    });
+    const row = await app.message.findUniqueOrThrow({ where: { id: theirs.messageId } });
+    assert.equal(row.ownerNotifiedAt, null, "no marker: no mail went");
+    assert.equal(mails.sent().length, before, "no mail");
+    assert.deepEqual(mailsTo(removed.email), [], "none to the removed member, ever");
+    const lines = logs.lines().filter(({ message_id }) => message_id === theirs.messageId);
+    assert.equal(lines.length, 1, "one line");
+    const [line] = lines;
+    assert.deepEqual(
+      [line?.message_id, line?.thread_id, line?.user_id, line?.outcome],
+      [theirs.messageId, theirs.threadId, removed.id, "owner_unavailable"],
+    );
+    const said = JSON.stringify(line);
+    for (const kept of [removed.email, TEXT, PERSON.firstName, PERSON.lastName]) {
+      assert.ok(!said.includes(kept), `the line holds no ${kept}`);
+    }
+
+    const ours = await storedReply(workspaceId, personId, owner.id);
+    const sent = { workspaceId, messageId: ours.messageId };
+    assert.deepEqual(await run("inbox_reply_mail", sent), { sent: true });
+    assert.equal(mailsTo(owner.email).length, 1, "the active member's mail");
+  }));
+
+test("a mail the server refused for good, or one whose input the port refused, runs one attempt and one that found no server five: each run fails with the code, with no mail and no marker", () =>
+  withHost(async (run) => {
+    const { workspaceId, owner, personId } = await workspaceWithOwner();
+    /** The run of a new reply's mail, to its failure: its activity's attempts and code. */
+    const failed = async () => {
+      const { messageId } = await storedReply(workspaceId, personId, owner.id);
+      const workflowId = `inbox_reply_mail-${randomUUID()}`;
+      await assert.rejects(run("inbox_reply_mail", { workspaceId, messageId }, workflowId));
+      const row = await app.message.findUniqueOrThrow({ where: { id: messageId } });
+      assert.equal(row.ownerNotifiedAt, null, "no marker");
+      const { events } = await env.client.workflow.getHandle(workflowId).fetchHistory();
+      const started = events?.filter((event) => event.activityTaskStartedEventAttributes).at(-1);
+      const failure = events?.find((event) => event.activityTaskFailedEventAttributes);
+      return [
+        started?.activityTaskStartedEventAttributes?.attempt,
+        failure?.activityTaskFailedEventAttributes?.failure?.applicationFailureInfo?.type,
+      ];
+    };
+    const before = mails.sent().length;
+
+    mails.failNext("mail_rejected");
+    assert.deepEqual(await failed(), [1, "mail_rejected"]);
+    for (let n = 0; n < 5; n += 1) mails.failNext("mail_unreachable");
+    assert.deepEqual(await failed(), [5, "mail_unreachable"]);
+    // An address the port's plain-address rule refuses: no TLD.
+    const email = `owner-${randomUUID()}@localhost`;
+    await app.user.update({ where: { id: owner.id }, data: { email } });
+    assert.deepEqual(await failed(), [1, "mail_input_invalid"]);
     assert.equal(mails.sent().length, before, "no mail");
   }));
 

@@ -5,7 +5,7 @@
 # Origin: {{appOrigin}} too. `personId` is a person of your workspace with a lead: put it in
 # http-client.private.env.json with your workspaceId.
 
-### POST /v1/workspaces/{workspaceId}/contacts/leads/{personId}/approve: approves the lead for outreach, from pending_review, from approved again, or from suppressed once the never-contact check allows it and the lead was never in a campaign; 200 with the outreachStatus; 409 person_suppressed with details.reason (recently_contacted included), 409 lead_in_outreach from in_campaign, replied or finished; 404 lead_not_found
+### POST /v1/workspaces/{workspaceId}/contacts/leads/{personId}/approve: approves the lead for outreach, from pending_review, from approved again, or from suppressed once the never-contact check allows it and the lead was never in a campaign; 200 with the outreachStatus; 409 person_suppressed with details.reason (recently_contacted included, with details.days, CONTACTS_RECENT_TOUCH_DAYS, 90 unset), 409 lead_in_outreach from in_campaign, replied or finished; 404 lead_not_found
 POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/{{personId}}/approve
 Accept: application/json
 Cookie: {{sessionCookie}}

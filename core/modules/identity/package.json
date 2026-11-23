@@ -27,6 +27,7 @@
     "smoke": "pnpm run build && node --env-file-if-exists=../../../.env.local tests/smoke.ts"
   },
   "dependencies": {
+    "@nestjs/common": "12.1.3",
     "@whytide/db": "workspace:*",
     "@whytide/platform": "workspace:*",
     "@whytide/providers": "workspace:*",

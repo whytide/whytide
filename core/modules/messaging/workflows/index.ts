@@ -1,6 +1,7 @@
 // What the worker host loads of messaging (core/apps/worker/docs/workflows.md; README.md "The
 // workflow"): the draft's workflow, its writer and its failure mark; the sweep, global and hourly,
-// workspace by workspace, as linkedin_status_refresh loops. Inputs carry ids only.
+// workspace by workspace, as linkedin_status_refresh loops, a page of workspaces a run (pages.ts).
+// Inputs carry ids, and a continued sweep's counts, only.
 import type { TenantClient } from "@whytide/db";
 import {
   type ActivityContext,
@@ -18,6 +19,7 @@ import { markFailed } from "../domain/drafts/store.ts";
 import { sweepStuckDrafts } from "../domain/drafts/sweep.ts";
 import { type DraftContext, writeDraft } from "../domain/drafts/write.ts";
 import { SWEEP } from "./constants.ts";
+import { workspacePage } from "./pages.ts";
 
 const id = z.string().min(1).max(64);
 /**
@@ -32,9 +34,17 @@ export const draftInput = workflowInput.extend({
   earlierDraftIds: z.array(id).max(EARLIER_DRAFTS_MAX).optional(),
 });
 
+/** A page of the sweep's workspaces: the ones after its cursor (gamma-p0-085). */
+const pageInput = globalWorkflowInput.extend({ afterId: id.optional() });
+const count = z.int().min(0);
+/** The sweep's: continued as new, its cursor and its counts so far (gamma-p0-085). */
+const sweepInput = pageInput.extend({
+  counts: z.strictObject({ stuck: count, unswept: count }).optional(),
+});
+
 export const workflows = defineWorkflows({
   messaging_draft_message: { input: draftInput, taskQueue: DEFAULT_TASK_QUEUE },
-  messaging_sweep: { input: globalWorkflowInput, taskQueue: DEFAULT_TASK_QUEUE, scope: "global" },
+  messaging_sweep: { input: sweepInput, taskQueue: DEFAULT_TASK_QUEUE, scope: "global" },
 });
 
 export const activities = {
@@ -51,12 +61,15 @@ export const activities = {
     run: (draft, context: ActivityContext<TenantClient>) =>
       context.tenant(() => markFailed(draft.draftId)),
   }),
-  /** Every workspace's id, from tenancy, and nothing else: the sweep's fan-out. */
+  /**
+   * A page of the workspaces' ids, from tenancy, and nothing else: the sweep's fan-out, after the
+   * run's cursor, with the next page's cursor, or null after the last (pages.ts).
+   */
   messaging_list_workspaces: defineActivity({
     kind: "db",
     scope: "global",
-    input: globalWorkflowInput,
-    run: async () => ({ workspaceIds: await listWorkspaceIds() }),
+    input: pageInput,
+    run: async ({ afterId }) => workspacePage(await listWorkspaceIds(), afterId),
   }),
   /** The workspace's drafts stuck in `drafting`, failed, draft_stuck: how many. */
   messaging_sweep_workspace: defineActivity({

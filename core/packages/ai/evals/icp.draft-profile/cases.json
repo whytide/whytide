@@ -20,13 +20,17 @@
         "seniorities": ["owner_founder"],
         "industries": ["Bakeries", "Food and beverage"],
         "sizeRanges": ["1-10", "11-50"],
-        "countries": [],
+        "countries": ["GB"],
         "mustHaves": "Runs one to three bakery shops",
         "disqualifiers": "Industrial and wholesale bakeries"
       }
     ],
     "expected": {
-      "fields": { "name": "baker", "seniorities": ["owner_founder"], "countries": [] }
+      "fields": {
+        "name": "baker",
+        "seniorities": ["owner_founder"],
+        "disqualifiers": "wholesale"
+      }
     }
   },
   {
@@ -52,7 +56,7 @@
         "sizeRanges": ["51-200"],
         "countries": ["FR", "BE"],
         "mustHaves": "Delivers to shops and restaurants with its own vans",
-        "disqualifiers": ""
+        "disqualifiers": "Wholesalers without their own vans"
       },
       {
         "name": "Food wholesalers in France and Belgium",
@@ -62,7 +66,7 @@
         "sizeRanges": ["51-200"],
         "countries": ["FR", "BE"],
         "mustHaves": "Delivers to shops and restaurants with its own vans",
-        "disqualifiers": ""
+        "disqualifiers": "Wholesalers without their own vans"
       }
     ],
     "expected": {
@@ -94,9 +98,9 @@
         "seniorities": ["administrator"],
         "industries": ["Florists"],
         "sizeRanges": ["1-10"],
-        "countries": [],
-        "mustHaves": "",
-        "disqualifiers": ""
+        "countries": ["GB", "IE"],
+        "mustHaves": "Sells bouquets in one shop",
+        "disqualifiers": "Florist chains with their own fleet"
       },
       {
         "name": "Small florists",
@@ -104,13 +108,16 @@
         "seniorities": ["owner_founder"],
         "industries": ["Florists"],
         "sizeRanges": ["1-10"],
-        "countries": [],
+        "countries": ["GB", "IE"],
         "mustHaves": "Sends bouquets to customers",
-        "disqualifiers": ""
+        "disqualifiers": "Florist chains with their own fleet"
       }
     ],
     "expected": {
-      "fields": { "name": "florist", "countries": [] },
+      "fields": {
+        "name": "florist",
+        "disqualifiers": "chain"
+      },
       "absent": "owned",
       "failSafe": true
     }

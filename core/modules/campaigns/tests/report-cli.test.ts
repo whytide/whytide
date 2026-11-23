@@ -4,7 +4,9 @@
 // approver's account, its reference sealed, and a clean connection request: the lines in order and
 // exit 0; a planted violation of each zero, each listed, exit 1; --workspace by slug or id; --since;
 // workspace_not_found; the usage; and the built file run by node alone. No line holds a name, a
-// text, a profile or a provider reference.
+// text, a profile or a provider reference. gamma-p4-070: each violation's mode, the count per mode,
+// and exit 1 on a violation in review_first_touches. gamma-p7-050: gamma's lines after beta's, which
+// print as before.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
@@ -26,7 +28,6 @@ import { useClock } from "../domain/clock.ts";
 import { utcDay } from "../domain/report/days.ts";
 import { weekdaysBefore } from "../domain/report/decisions.ts";
 import { ids } from "../ids.ts";
-import { APPROVER } from "./fixtures.ts";
 import {
   DAY_MS,
   HOUR_MS,
@@ -69,7 +70,8 @@ async function seeded(): Promise<[Seeded, Seeded]> {
   const made: Seeded[] = [];
   for (const [n, tenant] of tenants.entries()) {
     const fx = reportFixture(tenant.workspace.id);
-    const owner = { ownerUserId: APPROVER, providerAccountRef: `${REFERENCE}-${n}` };
+    // The workspace's Owner's: the seeded campaign sends from its owner's account (gamma-p6-040).
+    const owner = { ownerUserId: tenant.user.id, providerAccountRef: `${REFERENCE}-${n}` };
     const { id: accountId } = await createConnectedAccount(tenant.workspace.id, owner);
     const step = await stepOf(fx);
     made.push({ tenant, fx, accountId, clean: { step, ...(await fx.approvedSend(step)) } });
@@ -113,6 +115,12 @@ async function healthEvent(
   });
   return id;
 }
+/** The approval zero's lines when it holds: none, in either mode. */
+const ZERO_MODES = [
+  "sends_without_approval: 0",
+  "sends_without_approval_mode: review_everything 0",
+  "sends_without_approval_mode: review_first_touches 0",
+];
 /** No line holds a name, the text, a profile, the account's label or its reference. */
 function holdsNothingPersonal(lines: readonly string[]) {
   const output = lines.join("\n");
@@ -154,8 +162,10 @@ test("clean data: every figure's line in order, the three zeros and exit 0, and 
   });
 
   const { code, lines } = await report();
-  assert.deepEqual(lines, [
+  const beta = [
     "sends_without_approval: 0",
+    "sends_without_approval_mode: review_everything 0",
+    "sends_without_approval_mode: review_first_touches 0",
     "send_step_missing: 0",
     "actions_against_suppressed: 0",
     "duplicate_sends: 0",
@@ -171,7 +181,31 @@ test("clean data: every figure's line in order, the three zeros and exit 0, and 
     `health_event: ${wb} ${b.accountId} ${checkpoint} checkpoint checkpoint ${checkpointAt.toISOString()}`,
     `decision_days: ${wa} 1 of 5`,
     `decision_days: ${wb} 0 of 5`,
-  ]);
+  ];
+  assert.deepEqual(lines.slice(0, beta.length), beta, "beta's lines as before");
+  // gamma's lines after beta's, in their order (tests/report-gamma.test.ts checks each figure).
+  const gamma = lines.slice(beta.length);
+  assert.deepEqual(
+    [...new Set(gamma.map((line) => line.split(":")[0]))],
+    [
+      "restrictions_per_100",
+      "review_approval",
+      "unedited_approvals",
+      "active_day",
+      "active_streak",
+      "active_workspaces",
+    ],
+  );
+  for (const line of gamma.filter((line) => line.startsWith("restrictions_per_100: "))) {
+    assert.match(line, / restricted=0 active=[12] target=2 permanent: check by hand$/);
+  }
+  assert.ok(gamma.includes("review_approval: none approved=0 rejected=0 target=0.6"));
+  assert.ok(gamma.includes("unedited_approvals: 1.000 approved=1 unedited=1 target=0.5"));
+  assert.ok(gamma.includes(`active_streak: ${wa} 0 target=20`));
+  assert.ok(gamma.includes(`active_streak: ${wb} 0 target=20`));
+  for (const line of gamma.filter((line) => line.startsWith("active_day: "))) {
+    assert.match(line, /^active_day: \S+ \d{4}-\d{2}-\d{2} campaigns=[01] senders=[01]$/);
+  }
   assert.equal(code, 0);
   holdsNothingPersonal(lines);
 });
@@ -202,7 +236,9 @@ test("a planted violation of each zero: each listed and exit 1; --workspace by s
 
   const violations = [
     "sends_without_approval: 1",
-    `violation: sends_without_approval ${wb} ${bare} no_approval ${OLD.toISOString()}`,
+    `violation: sends_without_approval ${wb} ${bare} no_approval ${OLD.toISOString()} review_everything`,
+    "sends_without_approval_mode: review_everything 1",
+    "sends_without_approval_mode: review_first_touches 0",
     "send_step_missing: 1",
     `missing_step: ${wa} ${noStep} none ${a.accountId} invite ${OLD.toISOString()}`,
     "actions_against_suppressed: 1",
@@ -222,7 +258,7 @@ test("a planted violation of each zero: each listed and exit 1; --workspace by s
   const ours = await report("--workspace", a.tenant.workspace.slug);
   assert.equal(ours.code, 0, "A holds the three zeros");
   assert.ok(ours.lines.every((line) => !line.includes(wb)));
-  assert.deepEqual(ours.lines.slice(0, 2), ["sends_without_approval: 0", "send_step_missing: 1"]);
+  assert.deepEqual(ours.lines.slice(0, 4), [...ZERO_MODES, "send_step_missing: 1"]);
   const theirs = await report("--workspace", wb);
   assert.equal(theirs.code, 1);
   assert.ok(theirs.lines.every((line) => !line.includes(wa)));
@@ -236,12 +272,38 @@ test("a planted violation of each zero: each listed and exit 1; --workspace by s
   const since = utcDay(new Date(OLD.getTime() + 2 * DAY_MS));
   const after = await report("--since", since);
   assert.equal(after.code, 0);
-  assert.deepEqual(after.lines.slice(0, 4), [
-    "sends_without_approval: 0",
+  assert.deepEqual(after.lines.slice(0, 6), [
+    ...ZERO_MODES,
     "send_step_missing: 0",
     "actions_against_suppressed: 0",
     "duplicate_sends: 0",
   ]);
+});
+
+test("a send without a person's approval in review_first_touches is a violation in that mode and exits 1; a follow-up the mode approved is none", async () => {
+  const [a] = await seeded();
+  const wa = a.tenant.workspace.id;
+  const approved = await a.fx.enrolledLead(`${SLUG}-${++leads}`);
+  const bare = await a.fx.enrolledLead(`${SLUG}-${++leads}`);
+  // Its lock ended: each follow-up's item opens for the mode.
+  await a.fx.setMode("review_first_touches", new Date(0));
+  await a.fx.modeApprovedSend(approved.steps.follow_up_1, { at: OLD });
+  // Opened for the mode, its draft still being written, sent as the gate would never let it.
+  const step = bare.steps.follow_up_1;
+  await a.fx.dueAt(step, new Date());
+  assert.equal(await a.fx.queue(step), "opened");
+  const stored = { mode: "review_first_touches", firstTouch: false, origin: "approval_mode" };
+  await a.fx.sendStep(step, { at: OLD, jitChecks: { approval: stored } });
+
+  const { code, lines } = await report();
+  assert.equal(code, 1);
+  assert.deepEqual(lines.slice(0, 4), [
+    "sends_without_approval: 1",
+    `violation: sends_without_approval ${wa} ${step} no_approval ${OLD.toISOString()} review_first_touches`,
+    "sends_without_approval_mode: review_everything 0",
+    "sends_without_approval_mode: review_first_touches 1",
+  ]);
+  holdsNothingPersonal(lines);
 });
 
 test("refused: an unknown workspace id or slug prints workspace_not_found and exits 1; an unknown argument, a positional, a value missing or a malformed day prints the usage and exits 2", async () => {

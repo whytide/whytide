@@ -1,0 +1,18 @@
+# A member's new assessment of a lead, as the lead page's Re-score sends it
+# (core/modules/qualification/README.md "A new assessment", "Routes"): the AI assesses the decided
+# lead again with its person's fields of now, a member's edits included, for one assessment's credits;
+# none when nothing it reads changed, which the model's answer cache answers. Owner or Admin
+# (qualification.rescore). It answers 202 { status: "pending", requested }: requested false for a lead
+# that waits already, which stays as it is. 404 lead_not_found for a person without a lead, another
+# workspace's included; 403 for a Member. @Idempotent(): the Idempotency-Key is an example UUID;
+# another one makes a new request, the same one answers the first answer again for a day. A write
+# sends the cookie, so it sends Origin: {{appOrigin}} too (the api's origin check). `personId` is a
+# person of your workspace with a decided lead: put it in http-client.private.env.json with your
+# workspaceId. The lead's read, GET …/contacts/leads/{personId}, says when it left pending.
+
+### POST /v1/workspaces/{workspaceId}/qualification/leads/{personId}/reassess: the lead page's Re-score
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/qualification/leads/{{personId}}/reassess
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000257

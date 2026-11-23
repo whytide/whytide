@@ -42,6 +42,6 @@ export class ControlsController {
     errors: [errors.stopped_by_operator],
   })
   write(@Body() body: ControlsBody): Promise<ControlsResponse> {
-    return setWorkspaceStop(body.stopped, currentTenant().principal.userId);
+    return setWorkspaceStop(body.stopped, currentTenant().principal);
   }
 }

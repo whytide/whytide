@@ -6,6 +6,20 @@
 // SQL in the migration, which the schema cannot say: the CHECK messages_sent_by (sent_by null
 // exactly when the direction is in). beta-p5-040, migration inbox_reply_labels: a reply's label, one
 // row per inbound message, linked by the pair (workspace_id, message_id) and deleted with it.
+// gamma-p4-060, migration inbox_replies: a member's reply from the inbox, its send's status, the code
+// it was refused or failed with and the member; hand-written SQL, the CHECK messages_send_status
+// (the three null on every other row; a reply's row the user's, outbound, with its member; a code
+// only on a reply refused or failed). inbox-reply-draft, migration inbox_reply_drafts: a thread's
+// current reply draft, the AI's, one per thread, linked by the pair (workspace_id, thread_id) and
+// deleted with it; hand-written SQL, the CHECK reply_drafts_status (a text exactly when ready, a code
+// exactly when failed). gamma-p4-040, migration inbox_reply_classifications: a reply's classification,
+// one row per inbound message, linked by the pair (workspace_id, message_id) and deleted with it;
+// hand-written SQL, the CHECK reply_classifications_values (the label one of the 7 gamma writes or of
+// the 15 of RB-13.2.1, a confidence from 0 to 1, the origin's three values, and a model's row naming
+// its call). gamma-p4-055, migration inbox_reply_label_classes: a reply label's class, the thread
+// owner's choice among the 7, null on beta's rows; hand-written SQL, the CHECK
+// reply_labels_class_label (one of the 7, and the label following it: positive exactly for
+// interested).
 
 /// tenant
 model Thread {
@@ -25,6 +39,7 @@ model Thread {
   createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz()
   messages          Message[]
+  replyDraft        ReplyDraft?
 
   @@unique([workspaceId, id])
   @@unique([workspaceId, channel, providerThreadRef])
@@ -66,8 +81,15 @@ model Message {
   optOutMatched      Boolean          @default(false) @map("opt_out_matched")
   /// When the reply's email to the owner went out (beta-p5-030).
   ownerNotifiedAt    DateTime?        @map("owner_notified_at") @db.Timestamptz()
+  /// A reply from the inbox's send (gamma-p4-060); null on every other row (messages_send_status).
+  sendStatus         MessageSendStatus? @map("send_status")
+  /// The registered code a reply from the inbox was refused or failed with, or null.
+  errorCode          String?          @map("error_code")
+  /// identity's `usr_` id of the member who sent a reply from the inbox; null on every other row.
+  createdBy          String?          @map("created_by")
   thread             Thread           @relation(fields: [workspaceId, threadId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
   replyLabel         ReplyLabel?
+  classification     ReplyClassification?
 
   @@unique([workspaceId, id])
   @@unique([workspaceId, providerMessageRef])
@@ -90,13 +112,27 @@ enum MessageSentBy {
   @@map("message_sent_by")
 }
 
+/// A reply from the inbox: sending until its send settles, then sent, refused before the call, or failed.
+enum MessageSendStatus {
+  sending
+  sent
+  refused
+  failed
+
+  @@map("message_send_status")
+}
+
 /// tenant
 model ReplyLabel {
   id          String         @id
   workspaceId String         @map("workspace_id")
   /// The inbound message labeled: its row goes with it (ON DELETE CASCADE).
   messageId   String         @map("message_id")
+  /// Beta's word for the class: positive for interested, not_positive for the six others.
   label       ReplyLabelKind
+  /// The thread owner's label among campaigns' 7 (gamma-p4-055); null on beta's rows
+  /// (reply_labels_class_label).
+  classLabel  String?        @map("class_label")
   /// identity's `usr_` id of the member who chose the label.
   labeledBy   String         @map("labeled_by")
   labeledAt   DateTime       @map("labeled_at") @db.Timestamptz()
@@ -111,4 +147,84 @@ enum ReplyLabelKind {
   not_positive
 
   @@map("reply_label")
+}
+
+/// tenant
+model ReplyDraft {
+  id               String           @id
+  workspaceId      String           @map("workspace_id")
+  /// The thread drafted for: its row goes with it (ON DELETE CASCADE). One draft per thread.
+  threadId         String           @map("thread_id")
+  /// identity's `usr_` id of the member who asked, the thread's owner: the writer writes as them.
+  requestedBy      String           @map("requested_by")
+  status           ReplyDraftStatus @default(drafting)
+  /// What the member wants the reply to say, trimmed; null for none. Never in an event, an input,
+  /// a result or a log line.
+  /// pii
+  brief            String?
+  /// The writer's text, set exactly when ready (reply_drafts_status).
+  /// pii
+  text             String?
+  /// The ready draft's text this one replaced, for the writer's <replaced>.
+  /// pii
+  replacedText     String?          @map("replaced_text")
+  /// Why it failed, a code, set exactly when failed (reply_drafts_status).
+  errorCode        String?          @map("error_code")
+  /// The writer's call: its model, prompt version and decision record.
+  modelId          String?          @map("model_id")
+  promptVersion    Int?             @map("prompt_version")
+  decisionRecordId String?          @map("decision_record_id")
+  requestedAt      DateTime         @map("requested_at") @db.Timestamptz()
+  updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz()
+  thread           Thread           @relation(fields: [workspaceId, threadId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, threadId])
+  @@index([workspaceId, status, requestedAt])
+  @@map("reply_drafts")
+}
+
+/// A reply draft: drafting until the writer, or the sweep, ends it ready or failed.
+enum ReplyDraftStatus {
+  drafting
+  ready
+  failed
+
+  @@map("reply_draft_status")
+}
+
+/// tenant
+model ReplyClassification {
+  id               String   @id
+  workspaceId      String   @map("workspace_id")
+  /// The inbound message classified: its row goes with it (ON DELETE CASCADE). One per message.
+  messageId        String   @map("message_id")
+  /// The message's thread, and contacts' `per_` id of its person: plain ids.
+  threadId         String   @map("thread_id")
+  personId         String   @map("person_id")
+  /// One of the 7 labels gamma writes, or later one of the 15 (reply_classifications_values).
+  label            String
+  /// From 0 to 1: the model's; 1 for a phrase, 0 for a fallback.
+  confidence       Float
+  /// Below SUGGEST_BELOW, or a fallback: shown as suggested, and campaigns acts only on opt_out.
+  isSuggested      Boolean  @map("is_suggested")
+  /// opt_out, by the store's phrases or the model: the person is suppressed.
+  optOutDetected   Boolean  @map("opt_out_detected")
+  /// `{ returnDate }`: an out-of-office reply's day of return, `YYYY-MM-DD`, or null.
+  entities         Json
+  /// `phrase`, `model` or `fallback` (reply_classifications_values).
+  origin           String
+  /// The model call's decision record, model and prompt version; null for a phrase, and for a
+  /// fallback past the activity's attempts.
+  decisionRecordId String?  @map("decision_record_id")
+  modelId          String?  @map("model_id")
+  promptVersion    Int?     @map("prompt_version")
+  /// campaigns' answer, `{ actions, enrollmentIds }`: codes and ids only.
+  actionsTaken     Json     @map("actions_taken")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  message          Message  @relation(fields: [workspaceId, messageId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([workspaceId, messageId])
+  @@index([workspaceId, personId, createdAt])
+  @@map("reply_classifications")
 }

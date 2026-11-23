@@ -1,5 +1,6 @@
 # contacts' never-contact routes (core/modules/contacts/README.md "Routes"): a member's session,
-# suppression.read for the list, suppression.write to add or remove an entry. POST is @Idempotent():
+# suppression.read for the list, suppression.write (every role) to add an entry, suppression.remove
+# (Owner and Admin, gamma-p2-040) to remove one. POST is @Idempotent():
 # the Idempotency-Key is an example UUID; another one adds again, and an active entry with the same
 # key is answered unchanged. A write sends the cookie, so it sends Origin: {{appOrigin}} too.
 # `suppressionId` is an entry of your workspace, from the list: put it in
@@ -10,7 +11,7 @@ GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/suppression?limit=50
 Accept: application/json
 Cookie: {{sessionCookie}}
 
-### POST /v1/workspaces/{workspaceId}/contacts/suppression: adds an entry, here a company by its domain (or a person by personId or a profile URL, a company by companyId or its page; layer opt_out for a person's opt-out by hand); 201 with the entry; 400 suppression_target_invalid for a value that normalizes to nothing, a single-label domain or a company with neither domain nor page; 404 person_not_found, company_not_found
+### POST /v1/workspaces/{workspaceId}/contacts/suppression: adds an entry, here a company excluded as a competitor by its domain, on every channel (or a person by personId, a profile URL or an email address, gamma-rf-040, a company by companyId or its page; layer opt_out for a person's opt-out by hand, always on every channel; channel linkedin or email for one channel; relationship customer or competitor for a company by its domain); 201 with the entry, its channel and relationship; 400 suppression_target_invalid for a value that normalizes to nothing, a single-label domain or a company with neither domain nor page; 400 contacts_input_invalid for an opt-out on one channel or a relationship off a company's domain; 404 person_not_found, company_not_found
 POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/suppression
 Accept: application/json
 Content-Type: application/json
@@ -18,9 +19,9 @@ Cookie: {{sessionCookie}}
 Origin: {{appOrigin}}
 Idempotency-Key: 00000000-0000-4000-8000-000000002010
 
-{ "kind": "company", "value": "competitor.example" }
+{ "kind": "company", "value": "competitor.example", "channel": "all", "relationship": "competitor" }
 
-### DELETE /v1/workspaces/{workspaceId}/contacts/suppression/{id}: removes a never-contact entry, kept on record with its removal; 204; 409 suppression_not_removable for an opt-out; 404 suppression_not_found
+### DELETE /v1/workspaces/{workspaceId}/contacts/suppression/{id}: lifts an exclusion, a never-contact or relationship entry, kept on record with its removal (suppression.remove, Owner and Admin); 204; 409 suppression_not_removable for an opt-out; 404 suppression_not_found
 DELETE {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/suppression/{{suppressionId}}
 Accept: application/json
 Cookie: {{sessionCookie}}

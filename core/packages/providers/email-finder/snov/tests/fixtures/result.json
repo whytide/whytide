@@ -1,0 +1,26 @@
+{
+  "status": "completed",
+  "data": [
+    {
+      "people": "Ada Example",
+      "result": [
+        {
+          "email": "ada@copper-harbor.example",
+          "smtp_status": "valid",
+          "is_valid_format": true,
+          "is_disposable": false,
+          "is_webmail": false,
+          "is_gibberish": false
+        },
+        {
+          "email": "a.example@copper-harbor.example",
+          "smtp_status": "unknown",
+          "unknown_status_reason": "greylist"
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "task_hash": "synthetic-task-ada"
+  }
+}

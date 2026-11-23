@@ -2,13 +2,17 @@
 // only: useQualificationClient(asRole("app")) points the batch's own reads, the tick's workspaces and
 // callAgent's runs, at the test's schema; undefined puts the process's client back. createScoreSnapshot
 // writes a scored snapshot on asRole("app") of @whytide/db/testing, after withTestDb(), or on the
-// client given.
+// client given. useSignalReader puts a fake signal reader in place (README "Intent and priority");
+// setLeadPriority writes a person's intent row with a priority and its tier, in the caller's tenant
+// run, for other modules' tests.
 import type { PrismaClient } from "@whytide/db";
 import { asRole } from "@whytide/db/testing";
 import { newId } from "@whytide/platform";
 import { ids } from "../ids.ts";
 
 export { useClient as useQualificationClient } from "../domain/client.ts";
+export { setLeadPriority } from "../domain/intent/store.ts";
+export { useSignalReader } from "../domain/signal-reader.ts";
 
 /**
  * A scored snapshot of the person, as an assessment leaves its own, with no verdicts: `criteriaHash`

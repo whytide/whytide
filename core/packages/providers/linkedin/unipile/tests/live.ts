@@ -9,13 +9,23 @@
 // never under APP_ENV=production. They never pick an account or a recipient themselves, and a run
 // sends at most one invitation, withdrawn at once even when its case fails midway, and one message.
 // The event cases get Unipile's events built here and signed with UNIPILE_WEBHOOK_SECRET, for a
-// made-up account: nothing is read or sent for them (README.md "Webhooks").
+// made-up account: nothing is read or sent for them (README.md "Webhooks"). The post cases run only
+// when both UNIPILE_TEST_POSTS_PHRASE and UNIPILE_TEST_AUTHOR_URL are set: the sender's search for
+// the phrase, the author's posts and its own, over the last POSTS_LOOKBACK_DAYS days, each counted
+// once with reads of its own; a source of fewer than five posts, or of more than three full pages,
+// skips its case.
 import assert from "node:assert/strict";
 import { createHmac, randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
 import { bindPort, type PortInstance } from "../../../_pattern/index.ts";
-import type { LinkedinWorld, LinkedinWorldEvent } from "../../contract.ts";
-import { type LinkedinWebhook, type LinkedinWebhookEvent, linkedinPort } from "../../port.ts";
+import { AUTHOR_PATHS, POSTS_PAGE_MAX } from "../../constants.ts";
+import type { LinkedinWorld, LinkedinWorldEvent, LinkedinWorldPosts } from "../../contract.ts";
+import {
+  type LinkedinWebhook,
+  type LinkedinWebhookEvent,
+  linkedinPort,
+  type PostsPage,
+} from "../../port.ts";
 import { TIMEOUT_MS } from "../constants.ts";
 import { SECRET_HEADER, unipileAdapter } from "../index.ts";
 
@@ -33,6 +43,11 @@ const MESSAGES = {
   "account.disconnected": "DELETED",
   "account.credentials_required": "CREDENTIALS",
 } as const;
+/** The days the post cases read back, the pages a source is counted over, and its fewest posts. */
+const POSTS_LOOKBACK_DAYS = 7;
+const DAY_MS = 86_400_000;
+const COUNT_PAGES = 3;
+const SOURCE_MIN_POSTS = 5;
 /** The account the world's events name, and its own member id: made up, never read. */
 const EVENT_ACCOUNT = "contract-account";
 const EVENT_SELF = "contract-member-self";
@@ -66,6 +81,9 @@ export function unipileWorld(env: Env): LinkedinWorld {
     (adapter ??= bindPort(linkedinPort, unipileAdapter.create(), { adapter: "unipile" }));
   const sender = async () =>
     (account ??= env.UNIPILE_TEST_ACCOUNT_ID || (await firstConnected(env)));
+  const phrase = env.UNIPILE_TEST_POSTS_PHRASE;
+  const authorUrl = env.UNIPILE_TEST_AUTHOR_URL;
+  let sources: Promise<LinkedinWorldPosts> | undefined;
 
   const world: LinkedinWorld = {
     // The hosted-auth notify of an account connected through the link, as Unipile sends it: no
@@ -162,6 +180,12 @@ export function unipileWorld(env: Env): LinkedinWorld {
         }
       }
     },
+    ...(phrase && authorUrl
+      ? {
+          posts: (providerAccountRef: string) =>
+            (sources ??= livePosts(linkedin(), providerAccountRef, phrase, authorUrl)),
+        }
+      : {}),
   };
   if (sends === undefined) return world;
   return {
@@ -182,6 +206,39 @@ export function unipileWorld(env: Env): LinkedinWorld {
       if (!relation) current?.after(() => withdrawLeft(linkedin(), member));
       return sends.recipientRef;
     },
+  };
+}
+
+/** The sender's sources of posts since POSTS_LOOKBACK_DAYS ago, each counted with reads of its own. */
+async function livePosts(
+  linkedin: Linkedin,
+  providerAccountRef: string,
+  phrase: string,
+  authorUrl: string,
+): Promise<LinkedinWorldPosts> {
+  const postedSince = new Date(Date.now() - POSTS_LOOKBACK_DAYS * DAY_MS);
+  const query = { providerAccountRef, postedSince, limit: POSTS_PAGE_MAX };
+  const count = async (read: (cursor?: string) => Promise<PostsPage>) => {
+    let [total, cursor] = [0, undefined as string | null | undefined];
+    for (let pages = 0; cursor !== null; pages++) {
+      if (pages === COUNT_PAGES) return undefined;
+      const page = await read(cursor ?? undefined);
+      [total, cursor] = [total + page.posts.length, page.nextCursor];
+    }
+    return total >= SOURCE_MIN_POSTS ? total : undefined;
+  };
+  const at = (cursor?: string) => (cursor ? { cursor } : {});
+  const search = await count((cursor) => linkedin.searchPosts({ ...query, phrase, ...at(cursor) }));
+  const author = await count((cursor) =>
+    linkedin.listAuthorPosts({ ...query, authorUrl, ...at(cursor) }),
+  );
+  const own = await count((cursor) => linkedin.listOwnPosts({ ...query, ...at(cursor) }));
+  const kind = AUTHOR_PATHS.company.test(new URL(authorUrl).pathname) ? "company" : "member";
+  return {
+    postedSince,
+    ...(search === undefined ? {} : { search: { phrase, count: search } }),
+    ...(author === undefined ? {} : { [kind]: { authorUrl, count: author } }),
+    ...(own === undefined ? {} : { own: { count: own } }),
   };
 }
 

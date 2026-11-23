@@ -296,15 +296,22 @@ test("a decision delivered after a hold or a cancel changes nothing", async () =
   assert.deepEqual((await rowsOf(cancelled.personId))[0], ["connect", "cancelled", "opted_out"]);
 });
 
-test("a stored decision counts only for the event's item, approved or skipped, with who decided and when", () => {
+test("a stored decision counts only for the event's item, approved or skipped, with who decided and when, or approved by the mode, which names no person", () => {
   const at = new Date("2026-10-29T10:00:00Z");
-  const stored = { stepExecutionId: "sx_1", approvalItemId: "apv_1", draftId: "drf_1" } as const;
-  const decided = { ...stored, decidedBy: APPROVER, decidedAt: at } as const;
+  const stored = {
+    ...{ stepExecutionId: "sx_1", approvalItemId: "apv_1", draftId: "drf_1" },
+    approvalBy: "person",
+  } as const;
+  const decided = { ...stored, decidedBy: APPROVER, decidedAt: at, decisionOrigin: "app" } as const;
   const approvedItem: StepDecision = { ...decided, status: "approved" };
   assert.deepEqual(storedDecision(approvedItem, "apv_1"), { status: "approved", draftId: "drf_1" });
   const skippedItem: StepDecision = { ...decided, status: "skipped" };
   assert.deepEqual(storedDecision(skippedItem, "apv_1"), { status: "skipped", by: APPROVER, at });
-  const undecided = { ...stored, decidedBy: null, decidedAt: null } as const;
+  // gamma-p4-070: the mode's approval schedules its step; the gate decides whether it may go.
+  const byMode = { approvalBy: "mode", decidedBy: null, decisionOrigin: "approval_mode" } as const;
+  const modeItem: StepDecision = { ...decided, ...byMode, status: "approved" };
+  assert.deepEqual(storedDecision(modeItem, "apv_1"), { status: "approved", draftId: "drf_1" });
+  const undecided = { ...stored, decidedBy: null, decidedAt: null, decisionOrigin: null } as const;
   const none: (StepDecision | undefined)[] = [
     undefined,
     { ...decided, status: "approved", approvalItemId: "apv_2" },
@@ -312,6 +319,8 @@ test("a stored decision counts only for the event's item, approved or skipped, w
     { ...decided, status: "approved", decidedAt: null },
     { ...decided, status: "skipped", decidedBy: null },
     { ...decided, status: "skipped", decidedAt: null },
+    { ...decided, ...byMode, status: "approved", decidedAt: null },
+    { ...decided, ...byMode, status: "approved", approvalItemId: "apv_2" },
     { ...undecided, status: "pending" },
     { ...undecided, status: "blocked" },
   ];
@@ -355,4 +364,18 @@ test("a first message its acceptance left with no due time gets one at a queue r
   const due = (await stepOf(steps.message_1)).dueAt;
   assert.ok(due !== null && due > at, `due ${due?.toISOString()}`);
   assert.equal(await recover(new Date()), 0);
+});
+
+test("a first message after a connection request skipped as already connected, left with no due time, gets one at a queue run too; none while the request is neither accepted nor skipped so", async () => {
+  const other = fixture("wsp_campaigns_first_message_connected");
+  await other.account();
+  const { steps } = await other.enrolledLead("recover-connected");
+  const recover = (at: Date) => other.run(() => recoverFirstMessages(at));
+  assert.equal(await recover(new Date()), 0);
+  const skipped = { status: "skipped", skipReason: "already_connected" } as const;
+  await other.app().stepExecution.update({ where: { id: steps.connect }, data: skipped });
+  const at = new Date();
+  assert.equal(await recover(at), 1);
+  const due = (await stepOf(steps.message_1)).dueAt;
+  assert.ok(due !== null && due > at, `due ${due?.toISOString()}`);
 });

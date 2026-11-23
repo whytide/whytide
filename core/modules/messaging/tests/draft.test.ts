@@ -81,20 +81,28 @@ test("1. a plan and a grounded text: the draft is ready, every gate passed, with
   );
   assert.deepEqual(
     draft.gates,
-    ["facts_used", "placeholders", "length", "grounding", "red_lines", "colleague_signal"].map(
-      (gate) => ({
-        gate,
-        issues: [],
-      }),
-    ),
+    [
+      "facts_used",
+      "placeholders",
+      "length",
+      "grounding",
+      "red_lines",
+      "colleague_signal",
+      "signal_act",
+    ].map((gate) => ({
+      gate,
+      issues: [],
+    })),
   );
   assert.deepEqual(draft.flagReasons, []);
   assert.equal(draft.regenerations, 0);
   assert.match(draft.dossierHash ?? "", /^[0-9a-f]{64}$/);
   assert.deepEqual(
     { model: draft.modelId, version: draft.promptVersion, record: draft.decisionRecordId },
-    { model: "fake-model", version: 2, record: write.id },
+    { model: "fake-model", version: 3, record: write.id },
   );
+  // The prompts' v3 (gamma-p3-075): the planner's record and the writer's.
+  assert.deepEqual([plan.promptVersion, write.promptVersion], [3, 3]);
   assert.equal(records.length, 2);
   assert.deepEqual(costs.map(({ task }) => task).sort(), [plan.task, write.task].sort());
   assert.ok(costs.every((cost) => cost.feature === "messaging" && cost.subjectRef === personId));
@@ -293,7 +301,7 @@ test("a sequence step's draft sends both calls its <step> block: the kind of its
   );
   // The earlier texts are no facts: the plan's ids are the dossier's, the stored draft alpha's.
   const draft = await stored(workspaceId, draftId);
-  assert.deepEqual([draft.text, draft.promptVersion], [sized(200), 2]);
+  assert.deepEqual([draft.text, draft.promptVersion], [sized(200), 3]);
 });
 
 test("rules we keep, a message never mentions a colleague's signal: with a colleague's event in the workspace, the lead's dossier holds none of it; answers pointing at a colleague, or naming one, go back in <failures> and end the draft flagged, never ready", async () => {
@@ -327,5 +335,6 @@ test("rules we keep, a message never mentions a colleague's signal: with a colle
     ["flagged", 2, [pointing]],
   );
   const gates = draft.gates as { gate: string; issues: unknown[] }[];
-  assert.deepEqual(gates.at(-1), { gate: "colleague_signal", issues: [pointing] });
+  const colleagueGate = gates.find(({ gate }) => gate === "colleague_signal");
+  assert.deepEqual(colleagueGate, { gate: "colleague_signal", issues: [pointing] });
 });

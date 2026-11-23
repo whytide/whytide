@@ -23,6 +23,7 @@ export function useEnrollmentWords() {
     replied: t("status.replied"),
     completed: t("status.completed"),
     exited: t("status.exited"),
+    paused: t("status.paused"),
     refused: t("status.refused"),
   };
   const stepStatus: Record<StepStatus, string> = {
@@ -58,6 +59,8 @@ export function useEnrollmentWords() {
     insufficient_credits: r("insufficient_credits"),
     member_ref_unknown: r("member_ref_unknown"),
     profile_unreadable: r("profile_unreadable"),
+    already_connected: r("already_connected"),
+    not_interested: r("not_interested"),
     sending_closed: r("sending_closed"),
     platform_stopped: r("platform_stopped"),
     workspace_stopped: r("workspace_stopped"),
@@ -98,6 +101,14 @@ export function useEnrollmentWords() {
     linkedin_input_invalid: r("linkedin_input_invalid"),
     account_replaced: r("account_replaced"),
     send_in_flight: r("send_in_flight"),
+    // gamma-p3-060: a step waiting while its enrollment, or its campaign, is paused.
+    enrollment_paused: r("enrollment_paused"),
+    campaign_not_active: r("campaign_not_active"),
+    // gamma-p6-040: the sender's owner removed, an email's mailbox another member's.
+    owner_removed: r("owner_removed"),
+    sender_mismatch: r("sender_mismatch"),
+    // gamma-rf-050: a LinkedIn step of a person without a LinkedIn profile.
+    no_linkedin_profile: r("no_linkedin_profile"),
   };
   return {
     status,

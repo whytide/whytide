@@ -4,19 +4,24 @@
 // recorded, so contacts refuses the person a new enrollment for 90 days, campaigns.step_sent
 // published, then the end. An invitation already gone, answered after the call with its slot
 // committed (INVITATION_GONE_CODES): the step `failed` with the code, the touch recorded all the
-// same, then the end. The end: the enrollment `exited` (`not_accepted`) while it is active, its
-// pending steps cancelled with their items, the lead finished. A connection request accepted
-// meanwhile ends nothing: its enrollment goes on. A withdrawal holds no credits.
+// same, then the end. The end: the enrollment's pending LinkedIn steps cancelled with their items
+// (`not_accepted`), a pending fallback email kept, since its condition holds (gamma-p3-060); then,
+// with no step left open, the enrollment `exited` (`not_accepted`) and the lead finished
+// (../steps/skip.ts endIfDone), else when its last fallback email ends. A connection request
+// accepted meanwhile ends nothing: its enrollment goes on. A withdrawal holds no credits.
 import { cancelItems } from "@whytide/approvals";
 import { errors as contactsErrors, lockLeadStatus, recordTouch } from "@whytide/contacts";
 import { outboxWriter, tenantClient } from "@whytide/db";
 import { findSendReservation } from "@whytide/linkedin";
 import { currentTenant, isAppError, publish } from "@whytide/platform";
 import { events } from "../../events.ts";
+import { versionSteps } from "../campaigns/reads.ts";
+import { LIVE_ENROLLMENT_STATUSES } from "../constants.ts";
+import { fallbackKeys } from "../fallback/fallback.ts";
 import { PENDING_STEP_STATUSES } from "../gate/constants.ts";
 import { checkedCode } from "../steps/codes.ts";
 import { STEP_REASON_CODES } from "../steps/constants.ts";
-import { finishLead, lockEnrollment } from "../steps/skip.ts";
+import { endIfDone, lockEnrollment } from "../steps/skip.ts";
 import { inviteAcceptedAt } from "./accepted.ts";
 import { INVITATION_GONE_CODES } from "./constants.ts";
 
@@ -26,10 +31,17 @@ export type WithdrawStep = {
   readonly enrollmentId: string;
   readonly personId: string;
   readonly templateId: string;
+  readonly templateVersion: number;
 };
 
 const SYSTEM = { type: "system" } as const;
-const STEP = { id: true, enrollmentId: true, personId: true, templateId: true } as const;
+const STEP = {
+  id: true,
+  enrollmentId: true,
+  personId: true,
+  templateId: true,
+  templateVersion: true,
+} as const;
 
 /** The withdrawal that went out, settled at `at` (the file's header). */
 export async function settleWithdrawn(step: WithdrawStep, at: Date): Promise<void> {
@@ -84,21 +96,24 @@ export async function settleGone(
   return true;
 }
 
-/** The enrollment `exited` (`not_accepted`) while it is active, and what follows (the header). */
+/** The end, while the enrollment is live (the file's header). */
 async function endEnrollment(step: WithdrawStep, at: Date): Promise<void> {
-  const exited = { status: "exited", exitReason: "not_accepted", endedAt: at } as const;
-  const where = { id: step.enrollmentId, status: "active" } as const;
-  const { count } = await tenantClient.enrollment.updateMany({ where, data: exited });
-  if (count === 0) return;
+  const live = { id: step.enrollmentId, status: { in: [...LIVE_ENROLLMENT_STATUSES] } };
+  if ((await tenantClient.enrollment.count({ where: live })) === 0) return;
+  const steps = (await versionSteps(step.templateId, step.templateVersion)) ?? [];
   const skipReason = checkedCode(STEP_REASON_CODES, "skip_reason", "not_accepted");
   const cancelled = await tenantClient.stepExecution.updateManyAndReturn({
-    where: { enrollmentId: step.enrollmentId, status: { in: [...PENDING_STEP_STATUSES] } },
+    where: {
+      enrollmentId: step.enrollmentId,
+      status: { in: [...PENDING_STEP_STATUSES] },
+      stepKey: { notIn: fallbackKeys(steps) },
+    },
     data: { status: "cancelled", skipReason },
     select: { id: true },
   });
   // The cancelled steps' pending items blocked in this transaction.
   await cancelItems(cancelled.map(({ id }) => id));
-  await finishLead(step, SYSTEM);
+  await endIfDone(tenantClient, step, at, SYSTEM);
 }
 
 /** The touch on the person; one erased meanwhile has none to record. */

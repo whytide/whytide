@@ -37,12 +37,12 @@ export class ItemsController {
   @read
   @route({
     summary:
-      "The queue: every pending item, overdue ones included, and every approved one whose step waits, by due time, each with its lead, draft, sender account, flags and whether the caller decides it; and the counts to approve and decided today",
+      "The caller's own queue, whatever their role: every pending item of the senders they own, overdue ones included, and every approved one whose step waits, by due time, each with its channel, lead, draft, sender (an account, or an email's mailbox), who approves it, flags and whether the caller decides it; their senders by label, each with its counts to approve and decided today by a person in its own zone; and the senders' sums",
     response: itemsResponse,
   })
   async list(): Promise<ItemsResponse> {
-    const { items, counts } = await readQueue(currentTenant().principal);
-    return { items: items.map(toResponse), counts };
+    const { items, senders, counts } = await readQueue(currentTenant().principal);
+    return { items: items.map(toResponse), senders: [...senders], counts };
   }
 
   @Post(":id/approve")
@@ -51,11 +51,18 @@ export class ItemsController {
   @idempotent
   @route({
     summary:
-      "Approves a pending item as the sender account's owner, with the text given or the draft's own, which passes the gates and is frozen; publishes approvals.item_decided",
+      "Approves a pending item as its sender's owner, the account's or the mailbox's, with the text and an email's subject given or the draft's own, which pass the gates and are frozen; publishes approvals.item_decided",
     params: itemParams,
     body: approveBody,
     response: itemResponse,
-    errors: [...decisionErrors, errors.approval_draft_pending, messagingErrors.draft_text_refused],
+    errors: [
+      ...decisionErrors,
+      errors.approval_subject_not_allowed,
+      errors.approval_draft_pending,
+      errors.approval_draft_changed,
+      messagingErrors.draft_text_refused,
+      messagingErrors.draft_subject_not_allowed,
+    ],
   })
   async approve(@Param("id") id: string, @Body() body: ApproveBody): Promise<ItemResponse> {
     const { principal } = currentTenant();
@@ -68,7 +75,7 @@ export class ItemsController {
   @idempotent
   @route({
     summary:
-      "Skips a pending item as the sender account's owner: its step goes no further and its draft stays as it is; publishes approvals.item_decided",
+      "Skips a pending item as its sender's owner, the account's or the mailbox's: its step goes no further and its draft stays as it is; publishes approvals.item_decided",
     params: itemParams,
     response: itemResponse,
     errors: decisionErrors,
@@ -82,9 +89,10 @@ export class ItemsController {
 /** The answer: the times as ISO strings, the draft as messaging reads it. */
 function toResponse(item: QueueItem): ItemResponse {
   const { id, status, stepKey, actionType, waitCode, stale, needsAttention } = item;
-  const { lead, sender, canDecide } = item;
+  const { channel, mailboxId, approvalBy, lead, sender, canDecide } = item;
   return {
-    ...{ id, status, stepKey, actionType, waitCode, stale, needsAttention, lead, sender },
+    ...{ id, status, stepKey, actionType, channel, mailboxId, approvalBy },
+    ...{ waitCode, stale, needsAttention, lead, sender },
     scheduledFor: item.scheduledFor.toISOString(),
     createdAt: item.createdAt.toISOString(),
     waitUntil: item.waitUntil?.toISOString() ?? null,

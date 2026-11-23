@@ -134,7 +134,7 @@ test("an attempt past its cutoff by its own clock, as a slow check or provider m
   await assert.rejects(account.call("linkedin_send_message", late.input(), 1, slow), {
     code: "send_attempt_late",
   });
-  assert.equal(retries("provider", "send_attempt_late", 1), true);
+  assert.equal(retries({ kind: "provider" }, "send_attempt_late", 1), true);
   assert.deepEqual([sends(), methods()], [[], []]);
   assert.equal((await reservationOf(late.reservationId)).status, "reserved");
   assert.deepEqual(await rowsOf(late.stepExecutionId), []);

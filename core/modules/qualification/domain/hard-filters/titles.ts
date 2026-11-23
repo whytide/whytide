@@ -1,20 +1,24 @@
-// The title rule of the hard filters (docs/concepts.md "Titles"), English only in alpha (RB-3.1.2,
-// reduced): a title becomes tokens, and an ICP title matches when every one of its tokens is
-// in the person's. tests/fixtures/titles.json documents it in fifty pairs; a change here changes them.
+// The title rule (docs/concepts.md "Titles"), English only in alpha (RB-3.1.2, reduced): a title
+// becomes tokens, and an ICP title matches when every one of its tokens is in the person's. A hard
+// filter until title-check-ai, it now orders signals' reads only: the assessment judges the title.
+// tests/fixtures/titles.json documents it in fifty pairs; a change here changes them.
 
 /** Words that name no role. */
 const STOP_WORDS = new Set(["a", "an", "and", "at", "for", "in", "of", "on", "the", "to"]);
 /** Seniority noise: a level inside a role, never the role (seniority is the assessment's criterion). */
 const NOISE = new Set(["senior", "sr", "snr", "junior", "jr", "interim", "acting"]);
 /**
- * Synonyms and abbreviations, each phrase read as its canonical tokens. A role collapses to one token
- * (vice president is vp, so a vp is no president); a function's abbreviation expands to its words.
+ * Synonyms and abbreviations, each phrase read as its canonical tokens. A role collapses to one
+ * token (vice president is head, so a vice president is no president); a function's abbreviation
+ * expands to its words. vp, director and head are one role, head (gamma-p5-050): an audience's Head
+ * of Sales keeps a VP of Sales, and the reverse.
  */
 const SYNONYMS: Readonly<Record<string, string>> = {
-  "vice president": "vp",
-  "v p": "vp",
-  svp: "vp",
-  evp: "vp",
+  "vice president": "head",
+  "v p": "head",
+  vp: "head",
+  svp: "head",
+  evp: "head",
   director: "head",
   dir: "head",
   "chief executive officer": "ceo",

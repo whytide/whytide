@@ -1,8 +1,19 @@
 // `pnpm deploy:check [file]` (README.md "Production"): refuses an environment file that is not fit for
 // a server, deploy/.env by default, before `docker compose up -d`. One line per finding and exit 1;
-// exit 0 when it is fit. Plain Node, no dependency; the rules are exported for its unit test.
+// exit 0 when it is fit. Plain Node, no dependency; the rules are exported for its unit test. A list
+// is read as the apps read it, so that a file deploy:check takes also starts: every PROVIDER_
+// selector and list names only adapters of its port, each with the variables it cannot run without
+// (gamma-en-100), and enrichment's source lists only names its sources define, each once
+// (constants.ts holds both tables).
 import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import {
+  ADAPTER_VARIABLES,
+  FAKE,
+  LIST_SEPARATOR,
+  OPTIONAL_SELECTORS,
+  SOURCE_NAMES,
+} from "./constants.ts";
 
 /**
  * An environment file as Compose reads it: KEY=value, a value in quotes, or bare up to a ` #`
@@ -34,6 +45,21 @@ export function developmentSecrets(example: string): Map<string, string> {
   return secrets;
 }
 
+/** A PROVIDER_ list's names as providers' providerList() reads them: nothing trimmed; empty, none. */
+const adapterNames = (value: string) => (value === "" ? [] : value.split(LIST_SEPARATOR));
+
+/** An enrichment list's names as its sourceList() reads them: trimmed, an empty one dropped. */
+const sourceNames = (value: string) =>
+  value
+    .split(LIST_SEPARATOR)
+    .map((name) => name.trim())
+    .filter((name) => name !== "");
+
+/** Each name a list gives more than once. */
+const twice = (names: readonly string[]) => [
+  ...new Set(names.filter((name, at) => names.indexOf(name) !== at)),
+];
+
 const isHttps = (value: string) => URL.parse(value)?.protocol === "https:";
 const keyBytes = (value: string) => Buffer.from(value, "base64");
 const isMasterKey = (value: string) =>
@@ -49,9 +75,43 @@ export function checkDeploy(env: Map<string, string>, example: string): string[]
   if (appEnv !== "production") {
     findings.push(`APP_ENV is '${appEnv}': a server runs production, never development or test`);
   }
-  for (const [key, value] of env) {
-    if (/^PROVIDER_[A-Z_]+$/.test(key) && (value === "" || value === "fake")) {
+  // The file's selectors and every one of the table, so that one left out is read as empty.
+  const selectors = new Set([...env.keys(), ...Object.keys(ADAPTER_VARIABLES)]);
+  for (const key of selectors) {
+    if (!/^PROVIDER_[A-Z_]+$/.test(key)) continue;
+    const value = get(key);
+    // A selector names one adapter, a list several, separated by commas: the fake in neither.
+    if (
+      value.split(LIST_SEPARATOR).includes(FAKE) ||
+      (value === "" && !OPTIONAL_SELECTORS.has(key))
+    ) {
       findings.push(`${key} is '${value}': a server runs a real adapter, never the fake`);
+    }
+  }
+  // Each adapter a selector or a list names: one of the port's, with every variable it cannot run
+  // without; the fake is refused above. Names only, never a value.
+  for (const [key, adapters] of Object.entries(ADAPTER_VARIABLES)) {
+    const names = adapterNames(get(key));
+    for (const name of twice(names)) findings.push(`${key} lists '${name}' twice`);
+    for (const name of new Set(names)) {
+      if (name === FAKE) continue;
+      const variables = Object.hasOwn(adapters, name) ? adapters[name] : undefined;
+      if (variables === undefined) {
+        findings.push(`${key} lists '${name}', an adapter the registry does not know`);
+      }
+      for (const variable of variables ?? []) {
+        if (get(variable) === "") findings.push(`${key} lists ${name}, but ${variable} is not set`);
+      }
+    }
+  }
+  // Enrichment's source lists: each name one of its sources of the list's kind.
+  for (const [key, known] of Object.entries(SOURCE_NAMES)) {
+    const names = sourceNames(get(key));
+    for (const name of twice(names)) findings.push(`${key} lists '${name}' twice`);
+    for (const name of new Set(names)) {
+      if (!known.includes(name)) {
+        findings.push(`${key} lists '${name}', a name no source of its kind defines`);
+      }
     }
   }
   if (!isMasterKey(get("APP_MASTER_KEY"))) {

@@ -1,6 +1,8 @@
 // The end-to-end test of DataTable and Dialog (alpha-p1-160), on the gallery page of gallery-page.ts:
 // their entries and states, the table sorted, paged and followed by keyboard, its controlled mode
-// (alpha-p6-050), the dialog's focus, and axe with the dialog open.
+// (alpha-p6-050), the dialog's focus, and axe with the dialog open; the focus back on the opener
+// however the dialog closes, the page held still, and Tab past hidden and disabled controls
+// (gamma-p2-070).
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { IntlMessageFormat } from "intl-messageformat";
@@ -32,7 +34,10 @@ test("DataTable and Dialog have gallery entries that render their states", async
   ).toContainText(say("ui.table.page", { page: 1, pages: 3 }));
   await expect(tables.getByText(say("ui.state.empty"))).toBeVisible();
   const dialogs = entry(page, "Dialog");
-  await expect(dialogs.getByRole("button")).toHaveText(say("ui.action.delete"));
+  await expect(dialogs.getByRole("button")).toHaveText([
+    say("ui.action.delete"),
+    say("ui.gallery.edit_step"),
+  ]);
   await expect(page.getByRole("dialog")).toBeHidden();
 });
 
@@ -118,12 +123,109 @@ test("Dialog keeps the focus inside, closes on Escape and returns the focus", as
   await expect(opener).toBeFocused();
 });
 
+test("Dialog returns the focus to its opener after Cancel and after its action", async ({
+  page,
+}) => {
+  await openGallery(page, text);
+  const opener = entry(page, "Dialog")
+    .getByRole("button", { name: say("ui.action.delete") })
+    .first();
+  const dialog = page.getByRole("dialog", { name: say("ui.gallery.delete_title") });
+  for (const button of [say("ui.action.cancel"), say("ui.action.delete")]) {
+    await opener.focus();
+    await page.keyboard.press("Enter");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: button }).click();
+    await expect(dialog).toBeHidden();
+    await expect(opener, `the focus after ${button}`).toBeFocused();
+  }
+});
+
+test("Dialog unmounted while open returns the focus to its opener and lets the page scroll", async ({
+  page,
+}) => {
+  await openGallery(page, text);
+  // The second case is rendered only while open: Save and Cancel unmount it, open.
+  const opener = entry(page, "Dialog").getByRole("button", { name: say("ui.gallery.edit_step") });
+  const dialog = page.getByRole("dialog", { name: say("ui.gallery.edit_step") });
+  const root = page.locator("html");
+  for (const button of [say("ui.action.save"), say("ui.action.cancel")]) {
+    await opener.focus();
+    await page.keyboard.press("Enter");
+    await expect(dialog).toBeVisible();
+    await expect(root).toHaveCSS("overflow", "hidden");
+    await dialog.getByRole("button", { name: button }).click();
+    // Unmounted, not closed: the first case's dialog is the one left in the page.
+    await expect(page.locator("dialog")).toHaveCount(1);
+    await expect(opener, `the focus after ${button}`).toBeFocused();
+    await expect(root).toHaveCSS("overflow", "visible");
+  }
+});
+
+test("Dialog holds the page behind still while open, then puts back the overflow it found", async ({
+  page,
+}) => {
+  await openGallery(page, text);
+  const root = page.locator("html");
+  // A value of the host's own, which closing puts back.
+  await root.evaluate((html) => {
+    html.style.overflow = "auto";
+  });
+  const opener = entry(page, "Dialog")
+    .getByRole("button", { name: say("ui.action.delete") })
+    .first();
+  const dialog = page.getByRole("dialog", { name: say("ui.gallery.delete_title") });
+  const scrolled = () => page.evaluate(() => window.scrollY);
+  const frames = () =>
+    page.evaluate(
+      () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+    );
+  await opener.click();
+  await expect(dialog).toBeVisible();
+  await expect(root).toHaveCSS("overflow", "hidden");
+  const before = await scrolled();
+  await page.mouse.wheel(0, 400);
+  await frames();
+  expect(await scrolled()).toBe(before);
+  await dialog.getByRole("button", { name: say("ui.action.cancel") }).click();
+  await expect(dialog).toBeHidden();
+  await expect(root).toHaveCSS("overflow", "auto");
+  await page.mouse.wheel(0, 400);
+  await expect.poll(scrolled).not.toBe(before);
+});
+
+test("Dialog's Tab passes over its hidden and disabled controls, either way round", async ({
+  page,
+}) => {
+  await openGallery(page, text);
+  await entry(page, "Dialog")
+    .getByRole("button", { name: say("ui.gallery.edit_step") })
+    .click();
+  const dialog = page.getByRole("dialog", { name: say("ui.gallery.edit_step") });
+  const delay = dialog.getByRole("spinbutton", { name: say("ui.gallery.delay") });
+  const button = (key: string) => dialog.getByRole("button", { name: say(key) });
+  // The footer ends in a disabled Delete and a hidden Try again; the first control has the focus.
+  await expect(button("ui.action.delete")).toBeDisabled();
+  await expect(dialog.locator("button[hidden]")).toHaveCount(1);
+  await expect(delay).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(button("ui.action.save")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(delay).toBeFocused();
+  for (const key of ["ui.action.cancel", "ui.action.save"]) {
+    await page.keyboard.press("Tab");
+    await expect(button(key)).toBeFocused();
+  }
+  await page.keyboard.press("Tab");
+  await expect(delay).toBeFocused();
+});
+
 // axe (MPL-2.0, a test-only devDependency) on the whole gallery with the dialog open.
 test("the gallery with the dialog open has no serious or critical axe violation", async ({
   page,
 }) => {
   await openGallery(page, text);
-  await entry(page, "Dialog").getByRole("button").click();
+  await entry(page, "Dialog").getByRole("button").first().click();
   await expect(page.getByRole("dialog")).toBeVisible();
   const { violations } = await new AxeBuilder({ page }).analyze();
   const blocking = violations.filter((v) => v.impact === "serious" || v.impact === "critical");

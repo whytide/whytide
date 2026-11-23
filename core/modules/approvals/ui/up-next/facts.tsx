@@ -14,7 +14,13 @@ import { useId, useRef, useState } from "react";
 import { FACT_DATE_FORMAT } from "./constants.ts";
 import { useUpNextWords } from "./words.ts";
 
-type Props = { workspace: string; personId: string; factIds: readonly string[] };
+type Props = {
+  workspace: string;
+  personId: string;
+  factIds: readonly string[];
+  /** Under a row in a sender's section (queue.tsx): its title goes one level down. */
+  nested?: boolean;
+};
 
 const readDossier = (workspace: string, personId: string) =>
   browserApi().GET("/v1/workspaces/{workspaceId}/messaging/leads/{personId}/dossier", {
@@ -22,12 +28,13 @@ const readDossier = (workspace: string, personId: string) =>
   });
 type Fact = NonNullable<Awaited<ReturnType<typeof readDossier>>["data"]>["facts"][number];
 
-export function Facts({ workspace, personId, factIds }: Props) {
+export function Facts({ workspace, personId, factIds, nested = false }: Props) {
   const t = useTranslations("approvals.up_next");
   const words = useUpNextWords();
   const messages = useMessages();
   const format = useFormatter();
   const id = useId();
+  const Title = nested ? "h5" : "h4";
   const [open, setOpen] = useState(false);
   const [facts, setFacts] = useState<Fact[]>();
   const [failure, setFailure] = useState<ApiError>();
@@ -63,9 +70,9 @@ export function Facts({ workspace, personId, factIds }: Props) {
       </Button>
       {open && (
         <section id={id} aria-labelledby={`${id}-title`} className="grid w-full gap-2">
-          <h4 id={`${id}-title`} className="text-sm font-semibold text-ink">
+          <Title id={`${id}-title`} className="text-sm font-semibold text-ink">
             {t("facts.title")}
-          </h4>
+          </Title>
           {owner ? (
             <ErrorState module={owner.module} code={owner.code} onRetry={() => void read()} />
           ) : facts === undefined ? (

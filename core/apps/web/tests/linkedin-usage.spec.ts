@@ -86,7 +86,11 @@ test("the screen shows the reads, connection requests and messages today against
   expect(usage.weekInvites).toEqual({ used: 0, cap: 100 });
   expect(usage.actions).toEqual({ used: 0, max: 200 });
 
-  const region = page.getByRole("region", { name: say("linkedin.usage.title"), exact: true });
+  // The user's own account's, first: the e2e users are Owners of the fixture's workspace, whose
+  // teammates' accounts follow their own (gamma-p6-070).
+  const region = page
+    .getByRole("region", { name: say("linkedin.usage.title"), exact: true })
+    .first();
   const lines = [
     say("linkedin.usage.reads_today", { used: 0, cap: reads }),
     say("linkedin.usage.invites_today", usage.invites),

@@ -1,11 +1,16 @@
 // The report's lines (README.md "Commands"), pure: every workspace's figures, added up or listed, in
 // the command's order, each line `<code>: <detail>` with ids, codes, counts, days and instants only;
-// and whether the three zeros hold.
+// and whether the three zeros hold. gamma-p4-070: a send without approval's violation ends with the
+// mode it counts in, and sends_without_approval_mode counts them per mode, both modes always.
+// gamma-p7-050: sends_person_erased after the suppression zero, and gamma's lines after beta's.
+import { APPROVAL_MODES } from "../domain/approval-mode/constants.ts";
 import { acceptanceShare } from "../domain/report/acceptance.ts";
 import type { Violation } from "../domain/report/approval.ts";
 import { editShare } from "../domain/report/edits.ts";
 import type { WorkspaceReport } from "../domain/report/report.ts";
-import { LINE, NO_SHARE, NO_STEP, SENDER_SPAN_DAYS, SHARE_DECIMALS, TARGETS } from "./constants.ts";
+import { LINE, NO_STEP, SENDER_SPAN_DAYS, TARGETS } from "./constants.ts";
+import { share } from "./format.ts";
+import { gammaLines } from "./gamma-lines.ts";
 
 /** A health event's state, and the line that counts it. */
 const WARNINGS = [
@@ -20,17 +25,18 @@ export function reportLines(reports: readonly WorkspaceReport[]): string[] {
     reports.flatMap((report) => pick(report).map((item) => ({ ...item, wsp: report.workspaceId })));
   const zero = (code: string, found: readonly (Violation & { wsp: string })[]) => {
     lines.push(`${code}: ${found.length}`);
-    for (const { wsp, stepExecutionId, reason, at } of found) {
-      lines.push(
-        `${LINE.violation}: ${code} ${wsp} ${stepExecutionId} ${reason} ${at.toISOString()}`,
-      );
+    for (const { wsp, stepExecutionId, reason, at, mode } of found) {
+      const line = `${code} ${wsp} ${stepExecutionId} ${reason} ${at.toISOString()}`;
+      lines.push(`${LINE.violation}: ${line}${mode === undefined ? "" : ` ${mode}`}`);
     }
   };
 
-  zero(
-    LINE.sendsWithoutApproval,
-    each(({ withoutApproval }) => withoutApproval),
-  );
+  const withoutApproval = each(({ withoutApproval }) => withoutApproval);
+  zero(LINE.sendsWithoutApproval, withoutApproval);
+  for (const mode of APPROVAL_MODES) {
+    const counted = withoutApproval.filter((violation) => violation.mode === mode).length;
+    lines.push(`${LINE.sendsWithoutApprovalMode}: ${mode} ${counted}`);
+  }
   const missing = each(({ missing }) => missing);
   lines.push(`${LINE.sendStepMissing}: ${missing.length}`);
   for (const { wsp, id, stepExecutionId, senderAccountId, kind, at } of missing) {
@@ -43,6 +49,9 @@ export function reportLines(reports: readonly WorkspaceReport[]): string[] {
     LINE.actionsAgainstSuppressed,
     each(({ suppressed }) => suppressed),
   );
+  for (const { stepExecutionId, at } of each(({ erased }) => erased)) {
+    lines.push(`${LINE.sendsPersonErased}: ${stepExecutionId} ${at.toISOString()}`);
+  }
   const duplicates = each(({ duplicates }) => duplicates);
   lines.push(`${LINE.duplicateSends}: ${duplicates.length}`);
   for (const { wsp, stepExecutionId, rows } of duplicates) {
@@ -96,18 +105,15 @@ export function reportLines(reports: readonly WorkspaceReport[]): string[] {
       `${LINE.decisionDays}: ${workspaceId} ${decisions.decided} of ${decisions.weekdays}`,
     );
   }
-  return lines;
+  return [...lines, ...gammaLines(reports)];
 }
 
 /**
- * Whether every report holds the three zeros: no send without approval, none against suppression,
- * no duplicate.
+ * Whether every report holds the three zeros: no send without approval, in either mode, none against
+ * suppression, no duplicate.
  */
 export const zerosHold = (reports: readonly WorkspaceReport[]): boolean =>
   reports.every(
     ({ withoutApproval, suppressed, duplicates }) =>
       withoutApproval.length === 0 && suppressed.length === 0 && duplicates.length === 0,
   );
-
-const share = (value: number | null): string =>
-  value === null ? NO_SHARE : value.toFixed(SHARE_DECIMALS);

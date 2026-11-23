@@ -1,6 +1,7 @@
 // What the api host reads of identity (core/apps/api/README.md "Modules"): the workspace resolver,
 // which the workspace guard asks on every workspace route, and the authentication port's hooks,
-// which the host passes to auth.configure() at start. No route: identity has no `api` yet.
+// which the host passes to auth.configure() at start. The routes are invites.controller.ts' and
+// invitations.controller.ts'.
 import type { Principal, Role } from "@whytide/platform";
 import { type AuthHooks, appMailConfig, appMailPort, getAdapter } from "@whytide/providers";
 import { resolveMembership } from "@whytide/tenancy";

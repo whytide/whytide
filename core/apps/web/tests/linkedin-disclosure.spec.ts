@@ -5,8 +5,8 @@
 // api's seed route (core/apps/api/tests/fixtures/e2e): the card's notice and "Read and accept", the
 // Dialog with the text and the personal-account box, Cancel changing nothing, Accept off until the box
 // is ticked, a failed press in words with its retry; once accepted, the toast, and no notice after a
-// reload. The hint for another member is not reachable: the screen shows the viewer's own account
-// only (README.md "Open questions"). Every text from its key, and axe.
+// reload. Another member's account, as an Owner sees a teammate's (gamma-p6-070), routed: the notice
+// with the hint that its owner accepts, and no "Read and accept". Every text from its key, and axe.
 import { AxeBuilder } from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import linkedin from "../../../modules/linkedin/messages/en.json" with { type: "json" };
@@ -32,7 +32,7 @@ async function expectNoSeriousViolation(page: Page): Promise<void> {
   expect(blocking.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(", ")}`)).toEqual([]);
 }
 
-test("connect after the text and both boxes; an account at alpha's disclosure shows the notice, and its owner accepts through the Dialog: Cancel changes nothing, Accept waits for the box, a failed press retries, the notice goes", async ({
+test("connect after the text and both boxes; an account at alpha's disclosure shows the notice, to a teammate with the hint that its owner accepts, and its owner accepts through the Dialog: Cancel changes nothing, Accept waits for the box, a failed press retries, the notice goes", async ({
   page,
   signInAs,
   baseURL,
@@ -71,10 +71,27 @@ test("connect after the text and both boxes; an account at alpha's disclosure sh
 
   const seeded = await page.request.post(`${API}/e2e/linkedin-disclosure`, { headers });
   expect(seeded.status(), await seeded.text()).toBe(200);
+  const review = page.getByRole("button", { name: say("linkedin.disclosure.review") });
+
+  // A teammate's account, routed: the notice and the hint that its owner accepts, nothing to press.
+  await page.route(`**${ACCOUNTS}`, async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    const teammate = { mine: false, canEdit: false };
+    const accounts = json.accounts.map((account: object) => ({ ...account, ...teammate }));
+    await route.fulfill({ response, json: { ...json, accounts } });
+  });
   await page.reload();
   await expect(notice).toBeVisible();
+  await expect(page.getByText(say("linkedin.disclosure.owner_only"))).toBeVisible();
+  await expect(review).toHaveCount(0);
   await expectNoSeriousViolation(page);
-  const review = page.getByRole("button", { name: say("linkedin.disclosure.review") });
+  await page.unroute(`**${ACCOUNTS}`);
+
+  await page.reload();
+  await expect(notice).toBeVisible();
+  await expect(page.getByText(say("linkedin.disclosure.owner_only"))).toHaveCount(0);
+  await expectNoSeriousViolation(page);
   const dialog = page.getByRole("dialog", { name: say("linkedin.disclosure.title") });
   const accept = dialog.getByRole("button", { name: say("linkedin.disclosure.accept") });
   const personal = dialog.getByRole("checkbox", { name: say("linkedin.connect.personal_account") });

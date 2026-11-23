@@ -2,7 +2,7 @@
 // on leads that the e2e api's test-only module writes (core/apps/api/tests/fixtures/e2e) in the e2e
 // users' export workspace, whose leads are this spec's alone: with the tier filter at Hot, Export
 // downloads the CSV of the hot qualified leads only, UTF-8 with a byte-order mark and a formula
-// neutralized; axe.
+// neutralized; a Member's export, refused 403 (gamma-p6-010), says that only an owner exports; axe.
 import { readFile } from "node:fs/promises";
 import { AxeBuilder } from "@axe-core/playwright";
 import contacts from "../../../modules/contacts/messages/en.json" with { type: "json" };
@@ -67,6 +67,41 @@ test("with the tier filter at Hot, Export downloads the CSV of the hot qualified
   expect(lines[1]).toContain("Export,first,,Head of Data,'=SUM(A1),,90,hot,high,qualified");
   expect(lines[2]).toContain("Export,second,");
   expect(text).not.toContain("third");
+
+  const { violations } = await new AxeBuilder({ page }).analyze();
+  const blocking = violations.filter((v) => v.impact === "serious" || v.impact === "critical");
+  expect(blocking.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(", ")}`)).toEqual([]);
+});
+
+test("a Member's export, refused 403 forbidden, says that only an owner exports, with no Try again; axe", async ({
+  page,
+  signInAs,
+  baseURL,
+}) => {
+  await signInAs();
+  const leads = [lead("refused", 90, "hot"), lead("other", 65, "warm")];
+  const answer = await page.request.post(`/api/v1/workspaces/${WORKSPACE}/e2e/leads`, {
+    data: { leads },
+    headers: { origin: baseURL ?? "" },
+  });
+  expect(answer.status(), await answer.text()).toBe(200);
+  // The e2e users are Owners: the api's answer to a Member (core/apps/api/tests/roles.test.ts).
+  const csv = (url: URL) => url.pathname.endsWith("/exports/leads.csv");
+  await page.route(csv, (route) => route.fulfill({ status: 403, json: { code: "forbidden" } }));
+
+  await page.goto(`/w/${WORKSPACE}/leads`);
+  const rows = page.locator("tbody tr");
+  await expect(rows).toHaveCount(2);
+  // React replays a change made before hydration; the list's answer shows it hydrated.
+  await page.getByLabel(say("contacts.leads.filter.tier"), { exact: true }).selectOption("hot");
+  await expect(rows).toHaveCount(1);
+  await page.getByRole("button", { name: say("contacts.leads.export") }).click();
+  const hint = page
+    .getByRole("status")
+    .filter({ hasText: say("contacts.leads.export_owner_only") });
+  await expect(hint).toBeVisible();
+  // No error state, so no Try again: Next's route announcer is an alert too, outside the main.
+  await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
 
   const { violations } = await new AxeBuilder({ page }).analyze();
   const blocking = violations.filter((v) => v.impact === "serious" || v.impact === "critical");

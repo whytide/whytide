@@ -10,18 +10,26 @@ import { expect, test } from "./sign-in.ts";
 const WORKSPACE = "wsp_e2e_phone";
 /** A profile's slug without a hyphen: the lead's title, its URL, can wrap nowhere but inside. */
 const SLUG = `phone${"x".repeat(55)}`;
-const PUBLIC = ["/sign-in", "/sign-in/sent", "/sign-in/expired"];
+const PUBLIC = ["/sign-in", "/sign-in/sent", "/sign-in/expired", "/email/callback", "/invitations"];
 const SCREENS = [
   "leads",
+  "campaigns",
   "up-next",
   "inbox",
   "never-contact",
   "company",
+  "members",
+  "invites",
   "icp",
+  "agents",
   "sources",
+  "companies-found",
   "import",
   "linkedin",
+  "mailboxes",
   "counts",
+  "results",
+  "health",
   "credits",
 ];
 

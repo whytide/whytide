@@ -1,8 +1,11 @@
-// The ICP form (README "The screen"): the record's fields in cards, the people's and the companies'
-// side by side on a wide screen, and its criteria, saved from the browser through the api, the
-// criteria first, so that weights it refuses leave the record as it was; the save bar stays in view
-// while the form has changes. A code the api answers is shown in words next to the field it names;
-// another one in an ErrorState.
+// The ICP form (README "The screen"): the audience picker and the draft card on top, then the chosen
+// audience's fields in cards, the people's and the companies' side by side on a wide screen, and its
+// criteria, saved from the browser through the api's routes of that audience only, the criteria
+// first, so that weights it refuses leave the record as it was; the save bar stays in view while the
+// form has changes. A code the api answers is shown in words next to the field it names; another one
+// in an ErrorState. A draft used replaces the form's fields, saved. An audience the visitor may not
+// write, another member's or the default for a Member, shows its fields disabled under a hint,
+// without the draft card and the save bar (README "Decided here").
 "use client";
 
 import {
@@ -22,8 +25,12 @@ import { browserApi } from "@whytide/web/api/browser";
 import { useLocale, useTranslations } from "next-intl";
 import { type FormEvent, useMemo, useState } from "react";
 import { COUNTRIES, type Criterion, LIMITS, SENIORITIES, SIZE_RANGES } from "../../domain/lists.ts";
+import type { AudienceResponse, AudiencesResponse, DraftResponse } from "../../schemas/icp.ts";
 import { errorLabels, seniorityLabels, sizeRangeLabels } from "../labels.ts";
+import { AudiencePicker } from "./audience-picker.tsx";
+import { AUDIENCE_PATH } from "./constants.ts";
 import { CriteriaTable } from "./criteria.tsx";
+import { DraftCard } from "./draft-card.tsx";
 
 /** What a save sends: every field, since `PUT …/icp` replaces them all. */
 type Fields = {
@@ -38,7 +45,20 @@ type Fields = {
 };
 type Place = keyof Fields | "criteria";
 type Problem = { code?: unknown; details?: { fields?: unknown } };
-type Props = { workspace: string; icp: Fields & { version: number }; criteria: Criterion[] };
+type Props = {
+  workspace: string;
+  /** The workspace's audiences, the default first, for the picker. */
+  audiences: AudienceResponse[];
+  /** The limits the api answers with the audiences, for the picker. */
+  limits: AudiencesResponse["limits"];
+  /** The audience the screen shows, and whether it is the default, whose draft needs no id. */
+  icp: Fields & { id: string; version: number };
+  isDefault: boolean;
+  /** Whether the visitor may write it: its owner, or a holder of icp.manage. */
+  writable: boolean;
+  criteria: Criterion[];
+  draft: DraftResponse;
+};
 
 /** Where an error can show: next to a field, or under the criteria. */
 const PLACES: readonly Place[] = [
@@ -68,7 +88,10 @@ export function IcpForm(props: Props) {
   const [criteria, setCriteria] = useState(props.criteria);
   const [version, setVersion] = useState(props.icp.version);
   /** What the api holds, to tell the form's changes by. */
-  const [stored, setStored] = useState(() => JSON.stringify([fieldsOf(props.icp), props.criteria]));
+  const [stored, setStored] = useState(() => ({
+    fields: fieldsOf(props.icp),
+    criteria: props.criteria,
+  }));
   const [errors, setErrors] = useState<Partial<Record<Place, string>>>({});
   const [failure, setFailure] = useState<string>();
   const [saving, setSaving] = useState(false);
@@ -77,6 +100,8 @@ export function IcpForm(props: Props) {
   const seniorities = optionsOf(SENIORITIES, seniorityLabels(whole));
   const sizes = optionsOf(SIZE_RANGES, sizeRangeLabels(whole));
   const words = errorLabels(whole);
+  const dirty =
+    JSON.stringify([fields, criteria]) !== JSON.stringify([stored.fields, stored.criteria]);
 
   const edit = <K extends keyof Fields>(key: K, value: Fields[K]) => {
     setFields((current) => ({ ...current, [key]: value }));
@@ -102,24 +127,31 @@ export function IcpForm(props: Props) {
     setSaved(false);
     try {
       const api = browserApi();
-      const params = { path: { workspaceId: props.workspace } };
-      const weights = await api.PUT("/v1/workspaces/{workspaceId}/icp/criteria", {
-        params,
-        body: { criteria },
-      });
+      const params = { path: { workspaceId: props.workspace, icpId: props.icp.id } };
+      const weights = await api.PUT(`${AUDIENCE_PATH}/criteria`, { params, body: { criteria } });
       if (!weights.data) return refuse(weights.error);
       setCriteria(weights.data.criteria);
-      const record = await api.PUT("/v1/workspaces/{workspaceId}/icp", { params, body: fields });
+      const record = await api.PUT(AUDIENCE_PATH, { params, body: fields });
       if (!record.data) return refuse(record.error);
       setFields(fieldsOf(record.data));
       setVersion(record.data.version);
-      setStored(JSON.stringify([fieldsOf(record.data), weights.data.criteria]));
+      setStored({ fields: fieldsOf(record.data), criteria: weights.data.criteria });
       setSaved(true);
     } catch {
       setFailure("internal_error");
     } finally {
       setSaving(false);
     }
+  };
+  /** A draft used: the saved ICP replaces the form's fields, and its unsaved criteria the stored. */
+  const accepted = (icp: Fields & { version: number }) => {
+    setFields(fieldsOf(icp));
+    setCriteria(stored.criteria);
+    setVersion(icp.version);
+    setStored({ fields: fieldsOf(icp), criteria: stored.criteria });
+    setErrors({});
+    setFailure(undefined);
+    setSaved(true);
   };
 
   return (
@@ -129,6 +161,25 @@ export function IcpForm(props: Props) {
         description={t("description")}
         actions={<Badge tone="accent">{t("version", { version })}</Badge>}
       />
+      <AudiencePicker
+        workspace={props.workspace}
+        audiences={props.audiences}
+        limits={props.limits}
+        chosen={props.icp.id}
+      />
+      {props.writable ? (
+        <DraftCard
+          workspace={props.workspace}
+          icpId={props.isDefault ? undefined : props.icp.id}
+          draft={props.draft}
+          replaces={hasTargeting(stored.fields) || dirty}
+          onAccepted={accepted}
+        />
+      ) : (
+        <p className="text-pretty text-ink-muted">
+          {t("not_owner", { audience: props.isDefault ? "default" : "other" })}
+        </p>
+      )}
       <form className="grid gap-6" onSubmit={save}>
         <Card title={t("section.profile")}>
           <div className="max-w-md">
@@ -137,6 +188,7 @@ export function IcpForm(props: Props) {
               value={fields.name}
               maxLength={LIMITS.name}
               error={errors.name}
+              disabled={!props.writable}
               onChange={(event) => edit("name", event.target.value)}
             />
           </div>
@@ -147,6 +199,7 @@ export function IcpForm(props: Props) {
               label={t("titles")}
               value={fields.titles}
               error={errors.titles}
+              disabled={!props.writable}
               onChange={(value) => edit("titles", value)}
             />
             <ChipInput
@@ -154,6 +207,7 @@ export function IcpForm(props: Props) {
               options={seniorities}
               value={fields.seniorities}
               error={errors.seniorities}
+              disabled={!props.writable}
               onChange={(value) => edit("seniorities", value)}
             />
           </Card>
@@ -162,6 +216,7 @@ export function IcpForm(props: Props) {
               label={t("industries")}
               value={fields.industries}
               error={errors.industries}
+              disabled={!props.writable}
               onChange={(value) => edit("industries", value)}
             />
             <ChipInput
@@ -169,6 +224,7 @@ export function IcpForm(props: Props) {
               options={sizes}
               value={fields.sizeRanges}
               error={errors.sizeRanges}
+              disabled={!props.writable}
               onChange={(value) => edit("sizeRanges", value)}
             />
             <ChipInput
@@ -176,6 +232,7 @@ export function IcpForm(props: Props) {
               options={countries}
               value={fields.countries}
               error={errors.countries}
+              disabled={!props.writable}
               onChange={(value) => edit("countries", value)}
             />
           </Card>
@@ -188,6 +245,7 @@ export function IcpForm(props: Props) {
               maxLength={LIMITS.text}
               value={fields.mustHaves}
               error={errors.mustHaves}
+              disabled={!props.writable}
               onChange={(event) => edit("mustHaves", event.target.value)}
             />
             <TextArea
@@ -196,6 +254,7 @@ export function IcpForm(props: Props) {
               maxLength={LIMITS.text}
               value={fields.disqualifiers}
               error={errors.disqualifiers}
+              disabled={!props.writable}
               onChange={(event) => edit("disqualifiers", event.target.value)}
             />
           </div>
@@ -203,20 +262,20 @@ export function IcpForm(props: Props) {
         <CriteriaTable
           criteria={criteria}
           error={errors.criteria}
+          disabled={!props.writable}
           onChange={(rows) => {
             setCriteria(rows);
             setSaved(false);
           }}
         />
         {failure ? <ErrorState module="icp" code={failure} /> : null}
-        <SaveBar
-          dirty={JSON.stringify([fields, criteria]) !== stored}
-          note={<span className="text-pretty">{t("rescore_note")}</span>}
-        >
-          <Button type="submit" variant="primary" loading={saving}>
-            {whole("ui.action.save")}
-          </Button>
-        </SaveBar>
+        {props.writable ? (
+          <SaveBar dirty={dirty} note={<span className="text-pretty">{t("rescore_note")}</span>}>
+            <Button type="submit" variant="primary" loading={saving}>
+              {whole("ui.action.save")}
+            </Button>
+          </SaveBar>
+        ) : null}
         <Toast message={saved ? t("saved") : undefined} />
       </form>
     </>
@@ -228,6 +287,16 @@ function fieldsOf(icp: Fields): Fields {
   const { name, titles, seniorities, industries, sizeRanges, countries } = icp;
   const { mustHaves, disqualifiers } = icp;
   return { name, titles, seniorities, industries, sizeRanges, countries, mustHaves, disqualifiers };
+}
+
+/**
+ * Whether a targeting field holds a value, as domain/rules.ts's hasTargeting tells it of the stored
+ * ICP, whose answers are trimmed: any field but the name. The screen cannot import the rules.
+ */
+function hasTargeting(icp: Fields): boolean {
+  const { titles, seniorities, industries, sizeRanges, countries } = icp;
+  const lists = [titles, seniorities, industries, sizeRanges, countries];
+  return lists.some((list) => list.length > 0) || icp.mustHaves !== "" || icp.disqualifiers !== "";
 }
 
 /** The field a path of `details.fields` names: `titles.3` is titles, `criteria.0.weight` criteria. */

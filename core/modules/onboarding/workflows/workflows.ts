@@ -7,18 +7,19 @@
 import { isCancellation, proxyActivities } from "@temporalio/workflow";
 import type { ActivityFunctions } from "@whytide/platform";
 import type { DraftRun, FetchResult, RunResult } from "../domain/draft.ts";
+import { DRAFT_TIMEOUTS } from "./constants.ts";
 import type { activities } from "./index.ts";
 
 type Activities = ActivityFunctions<typeof activities>;
 const { onboarding_fetch_website } = proxyActivities<Activities>({
-  startToCloseTimeout: "75 seconds",
-  heartbeatTimeout: "30 seconds",
+  startToCloseTimeout: DRAFT_TIMEOUTS.fetch,
+  heartbeatTimeout: DRAFT_TIMEOUTS.fetchHeartbeat,
 });
 const { onboarding_draft_from_pages } = proxyActivities<Activities>({
-  startToCloseTimeout: "3 minutes",
+  startToCloseTimeout: DRAFT_TIMEOUTS.draft,
 });
 const { onboarding_fetch_failed, onboarding_draft_failed } = proxyActivities<Activities>({
-  startToCloseTimeout: "10 seconds",
+  startToCloseTimeout: DRAFT_TIMEOUTS.mark,
 });
 
 export async function onboarding_draft_company_knowledge(

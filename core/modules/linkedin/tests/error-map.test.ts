@@ -1,16 +1,18 @@
 // The error map (beta-p1-030; docs/flows.md "The error map") and the hold, unit tests: every code
 // of the LinkedIn port has a row; an account code with no reason, or one of the reasons left, maps as
-// disconnected; a code off the list as an unmapped one; the rows of the task's table; the table
-// frozen; and the hold longer than the worst retry span of a send activity.
+// disconnected; an invitation refused as already connected has its own row, no other refusal;
+// a code off the list as an unmapped one; the rows of the task's table; the table frozen; and the
+// hold longer than the worst retry span of a send activity.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { LINKEDIN_DISCONNECT_REASONS, linkedinPort } from "@whytide/providers";
 import {
   ACCOUNT_COOLDOWN_MS,
   PROVIDER_ERROR_PAUSE_MS,
+  SEND_REFUSED_REASONS,
   SEND_RESERVATION_MS,
 } from "../domain/send/constants.ts";
-import { SEND_ERROR_MAP, sendAnswerOf } from "../domain/send/error-map.ts";
+import { refusedReasonOf, SEND_ERROR_MAP, sendAnswerOf } from "../domain/send/error-map.ts";
 
 const MINUTE_MS = 60_000;
 
@@ -48,6 +50,36 @@ test("linkedin_account_disconnected maps by its reason: checkpoint and restricte
     "disconnected",
     "restricted",
   ]);
+});
+
+test("linkedin_send_refused maps by its reason for an invite only (connect-already-connected): already_connected commits the slot with no invitation pending, releases the credits and skips the step, its answer naming the reason; another reason, none, or a message's or a withdrawal's is a refusal", () => {
+  const key = sendAnswerOf("linkedin_send_refused", "already_connected", "invite");
+  assert.equal(key, "linkedin_send_refused:already_connected");
+  assert.deepEqual(SEND_ERROR_MAP[key], {
+    slot: "commit_not_pending",
+    credits: "release",
+    step: { status: "skipped", reason: "already_connected" },
+    account: null,
+  });
+  assert.equal(refusedReasonOf(key), "already_connected");
+  const others = [
+    ["already_connected", "message"],
+    ["already_connected", "withdraw"],
+    ["already_connected", undefined],
+    ["already_invited", "invite"],
+    ["recipient_unavailable", "invite"],
+    [undefined, "invite"],
+  ] as const;
+  for (const [reason, action] of others) {
+    const answer = sendAnswerOf("linkedin_send_refused", reason, action);
+    assert.equal(answer, "linkedin_send_refused", `${reason} ${action}`);
+    assert.equal(refusedReasonOf(answer), undefined);
+  }
+  assert.equal(
+    sendAnswerOf("linkedin_not_found", "already_connected", "invite"),
+    "linkedin_not_found",
+  );
+  assert.deepEqual([...SEND_REFUSED_REASONS], ["already_connected"]);
 });
 
 test("the rows of the table: the outcome unknown keeps the slot until the check and pauses the account; a refusal by LinkedIn commits the slot, not the credits; a limit restricts; a defect fails; a refusal before the call waits; a committed repeat is a success", () => {

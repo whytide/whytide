@@ -4,9 +4,9 @@
 // of the workspace's enrollments, by label: each number on seeded rows; every other step status, a
 // withdrawal and the enrollments that did not end on a reply left out; the periods' boundaries in two
 // zones from the same instants; an account linkedin no longer holds, in UTC; another workspace's rows,
-// the same sender id's included; campaigns.read. The rows are written as campaigns and its sender
-// leave them by campaigns' createEnrollment, the accounts by linkedin's factory. It lives here: a
-// module never imports a host.
+// the same sender id's included; campaigns.read; whose accounts, a Member's own or an Owner's every
+// one (gamma-p6-070). The rows are written as campaigns and its sender leave them by campaigns'
+// createEnrollment, the accounts by linkedin's factory. It lives here: a module never imports a host.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { databaseUrl } from "@whytide/db";
@@ -14,7 +14,12 @@ import { asRole, withTestDb } from "@whytide/db/testing";
 import { useIdentityClient } from "@whytide/identity/testing";
 import { collectLogs, createLogger } from "@whytide/platform";
 import { signInAs } from "@whytide/providers/auth/testing";
-import { createTwoWorkspaces, createUser, useTenancyClient } from "@whytide/tenancy/testing";
+import {
+  createMembership,
+  createTwoWorkspaces,
+  createUser,
+  useTenancyClient,
+} from "@whytide/tenancy/testing";
 import { type Api, start } from "../src/start.ts";
 
 // The modules by their builds' paths, as src/modules.generated.ts loads them: the api lists no module
@@ -70,9 +75,9 @@ async function enroll(workspaceId: string, senderAccountId: string, rest: Partia
   return personId;
 }
 
-/** A connected account in the zone, with the label. */
-async function account(workspaceId: string, timeZone: string, label: string) {
-  const { id } = await linkedin.createConnectedAccount(workspaceId, { timeZone });
+/** A connected account in the zone, with the label, and its owner when given. */
+async function account(workspaceId: string, timeZone: string, label: string, ownerUserId?: string) {
+  const { id } = await linkedin.createConnectedAccount(workspaceId, { timeZone, ownerUserId });
   await app.senderAccount.update({ where: { id }, data: { label } });
   return id;
 }
@@ -169,6 +174,7 @@ test("GET …/campaigns/counts answers each sender account by label with its con
   assert.equal(status, 200);
   assert.deepEqual(body, {
     asOf: NOW,
+    scope: "all",
     senders: [
       sender(
         founder,
@@ -239,6 +245,7 @@ test("GET …/campaigns/counts counts no step planned, awaiting approval, schedu
   assert.equal(status, 200);
   assert.deepEqual(body, {
     asOf: NOW,
+    scope: "all",
     senders: [sender(id, ["Left out", "UTC"], [ZERO, ZERO, [1, 0, 0, 0]])],
   });
 });
@@ -274,6 +281,7 @@ test("GET …/campaigns/counts reads each sender's periods in its zone: 23:30 lo
   const all = (n: number): Tally => [n, n, n, n];
   assert.deepEqual(body, {
     asOf: NOW,
+    scope: "all",
     senders: [
       sender(kolkata, ["Kolkata", "Asia/Kolkata"], [all(1), all(5), all(7)]),
       sender(losAngeles, ["Los Angeles", "America/Los_Angeles"], [all(3), all(6), all(7)]),
@@ -287,7 +295,7 @@ test("GET …/campaigns/counts never counts another workspace's rows, those unde
   const ofB = await account(b.workspace.id, "UTC", "B's");
   assert.deepEqual(await read(a.user.id, a.workspace.id), {
     status: 200,
-    body: { asOf: NOW, senders: [] },
+    body: { asOf: NOW, scope: "all", senders: [] },
   });
   await enroll(a.workspace.id, ofA, { steps: [sent("connect", ago(0, 1))] });
   // B's rows: its own account's, and rows under A's account id, which B's linkedin does not hold.
@@ -307,6 +315,7 @@ test("GET …/campaigns/counts never counts another workspace's rows, those unde
     status: 200,
     body: {
       asOf: NOW,
+      scope: "all",
       senders: [
         sender(
           ofA,
@@ -324,6 +333,7 @@ test("GET …/campaigns/counts never counts another workspace's rows, those unde
     status: 200,
     body: {
       asOf: NOW,
+      scope: "all",
       senders: [sender(ofB, ["B's", "UTC"], both), sender(ofA, [null, null], both)],
     },
   });
@@ -335,5 +345,37 @@ test("campaigns.read is required: a signed-in user who is no member of the works
   assert.deepEqual(await read(nobody.id, a.workspace.id), {
     status: 403,
     body: { code: "forbidden" },
+  });
+});
+
+test("whose accounts (gamma-p6-070): a Member reads their own account's counts alone, scope own, and the other Member theirs; an Owner every member's and an account linkedin no longer holds, scope all", async () => {
+  const [a] = await createTwoWorkspaces();
+  const ws = a.workspace.id;
+  const [ada, bo] = [await createUser(), await createUser()];
+  for (const { id: userId } of [ada, bo]) {
+    await createMembership({ userId, workspaceId: ws, role: "Member" });
+  }
+  const adas = await account(ws, "UTC", "Ada's", ada.id);
+  const bos = await account(ws, "UTC", "Bo's", bo.id);
+  const gone = "sac_counts_gone";
+  for (const id of [adas, bos, gone]) {
+    await enroll(ws, id, { steps: [sent("connect", ago(0, 1))] });
+  }
+  const one: [Tally, Tally, Tally] = [
+    [1, 0, 0, 0],
+    [1, 0, 0, 0],
+    [1, 0, 0, 0],
+  ];
+  const own = (senders: unknown[]) => ({ status: 200, body: { asOf: NOW, scope: "own", senders } });
+  assert.deepEqual(await read(ada.id, ws), own([sender(adas, ["Ada's", "UTC"], one)]));
+  assert.deepEqual(await read(bo.id, ws), own([sender(bos, ["Bo's", "UTC"], one)]));
+  const senders = [
+    sender(adas, ["Ada's", "UTC"], one),
+    sender(bos, ["Bo's", "UTC"], one),
+    sender(gone, [null, null], one),
+  ];
+  assert.deepEqual(await read(a.user.id, ws), {
+    status: 200,
+    body: { asOf: NOW, scope: "all", senders },
   });
 });

@@ -4,9 +4,12 @@
 // whose text changed after the approval (content_changed), the step skipped and nothing reserved; a
 // held or cancelled step's pending item is blocked in the stop's transaction, and an approval pressed
 // before the stop passes nothing; a withdrawal needs no item, and every other action needs one, an
-// action added later included. A late press's 409 is the worker's test
+// action added later included; a first message's item the campaign's mode approved passes nothing:
+// a first touch needs a person's approval in every mode (gamma-p4-090, gamma-p4-070; the mode's own
+// cases are tests/safety/approval-mode.test.ts). A late press's 409 is the worker's test
 // (core/apps/worker/tests/campaigns-queue.test.ts): approvals' commands are its routes' only.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test, { beforeEach } from "node:test";
 import { addOptOut } from "@whytide/contacts";
 import { useHashSalt } from "@whytide/contacts/testing";
@@ -16,7 +19,7 @@ import { openSending, useClock, useLinkedinClient, useRandom } from "@whytide/li
 import { checkGate } from "../../domain/gate/gate.ts";
 import { exitSuppressedEnrollments } from "../../domain/gate/suppressed.ts";
 import { holdForReply } from "../../domain/hold.ts";
-import { needsApproval, opensItem } from "../../domain/steps/actions.ts";
+import { linkedinActionType, needsApproval, opensItem } from "../../domain/steps/actions.ts";
 import { nextDueAt } from "../../domain/template/due.ts";
 import { fixture } from "../fixtures.ts";
 
@@ -45,7 +48,8 @@ const sendThroughGate = (accountId: string, stepId: string) =>
         where: { id: stepId },
         select: { actionType: true, idempotencyKey: true },
       });
-      const reservation = await reserveSend({ accountId, actionType, idempotencyKey });
+      const action = linkedinActionType({ id: stepId, actionType });
+      const reservation = await reserveSend({ accountId, actionType: action, idempotencyKey });
       assert.ok("reservationId" in reservation, "a passed step is reserved");
     }
     return answer;
@@ -212,4 +216,39 @@ test("the approval check fails closed: every action needs an approved item but a
     actions.map((action) => opensItem(action)),
     [true, true, false, false],
   );
+});
+
+test("a first message whose item the campaign's mode approved fails the gate with not_approved: a first touch needs a person's approval, so the mode's, its text frozen with the AI disclosure line, sends nothing and nothing is reserved", async () => {
+  const { id: accountId } = await account();
+  const { steps } = await enrolledLead("approval-safety-mode");
+  await approved(steps.connect);
+  await moveStep(steps.connect, "succeeded");
+  await dueAt(steps.message_1, new Date());
+  assert.equal(await queue(steps.message_1), "opened");
+  await draftReady(steps.message_1, FIRST);
+  // The mode's approval as approvals and messaging leave it: the text frozen with its line, the
+  // item approved with no person (approvals' approveByMode).
+  const item = await itemOf(steps.message_1);
+  assert.ok(item?.draftId);
+  const frozen = `${FIRST}\n\nWritten with AI assistance and sent without a person's review.`;
+  const draft = { status: "approved", approvedAt: new Date(), editedText: frozen } as const;
+  const where = { id: item.draftId };
+  await app().messageDraft.update({ where, data: { ...draft, disclosureApplied: true } });
+  const approvedContentHash = createHash("sha256").update(frozen, "utf8").digest("hex");
+  const byMode = { decisionOrigin: "approval_mode", approvalBy: "mode" } as const;
+  const decision = { status: "approved", approvedContentHash, decidedAt: new Date() } as const;
+  await app().approvalItem.update({ where: { id: item.id }, data: { ...decision, ...byMode } });
+  // The decision schedules the mode's approval by its origin; the gate decides (gamma-p4-070).
+  assert.equal(await decide(steps.message_1), "scheduled");
+
+  const answer = await sendThroughGate(accountId, steps.message_1);
+  assert.deepEqual([answer.pass, !answer.pass && answer.reason], [false, "not_approved"]);
+  assert.deepEqual(answer.checks.approval, {
+    approvalItemId: item.id,
+    status: "approved",
+    contentHash: null,
+  });
+  assert.equal(await reservations(), 0);
+  const step = await stepOf(steps.message_1);
+  assert.deepEqual([step.status, step.skipReason], ["skipped", "not_approved"]);
 });

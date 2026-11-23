@@ -51,12 +51,18 @@ export function whyText(t: Translate, { key, params = {} }: WhyBullet): string |
       return t("qualification.why.disqualified", params);
     case "qualification.why.fit":
       return t("qualification.why.fit", params);
+    case "qualification.why.fit_member":
+      return t("qualification.why.fit_member", params);
     case "qualification.why.gap":
       return t("qualification.why.gap", params);
     case "qualification.why.hard_filtered":
       return t("qualification.why.hard_filtered", params);
     case "qualification.why.must_missed":
       return t("qualification.why.must_missed", params);
+    case "qualification.why.must_missed_member":
+      return t("qualification.why.must_missed_member", params);
+    case "qualification.why.why_now":
+      return t("qualification.why.why_now", params);
     default:
       return undefined;
   }

@@ -77,7 +77,7 @@ export type WithdrawRow = {
   readonly actionType: string;
   readonly status: string;
   readonly personId: string;
-  readonly senderAccountId: string;
+  readonly senderAccountId: string | null;
   readonly templateId: string;
   readonly stepTemplateHash: string;
   readonly idempotencyKey: string;

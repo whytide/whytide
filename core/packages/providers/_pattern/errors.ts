@@ -17,6 +17,8 @@ export const patternErrors = defineErrors({
   provider_unknown: {},
   /** No selector: `PROVIDER_<PORT>` is empty. */
   provider_not_configured: {},
+  /** A list of adapters naming one twice; `details.adapter` names it. */
+  provider_list_invalid: { status: 500 },
   /** A provider ref that is not a non-empty id under an adapter name, or a malformed column. */
   provider_ref_invalid: { status: 500 },
 });

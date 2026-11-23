@@ -3,8 +3,9 @@
 // loading state and its error state with a retry: a Switch, on while the workspace is stopped, that
 // asks for confirmation both ways. Stopped, no LinkedIn action of the workspace runs from the next
 // one, reads included, for every account, until the stop is lifted. The operator's stop of the
-// workspace or of the instance shows the Switch locked, saying so. A failed change shows its code
-// in words, with a retry.
+// workspace or of the instance shows the Switch locked, saying so; a member without linkedin.manage
+// (a Member, gamma-p6-070, as page.tsx reads the role) sees it disabled with a hint. A failed change
+// shows its code in words, with a retry.
 import { Button, Dialog, ErrorState, LoadingState, Switch } from "@whytide/ui";
 import { Lock, OctagonX } from "@whytide/ui/icons";
 import { ApiError, browserApi, data } from "@whytide/web/api/browser";
@@ -15,7 +16,13 @@ import type { ControlsResponse } from "../../schemas/controls.ts";
 const NOTE = "flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-sm";
 const ICON = "mt-0.5 size-4 shrink-0";
 
-export function WorkspaceStop({ workspaceId }: { workspaceId: string }) {
+type Props = {
+  workspaceId: string;
+  /** The signed-in member holds linkedin.manage: an Owner or an Admin stops and lifts. */
+  canStop: boolean;
+};
+
+export function WorkspaceStop({ workspaceId, canStop }: Props) {
   const t = useTranslations("linkedin.controls");
   const id = useId();
   const [controls, setControls] = useState<ControlsResponse>();
@@ -65,7 +72,9 @@ export function WorkspaceStop({ workspaceId }: { workspaceId: string }) {
       ? t("locked.platform")
       : controls?.workspace.stopSource === "operator"
         ? t("locked.workspace")
-        : undefined;
+        : canStop
+          ? undefined
+          : t("hint.stop_manage_only");
   return (
     <section
       aria-labelledby={`${id}-title`}

@@ -5,3 +5,4 @@
 3. Commands, from the repository root: `pnpm -F @whytide/identity build`, `typecheck`, `test`, `test:tenancy`, `lint`; `pnpm -F @whytide/api test` for the guard and the first sign-in; `pnpm invite <email>`; `pnpm tenant:create` and `pnpm workspace:create` (README "The tenant commands").
 4. Every access to `invites` goes through `domain/store.ts`, on its two paths; a new read across workspaces is a security change (`docs/security.md`). Users, workspaces and memberships are tenancy's: through its commands only.
 5. Tests import `domain/`, `cli/` and `testing/`, and tenancy's `@whytide/tenancy/testing`; never `index.ts` or a host. Stay inside this folder and `identity.prisma`; a change to a shared package is its own task.
+6. An invite is accepted only by a session of its own address (`allowSignIn`, the first sign-in, `acceptInvite`), and only while open: never a token or a link that signs in, in a mail or a URL.

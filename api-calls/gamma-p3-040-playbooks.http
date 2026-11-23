@@ -1,0 +1,54 @@
+# playbooks' agents (core/modules/playbooks/README.md "Routes"): up to
+# PLAYBOOKS_MAX_AGENTS_PER_WORKSPACE (3 unset) live agents in a workspace, each on an audience of its
+# own (icp's GET …/icp/audiences) and with up to PLAYBOOKS_MAX_SOURCES_PER_AGENT (10 unset) sources
+# of signals'; the list answers both as limits. A member's session: playbooks.read for the reads, playbooks.write for the writes.
+# `icpId`, `playbookId` and `sourceId` are ids of your workspace: put them in
+# http-client.private.env.json with your workspaceId. Another workspace's agent is 404
+# playbook_not_found on every route that names one. A write sends the cookie, so it sends
+# Origin: {{appOrigin}} too (the api's origin check). The create is @Idempotent(): its
+# Idempotency-Key is an example UUID; another one makes a new agent. signals registers its source
+# checker as it loads (gamma-p5-045); without it the two sources' routes answer 503
+# playbook_source_checker_missing.
+
+### GET /v1/workspaces/{workspaceId}/playbooks: the workspace's agents with their sources' counts, the live ones first, and the limits
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/playbooks
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/playbooks: a new agent on the audience, owned by the caller; 201, 409 playbook_icp_in_use or playbook_limit_reached
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/playbooks
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000003040
+
+{ "name": "Logistics founders", "icpId": "{{icpId}}" }
+
+### GET /v1/workspaces/{workspaceId}/playbooks/{playbookId}: the agent and the ids of its sources
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/playbooks/{{playbookId}}
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PATCH /v1/workspaces/{workspaceId}/playbooks/{playbookId}: renames, moves or pauses the agent; archived is final
+PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/playbooks/{{playbookId}}
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "name": "Logistics founders in France", "status": "paused" }
+
+### PUT /v1/workspaces/{workspaceId}/playbooks/{playbookId}/sources: replaces the agent's sources, limits.sources at most
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/playbooks/{{playbookId}}/sources
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "sourceIds": ["{{sourceId}}"] }
+
+### GET /v1/workspaces/{workspaceId}/playbooks/{playbookId}/sources/check: whether the agent may hold each source, fifty ids at most
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/playbooks/{{playbookId}}/sources/check?ids={{sourceId}}
+Accept: application/json
+Cookie: {{sessionCookie}}

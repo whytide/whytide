@@ -29,6 +29,7 @@
     "@whytide/contacts": "workspace:*",
     "@whytide/db": "workspace:*",
     "@whytide/platform": "workspace:*",
+    "@whytide/providers": "workspace:*",
     "@whytide/qualification": "workspace:*",
     "@whytide/signals": "workspace:*",
     "@whytide/tenancy": "workspace:*",

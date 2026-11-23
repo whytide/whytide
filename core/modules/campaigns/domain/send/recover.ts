@@ -6,18 +6,27 @@
 // credits and waits for its next check: `due_at` on an `executing` step is when that check may run,
 // null or past when due, so a failed check waits for the next quota day and an outage costs a check
 // a day at most. A failed step ends its enrollment, locking the person's rows in the order every
-// stop takes: the lead, the enrollment, the steps, then the items.
+// stop takes: the lead, the enrollment, the steps, then the items. A connection request refused as
+// already connected is skipped, and its enrollment goes on (connected.ts, connect-already-connected).
 import { cancelItems } from "@whytide/approvals";
 import { lockLeadStatus } from "@whytide/contacts";
 import { tenantClient } from "@whytide/db";
-import { findSendReservation, SEND_ERROR_MAP, type SendErrorMap } from "@whytide/linkedin";
+import {
+  findSendReservation,
+  SEND_ERROR_MAP,
+  type SendErrorMap,
+  sendAnswerOf,
+} from "@whytide/linkedin";
 import { nextQuotaDayAt } from "@whytide/platform";
+import { LIVE_ENROLLMENT_STATUSES, NO_PAUSE } from "../constants.ts";
 import { PENDING_STEP_STATUSES } from "../gate/constants.ts";
 import { lastExecutedAt } from "../plan/account.ts";
 import { MIN_ACTION_GAP_MS } from "../plan/constants.ts";
+import { linkedinSenderAccount } from "../steps/actions.ts";
 import { checkedCode } from "../steps/codes.ts";
 import { EXIT_DETAILS, STEP_REASON_CODES, type StepReasonCode } from "../steps/constants.ts";
 import { finishLead, lockEnrollment, timeZoneOf } from "../steps/skip.ts";
+import { skipConnected } from "./connected.ts";
 import { MS_PER_SECOND, PORT_CODE_PREFIX } from "./constants.ts";
 import { type Holds, releaseHolds, waitAgain } from "./release.ts";
 
@@ -28,6 +37,8 @@ type Outcome = {
   readonly uncharged: null;
 };
 type SendEffect = SendErrorMap[keyof SendErrorMap];
+/** A port's code the map has and the steps store; any other is linkedin_error_unmapped. */
+type MappedCode = keyof SendErrorMap & StepReasonCode;
 /** A step due for its check, with the credits its claim reserved. */
 export type DueCheck = { readonly stepExecutionId: string; readonly usageId: string | null };
 
@@ -53,10 +64,10 @@ export async function checkAccounts(at: Date): Promise<string[]> {
   const rows = await tenantClient.stepExecution.findMany({
     where: { ...EXECUTING, OR: dueForCheck(at) },
     distinct: ["senderAccountId"],
-    select: { senderAccountId: true },
+    select: { id: true, senderAccountId: true },
     orderBy: { senderAccountId: "asc" },
   });
-  return rows.map(({ senderAccountId }) => senderAccountId);
+  return rows.map(linkedinSenderAccount);
 }
 
 /**
@@ -122,21 +133,26 @@ async function backToPlan(id: string, code: StepReasonCode | null, at: Date): Pr
 }
 
 /**
- * A port's error after the call, `{ refused, retryAfterSec? }`, or a request off the port's schema
- * before it, by linkedin's error map; linkedin has already settled the slot and `retry_at`. The
- * outcome unknown: kept, checked at the next run after linkedin's pause. Otherwise the credits are
- * released and the step is `failed` (a send refused, a person not found, a defect), its enrollment
- * ended, or put back unplaced (`due_at` after the rate limit's wait, else the next quota day's start).
- * The run ends when the map's row touches the account.
+ * A port's error after the call, `{ refused, reason?, retryAfterSec? }`, or a request off the port's
+ * schema before it, by linkedin's error map; linkedin has already settled the slot and `retry_at`.
+ * The outcome unknown: kept, checked at the next run after linkedin's pause. Otherwise the credits
+ * are released and the step is `skipped` (a connection request refused as already connected, its
+ * enrollment going on), `failed` (a send refused, a person not found, a defect), its enrollment
+ * ended, or put back unplaced (`due_at` after the rate limit's wait, else the next quota day's
+ * start). The run ends when the map's row touches the account.
  */
 export async function settlePortError(
   id: string,
   holds: Holds,
-  answer: { readonly refused: string; readonly retryAfterSec?: number | undefined },
+  answer: {
+    readonly refused: string;
+    readonly reason?: string | undefined;
+    readonly retryAfterSec?: number | undefined;
+  },
   at: Date,
 ): Promise<Outcome> {
   const code = mappedCode(answer.refused);
-  const effect: SendEffect = SEND_ERROR_MAP[code];
+  const effect: SendEffect = SEND_ERROR_MAP[await answerOf(id, code, answer.reason)];
   const { step } = effect;
   if (step.status === "executing" || step.status === "succeeded") {
     await keepExecuting(id, code, null);
@@ -144,6 +160,10 @@ export async function settlePortError(
   }
   await releaseHolds({ usageId: holds.usageId, reservationId: null });
   const end = effect.account !== null;
+  if (step.status === "skipped") {
+    await skipConnected(id, at);
+    return { outcome: "refused", end, uncharged: null };
+  }
   if (step.status === "failed") {
     await failStep(id, code, step.defect, at);
     return { outcome: "refused", end, uncharged: null };
@@ -161,8 +181,9 @@ export async function settlePortError(
 
 /**
  * The step `failed` with `code`, then its enrollment `exited` (`send_refused`; `exit_detail` the
- * code for a defect), its pending steps `cancelled` with the code and their pending items blocked
- * (approvals' cancelItems), and the lead `finished` (the file's header). Whether it failed.
+ * code for a defect, and for a person without a LinkedIn profile, gamma-rf-050), its pending steps
+ * `cancelled` with the code and their pending items blocked (approvals' cancelItems), and the lead
+ * `finished` (the file's header). Whether it failed.
  */
 export async function failStep(
   id: string,
@@ -185,8 +206,8 @@ export async function failStep(
   });
   if (failed.count === 0) return false;
   const exited = await tenantClient.enrollment.updateMany({
-    where: { id: step.enrollmentId, status: "active" },
-    data: { status: "exited", exitReason: "send_refused", exitDetail, endedAt: at },
+    where: { id: step.enrollmentId, status: { in: [...LIVE_ENROLLMENT_STATUSES] } },
+    data: { status: "exited", exitReason: "send_refused", exitDetail, endedAt: at, ...NO_PAUSE },
   });
   const cancelled = await tenantClient.stepExecution.updateManyAndReturn({
     where: { enrollmentId: step.enrollmentId, status: { in: [...PENDING_STEP_STATUSES] } },
@@ -256,17 +277,35 @@ async function keepExecuting(id: string, code: string | null, dueAt: Date | null
 async function nextQuotaDayOf(id: string, at: Date): Promise<Date | null> {
   const step = await tenantClient.stepExecution.findFirst({
     where: { id },
-    select: { senderAccountId: true },
+    select: { id: true, senderAccountId: true },
   });
-  const timeZone = step === null ? null : await timeZoneOf(step.senderAccountId);
+  const timeZone = step === null ? null : await timeZoneOf(linkedinSenderAccount(step));
   return timeZone === null ? null : nextQuotaDayAt(at, timeZone);
 }
 
 /** The map's key for a port's code; any other answer is an unmapped one, its outcome unknown. */
-function mappedCode(code: string): keyof SendErrorMap & StepReasonCode {
+function mappedCode(code: string): MappedCode {
   const known =
     code.startsWith(PORT_CODE_PREFIX) &&
     Object.hasOwn(SEND_ERROR_MAP, code) &&
     (STEP_REASON_CODES as readonly string[]).includes(code);
-  return (known ? code : "linkedin_error_unmapped") as keyof SendErrorMap & StepReasonCode;
+  return (known ? code : "linkedin_error_unmapped") as MappedCode;
+}
+
+/**
+ * The map's row for the step's answer: its code's, or, with a reason beside it, linkedin's key for
+ * the code, the reason and the step's action (sendAnswerOf), so that only a connection request
+ * refused as already connected has a row of its own.
+ */
+async function answerOf(
+  id: string,
+  code: MappedCode,
+  reason: string | undefined,
+): Promise<keyof SendErrorMap> {
+  if (reason === undefined) return code;
+  const step = await tenantClient.stepExecution.findFirst({
+    where: { id },
+    select: { actionType: true },
+  });
+  return sendAnswerOf(code, reason, step?.actionType);
 }

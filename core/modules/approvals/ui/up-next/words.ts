@@ -1,6 +1,7 @@
 // "Up next"'s words for what a row holds (messages/en.json, `approvals.up_next.*`), each key written
 // out so that the message check reads every one: the lead's name and role, a step's name, why an
-// approved step waits, a gate's issue with what it found, and a fact's source, worded from its
+// approved step waits, why the campaign's mode left a step to its owner (gamma-p4-090), a gate's
+// issue with what it found, and a fact's source, worded from its
 // reference's table and column, never the reference, which holds record ids. The steps', gates' and
 // codes' names are open strings (README.md "Screen"): one off these lists gets a generic word.
 import { useTranslations } from "next-intl";
@@ -29,6 +30,7 @@ export function useUpNextWords() {
     message_1: t("step.message_1"),
     follow_up_1: t("step.follow_up_1"),
     follow_up_2: t("step.follow_up_2"),
+    email_1: t("step.email_1"),
   };
   const waits: Record<string, string> = {
     insufficient_credits: t("wait.insufficient_credits"),
@@ -40,12 +42,18 @@ export function useUpNextWords() {
         length: count(issue, "length"),
         min: count(issue, "min"),
         max: count(issue, "max"),
+        unit: text(issue, "unit"),
       }),
     placeholders: (issue) => t("gate.placeholders", { placeholder: text(issue, "placeholder") }),
     red_lines: (issue) => t("gate.red_lines", { phrase: text(issue, "phrase") }),
     colleague_signal: (issue) => t("gate.colleague_signal", { phrase: text(issue, "phrase") }),
     grounding: (issue) => t("gate.grounding", { entity: text(issue, "entity") }),
     facts_used: () => t("gate.facts_used"),
+    // gamma-p3-070's, on every channel and on an email's (gamma-p4-090).
+    signal_act: (issue) => t("gate.signal_act", { phrase: text(issue, "phrase") }),
+    subject: (issue) => t("gate.subject", { problem: text(issue, "problem") }),
+    links: (issue) => t("gate.links", { link: text(issue, "link") }),
+    near_duplicate: (issue) => t("gate.near_duplicate", { similarity: count(issue, "similarity") }),
   };
   const sources: Record<string, (column: string) => string> = {
     users: (column) => t("source.users", { column }),
@@ -70,8 +78,18 @@ export function useUpNextWords() {
         : title || companyName || undefined,
     /** The step's name: the sequence's step, else its action's. */
     step: (stepKey: string, actionType: ItemResponse["actionType"]) =>
-      pick(steps, stepKey) ?? (actionType === "invite" ? t("step.connect") : t("step.message")),
+      pick(steps, stepKey) ??
+      (actionType === "invite"
+        ? t("step.connect")
+        : actionType === "email"
+          ? t("step.email")
+          : t("step.message")),
     wait: (code: string) => pick(waits, code) ?? t("wait.other"),
+    /** Why the mode left the step to its owner, from the row: its action, else its draft. */
+    declined: ({ actionType, draft }: ItemResponse) =>
+      t("wait.mode_declined", {
+        reason: actionType === "invite" ? "invite" : draft?.status === "ready" ? "check" : "draft",
+      }),
     gate: (issue: GateIssue) => pick(gates, issue.gate)?.(issue) ?? t("gate.other"),
     /** A fact's source, from `<table>/<id>/<column>`, then an item's index. */
     source: (sourceRef: string) => {

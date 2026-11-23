@@ -1,42 +1,40 @@
 "use client";
-// The lead's Re-score (README "Screen"), in the lead page's header. A lead without a scored snapshot
-// has a short note instead, which says what comes next: pending waits for the next batch, ai_failed
-// for a change to the ICP's targeting. A scored one has Re-score, with what to do first when it needs
-// review: the worker scores it again from its verdicts with the saved criteria. When the request
-// marked the lead, its snapshot is asked for every two seconds, thirty seconds at most, until a new
-// one takes the lead: its status shows and the page reads its data again. A failure shows its code
-// in words, with a retry.
+// The lead's Re-score (README "Screen", "A new assessment"), in the lead page's header. Every decided
+// lead has it, whatever its status, with one line under it: it asks the AI to assess the lead again
+// with its details of now, for one assessment's credits; a lead that needs review says what to check,
+// an ai_failed one why the AI failed. A pending lead has a short note instead, which says what it
+// waits for. After the press, the lead is read every few seconds while it waits for the member's
+// request, about three minutes at most: then its new status shows, or the note of what it waits for
+// now (credits, the provider), and the page reads its data again; past that, a line says the result
+// shows when the AI is done. A failure shows its code in words, with a retry.
 import { Button, ErrorState, LoadingState } from "@whytide/ui";
 import { Info, RotateCw, TriangleAlert } from "@whytide/ui/icons";
 import { ApiError, browserApi, data } from "@whytide/web/api/browser";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { MEMBER_REQUESTED } from "../../domain/member-reassess/constants.ts";
+import { POLL_LIMIT, POLL_MS } from "./constants.ts";
 
-/** What the panel shows of the lead: its status, why it waits or failed, its current snapshot. */
-type Lead = {
-  readonly status: string;
-  readonly reason: string | null;
-  readonly snapshotId: string | null;
-};
+/** What the panel shows of the lead: its status, and why it waits or failed. */
+type Lead = { readonly status: string; readonly reason: string | null };
 type Failure = { readonly module: string; readonly code: string };
 type Props = { workspaceId: string; personId: string; lead?: Lead; failure?: Failure };
-/** Re-score's step: ready, waiting for a snapshot other than `from` (`left` polls more), or done. */
+/** Re-score's step: ready, asking, reading the lead until it leaves pending (`left` reads more), or done. */
 type Step =
-  | { readonly kind: "ready" | "unchanged" | "waiting" }
-  | { readonly kind: "running"; readonly from: string | null; readonly left: number }
+  | { readonly kind: "ready" | "asking" | "waiting" }
+  | { readonly kind: "reading"; readonly left: number }
   | { readonly kind: "rescored"; readonly status: string }
   | { readonly kind: "failed"; readonly failure: Failure };
 
-const POLL_MS = 2_000;
-const POLLS = 15;
-const SCORED = new Set(["qualified", "not_qualified", "needs_review"]);
-/** A note in place of the button or under it, its icon first: short, quiet, as the header's facts are. */
+/** A line under the button, quiet, as the header's facts are. */
+const LINE = "max-w-xs text-start text-xs text-ink-muted sm:text-end";
+/** A note in place of the button or under it, its icon first. */
 const NOTE = "flex max-w-xs items-start gap-1.5 text-start text-xs text-ink-muted";
 const NOTE_ICON = "mt-px size-3.5 shrink-0";
-const failed = (error: unknown): Step => {
+const failed = (error: unknown, module: string): Step => {
   const code = error instanceof ApiError ? error.code : "internal_error";
-  return { kind: "failed", failure: { module: "qualification", code } };
+  return { kind: "failed", failure: { module, code } };
 };
 
 export function RescoreAction({ workspaceId, personId, lead, failure }: Props) {
@@ -44,44 +42,45 @@ export function RescoreAction({ workspaceId, personId, lead, failure }: Props) {
   const router = useRouter();
   const [step, setStep] = useState<Step>({ kind: "ready" });
 
-  async function rescore() {
-    setStep({ kind: "running", from: lead?.snapshotId ?? null, left: POLLS });
+  async function reassess() {
+    setStep({ kind: "asking" });
     try {
       // One key per press: a retry of this request is answered once (core/apps/api "Request protection").
       const header = { "Idempotency-Key": crypto.randomUUID() };
-      const { marked } = await data(
-        browserApi().POST("/v1/workspaces/{workspaceId}/qualification/rescore", {
-          params: { path: { workspaceId }, header },
-          body: { personIds: [personId] },
+      await data(
+        browserApi().POST("/v1/workspaces/{workspaceId}/qualification/leads/{personId}/reassess", {
+          params: { path: { workspaceId, personId }, header },
         }),
       );
-      if (marked === 0) setStep({ kind: "unchanged" });
+      setStep({ kind: "reading", left: POLL_LIMIT });
     } catch (error) {
-      setStep(failed(error));
+      setStep(failed(error, "qualification"));
     }
   }
 
   useEffect(() => {
-    if (step.kind !== "running") return;
+    if (step.kind !== "reading") return;
     if (step.left === 0) {
       setStep({ kind: "waiting" });
       return;
     }
     const timer = setTimeout(async () => {
       try {
-        const snapshot = await data(
-          browserApi().GET("/v1/workspaces/{workspaceId}/qualification/leads/{personId}/snapshot", {
+        const read = await data(
+          browserApi().GET("/v1/workspaces/{workspaceId}/contacts/leads/{personId}", {
             params: { path: { workspaceId, personId } },
           }),
         );
-        if (snapshot.snapshotId === step.from) {
-          setStep((now) => (now.kind === "running" ? { ...now, left: now.left - 1 } : now));
+        const status = read.qualificationStatus;
+        if (status === "pending" && read.statusReason === MEMBER_REQUESTED) {
+          setStep((now) => (now.kind === "reading" ? { ...now, left: now.left - 1 } : now));
           return;
         }
-        setStep({ kind: "rescored", status: snapshot.status });
+        // Decided, or waiting for something else now: the page's new read shows its note.
+        setStep(status === "pending" ? { kind: "ready" } : { kind: "rescored", status });
         router.refresh();
       } catch (error) {
-        setStep(failed(error));
+        setStep(failed(error, "contacts"));
       }
     }, POLL_MS);
     return () => clearTimeout(timer);
@@ -94,51 +93,50 @@ export function RescoreAction({ workspaceId, personId, lead, failure }: Props) {
   }
   if (step.kind === "failed") {
     const { module, code } = step.failure;
-    return <ErrorState module={module} code={code} onRetry={rescore} />;
+    return <ErrorState module={module} code={code} onRetry={reassess} />;
   }
-  if (lead === undefined || lead.snapshotId === null || !SCORED.has(lead.status)) {
-    const reason = lead?.reason ?? "none";
-    const why =
-      lead?.status === "pending"
-        ? t("explain.pending", { reason })
-        : lead?.status === "ai_failed"
-          ? t("explain.ai_failed", { reason })
-          : t("action.empty");
+  const reason = lead?.reason ?? "none";
+  if (lead === undefined || lead.status === "pending") {
     return (
       <p className={NOTE}>
         <Info aria-hidden="true" className={NOTE_ICON} />
-        {why}
+        {t("explain.pending", { reason })}
       </p>
     );
   }
-  const running = step.kind === "running";
+  const busy = step.kind === "asking" || step.kind === "reading";
   const said =
     step.kind === "rescored"
       ? t("action.rescored", { status: step.status })
-      : step.kind === "unchanged"
-        ? t("action.unchanged")
-        : step.kind === "waiting"
-          ? t("action.waiting")
-          : undefined;
+      : step.kind === "waiting"
+        ? t("action.waiting")
+        : undefined;
   return (
     <div className="grid justify-items-start gap-2 sm:justify-items-end">
-      <Button onClick={rescore} loading={running}>
-        {running ? null : <RotateCw aria-hidden="true" />}
+      <Button onClick={reassess} loading={busy}>
+        {busy ? null : <RotateCw aria-hidden="true" />}
         {t("action.rescore")}
       </Button>
+      <p className={LINE}>{t("action.rescore_hint")}</p>
       {lead.status === "needs_review" ? (
         <p className={NOTE}>
           <TriangleAlert aria-hidden="true" className={`${NOTE_ICON} text-warm-dot`} />
           {t("explain.needs_review")}
         </p>
       ) : null}
-      {running ? (
+      {lead.status === "ai_failed" ? (
+        <p className={NOTE}>
+          <Info aria-hidden="true" className={NOTE_ICON} />
+          {t("explain.ai_failed", { reason })}
+        </p>
+      ) : null}
+      {busy ? (
         <div className="text-xs">
           <LoadingState />
         </div>
       ) : null}
       {said ? (
-        <p role="status" className="max-w-xs text-xs text-ink-muted sm:text-end">
+        <p role="status" className={LINE}>
           {said}
         </p>
       ) : null}

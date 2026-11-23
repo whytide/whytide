@@ -1,6 +1,7 @@
 // A send's settle (docs/flows.md "Sends"): commitSend counts the send on its reservation's own day
 // row once it went out, a reservation released or expired meanwhile included, and an invite in the
-// account's pending invitations until the next check (domain/invites/); releaseSend frees a slot
+// account's pending invitations until the next check (domain/invites/), but with `pending` false (an
+// invitation LinkedIn refused, its person a connection already); releaseSend frees a slot
 // whose send did not go out. Each locks the day's row first (quota/holds.ts), as the read settles
 // do, an invite's commit its account's row before it, and moves only the counters of the
 // reservation's own action type. holdSendUntil keeps a slot past its hold while its send's outcome
@@ -20,8 +21,13 @@ export type SettledSend = {
  * The send counted once: a repeat answers as the first. A released or expired reservation still
  * counts, since the send went out; when another reservation holds its key meanwhile, it becomes
  * `committed_late`, counted, outside the partial unique index. A read's is `reservation_not_open`.
+ * An invite's adds one to the account's pending invitations, unless `pending` is false.
  */
-export async function commitSend(reservationId: string): Promise<SettledSend> {
+export async function commitSend(
+  reservationId: string,
+  options: { readonly pending?: boolean } = {},
+): Promise<SettledSend> {
+  const { pending = true } = options;
   const valid = parseInput(releaseInput, { reservationId });
   const invite = await tenantClient.senderQuotaReservation.findFirst({
     where: { id: valid.reservationId, actionType: "invite" },
@@ -37,7 +43,7 @@ export async function commitSend(reservationId: string): Promise<SettledSend> {
   const late = held.status !== "reserved" && (await heldElsewhere(held));
   const status = late ? "committed_late" : "committed";
   await settle(held, status, 1);
-  if (held.actionType === "invite") await countPending(held.senderAccountId);
+  if (held.actionType === "invite" && pending) await countPending(held.senderAccountId);
   return { reservationId: held.id, status };
 }
 

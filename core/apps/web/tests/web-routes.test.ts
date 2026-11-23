@@ -27,6 +27,16 @@ test("a panel in a slot that its page does not list fails web:routes, naming the
   await assert.rejects(collectMounts(tree("unknown-slot"), false), { message });
 });
 
+test("a navigation screen that lists slots takes panels as a page outside the navigation does", async () => {
+  const { navPages, panels } = await collectMounts(tree("nav-slot"), false);
+  const shown = navPages.map(({ id, path, slots }) => [id, path, slots]);
+  assert.deepEqual(shown, [["a.queue", "queue", ["side"]]]);
+  assert.deepEqual(
+    panels.map(({ page, slot, screen }) => [page, slot, screen]),
+    [["a.queue", "side", "extra"]],
+  );
+});
+
 test("the navigation keeps the groups' order and sorts each group's entries by order", () => {
   const entry = (group: NavEntry["group"], segment: string, order: number): NavEntry => {
     const labelKey = `m.nav.${segment}`;

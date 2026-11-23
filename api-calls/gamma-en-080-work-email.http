@@ -1,0 +1,28 @@
+# enrichment's Email panel routes (core/modules/enrichment/README.md "The Email panel";
+# gamma-en-080, built in gamma-en-081): a member's session, enrichment.read for the GET and
+# enrichment.run for the POST. The GET answers the lead's held address with its kind,
+# verification, source class and times, whether it waits for consent, and the last lookup with its
+# status and reason; never a finder's or verifier's name. The POST asks for the email: "find", a
+# lookup at enrichment.work_email's price, charged only for a verified address; "verify", the held
+# address checked again, free. 202 with the request and its status, queued; the worker runs it and
+# the GET then answers how it ended. The Idempotency-Key is an example UUID and, with the action's
+# prefix, the request's key too: the same one answers the same request. A write sends the cookie, so
+# it sends Origin: {{appOrigin}} too. Put in http-client.private.env.json, with your workspaceId:
+# `personId`, a lead of yours. Refusals: 404 enrichment_person_not_found (another workspace's
+# person, an unknown one), 400 idempotency_key_required, 400 validation_failed (no action), 422
+# idempotency_key_reused (the same key with the other action).
+
+### GET /v1/workspaces/{workspaceId}/enrichment/leads/{personId}/work-email: the held address and the last lookup
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/enrichment/leads/{{personId}}/work-email
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/enrichment/leads/{personId}/work-email: find the email (or verify the held one); 202, queued
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/enrichment/leads/{{personId}}/work-email
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000800
+
+{ "action": "find" }

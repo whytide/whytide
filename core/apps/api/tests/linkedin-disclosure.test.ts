@@ -200,3 +200,24 @@ test("PATCH …/accounts/{id} and POST …/refresh answer disclosureVersion and 
   const after = await call(owner, ws, "PATCH", `/accounts/${unconfirmed.id}`, patch);
   assert.deepEqual(fields(after), [200, 2, false]);
 });
+
+test("a Member accepts the disclosure for their own account (gamma-p6-070), and neither a teammate Member nor an Owner for it, not_account_owner, nothing stored", async () => {
+  const [a] = await createTwoWorkspaces();
+  const ws = a.workspace.id;
+  const [member, teammate] = [await createUser(), await createUser()];
+  for (const { id: userId } of [member, teammate]) {
+    await createMembership({ userId, workspaceId: ws, role: "Member" });
+  }
+  const settings = { ownerUserId: member.id, personalAccount: false };
+  const { id } = await createConnectedAccount(ws, settings);
+  const accept = (userId: string) =>
+    call(userId, ws, "POST", `/accounts/${id}/disclosure`, { body: ACCEPTED, key: randomUUID() });
+  assert.deepEqual(await accept(teammate.id), refusal(403, "not_account_owner"));
+  assert.deepEqual(await accept(a.user.id), refusal(403, "not_account_owner"));
+  const confirmed = async () =>
+    (await app.senderAccount.findUniqueOrThrow({ where: { id } })).personalAccountConfirmedAt;
+  assert.equal(await confirmed(), null);
+  const accepted = await accept(member.id);
+  assert.deepEqual([accepted.status, accepted.body.sendingDisclosureRequired], [200, false]);
+  assert.notEqual(await confirmed(), null);
+});

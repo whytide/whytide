@@ -115,7 +115,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
   }
 }
 
-test("the 46-valid-row fixture: 46 persons, every value of each stamped import, csv and the upload's time, 46 imported leads, one discovery.people_imported; the job done with its counts", async () => {
+test("the 46-valid-row fixture: 46 persons, every value of each stamped import, csv and the upload's time, 46 imported leads named by the file, one discovery.people_imported; the job done with its counts", async () => {
   const job = await claimed(readFileSync(FIFTY_ROWS, "utf8"));
   const made = counts({ created: 46, skippedDuplicate: 1, errors: 3 });
   assert.deepEqual(await importRun(job), { status: "done", counts: made });
@@ -136,7 +136,7 @@ test("the 46-valid-row fixture: 46 persons, every value of each stamped import, 
   for (const lead of leads) {
     assert.deepEqual([lead.sourceLabel, lead.qualificationStatus], ["imported", "pending"]);
     assert.deepEqual(lead.sources, [
-      { kind: "imported", ref: job.id, at: lead.firstSourceAt.toISOString() },
+      { kind: "imported", ref: job.id, at: lead.firstSourceAt.toISOString(), label: "people.csv" },
     ]);
   }
   const [event, ...more] = await imported(job.workspaceId);

@@ -202,7 +202,7 @@ test("a workspace route without @Permission is 500 permission_undeclared; a perm
     headers: { cookie },
   });
   assert.deepEqual([undeclared.status, undeclared.body], [500, { code: "permission_undeclared" }]);
-  // can() reads no role in alpha (platform README): an account route's principal has no membership.
+  // An account route's principal has no membership: can() refuses it before any role is read.
   const refused = await call("/v1/guard/declared", { headers: { cookie } });
   assert.deepEqual([refused.status, refused.body], [403, { code: "forbidden" }]);
 });

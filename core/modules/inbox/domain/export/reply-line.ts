@@ -1,11 +1,19 @@
 // A line of the reply golden set (README.md "The reply golden set"; docs/data.md), pure: one labeled
 // reply as gamma's classifier reads it, with the conversation before it. The person and the thread
 // are the sha256 of their ids; the line holds no id, and the person's first and last names are masked
-// in every text, as qualification's golden set leaves names out.
+// in every text, as qualification's golden set leaves names out. gamma-p7-060: the thread's channel,
+// the class its owner chose among the 7, the reply's classification and whether the store's phrases
+// matched it, so that the classifier is measured on the owners' labels.
 import { createHash } from "node:crypto";
 import type { ReplyLabelValue } from "../labels/constants.ts";
 import type { Direction } from "../threads/constants.ts";
-import { EXPORT_EARLIER_MAX, NAME_MASKS, PATTERN_SYNTAX, WORD_CHARACTER } from "./constants.ts";
+import {
+  EXPORT_EARLIER_MAX,
+  type LineChannel,
+  NAME_MASKS,
+  PATTERN_SYNTAX,
+  WORD_CHARACTER,
+} from "./constants.ts";
 
 /** A message of the thread, as the line reads it. */
 export type ThreadText = {
@@ -19,6 +27,23 @@ export type ThreadText = {
 /** The person's names, from contacts' getLead; null where contacts holds none. */
 export type PersonNames = { readonly firstName: string | null; readonly lastName: string | null };
 
+/** The reply's classification as the line carries it (gamma-p7-060): the label and how it was made. */
+export type LineClassification = {
+  readonly label: string;
+  readonly confidence: number;
+  readonly is_suggested: boolean;
+  readonly origin: string;
+  readonly prompt_version: number | null;
+};
+/** The classification as inbox's table holds it. */
+export type StoredClassification = {
+  readonly label: string;
+  readonly confidence: number;
+  readonly isSuggested: boolean;
+  readonly origin: string;
+  readonly promptVersion: number | null;
+};
+
 /** A message before the reply: who wrote it, the masked text and when it was sent. */
 export type EarlierMessage = {
   readonly direction: Direction;
@@ -30,10 +55,16 @@ export type EarlierMessage = {
 export type ReplyLine = {
   readonly person_sha256: string;
   readonly thread_sha256: string;
+  readonly channel: LineChannel;
   readonly label: ReplyLabelValue;
+  /** The thread owner's class among the 7 (gamma-p4-055); null on beta's rows. */
+  readonly class_label: string | null;
   readonly labeled_at: string;
   readonly received_at: string;
   readonly text: string;
+  readonly opt_out_matched: boolean;
+  /** The reply's classification (gamma-p4-040), whatever its origin; null until classified. */
+  readonly classification: LineClassification | null;
   readonly earlier: EarlierMessage[];
 };
 
@@ -45,12 +76,18 @@ export type ReplyLine = {
 export function replyLine(parts: {
   readonly personId: string;
   readonly threadId: string;
-  readonly label: { readonly label: ReplyLabelValue; readonly labeledAt: Date };
-  readonly reply: ThreadText & { readonly receivedAt: Date };
+  readonly channel: LineChannel;
+  readonly label: {
+    readonly label: ReplyLabelValue;
+    readonly classLabel: string | null;
+    readonly labeledAt: Date;
+  };
+  readonly reply: ThreadText & { readonly receivedAt: Date; readonly optOutMatched: boolean };
+  readonly classification: StoredClassification | null;
   readonly thread: readonly ThreadText[];
   readonly names: PersonNames;
 }): ReplyLine {
-  const { reply, names } = parts;
+  const { reply, names, classification } = parts;
   const earlier = parts.thread
     .filter((message) => oldestFirst(message, reply) < 0)
     .sort(oldestFirst)
@@ -64,10 +101,23 @@ export function replyLine(parts: {
   return {
     person_sha256: sha256(parts.personId),
     thread_sha256: sha256(parts.threadId),
+    channel: parts.channel,
     label: parts.label.label,
+    class_label: parts.label.classLabel,
     labeled_at: parts.label.labeledAt.toISOString(),
     received_at: reply.receivedAt.toISOString(),
     text: maskNames(reply.body, names),
+    opt_out_matched: reply.optOutMatched,
+    classification:
+      classification === null
+        ? null
+        : {
+            label: classification.label,
+            confidence: classification.confidence,
+            is_suggested: classification.isSuggested,
+            origin: classification.origin,
+            prompt_version: classification.promptVersion,
+          },
     earlier,
   };
 }

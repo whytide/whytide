@@ -19,3 +19,25 @@ export const TOUCHES_PER_PERSON_PER_DAY = 1;
 export const ACTION_ORDER = ["message", "withdraw", "invite"] as const;
 
 export type PlanAction = (typeof ACTION_ORDER)[number];
+
+/**
+ * The actions whose candidates go by their persons' priority, the higher first (gamma-p5-070,
+ * RB-9.2.1): messages and invites. Withdrawals keep beta's order, by due time, as a priority would
+ * withdraw a Hot lead's invitation first (not in the sources).
+ */
+export const PRIORITY_ACTIONS: ReadonlySet<PlanAction> = new Set(["message", "invite"]);
+
+/**
+ * The persons one call of qualification's leadPriorities takes at most (its LEAD_PRIORITIES_MAX,
+ * which its index does not export): an account's due persons are read in pages of this many, one
+ * call each, so an account with more never fails its plan on the read (gamma-p5-070).
+ */
+export const PRIORITY_READ_MAX = 1000;
+
+/**
+ * The prefix of a sender's plan lock (gamma-p6-040, account.ts), a transaction-scoped advisory lock
+ * keyed `<prefix>:<workspace id>:<sender id>`: one plan run per sender at a time, so an attempt
+ * past PLAN_TIMEOUT never overlaps the next on the same sender. A mailbox's plan takes the same
+ * (gamma-p4-010): an account's and a mailbox's ids never meet, their prefixes differ.
+ */
+export const PLAN_LOCK = "campaigns.plan";

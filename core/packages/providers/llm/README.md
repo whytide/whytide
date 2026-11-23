@@ -1,6 +1,6 @@
 # The LLM port
 
-Mastra agents get their model here ([architecture §8, §9](../../../../docs/architecture.md#8-background-work-temporal-and-mastra)): an AI SDK 7 language model object (`LanguageModelV4`), the kind Mastra takes, so that bring-your-own-model keeps working, with our metadata beside it. No module imports a vendor SDK; the Anthropic adapter is in `anthropic/`.
+Mastra agents get their model here ([architecture §8, §9](../../../../docs/architecture.md#8-background-work-temporal-and-mastra)): an AI SDK 7 language model object (`LanguageModelV4`), the kind Mastra takes, so that bring-your-own-model keeps working, with our metadata beside it. No module imports a vendor SDK; the Anthropic adapter is in `anthropic/`, the OpenAI one in `openai/`.
 
 | File | Holds |
 |---|---|
@@ -11,6 +11,7 @@ Mastra agents get their model here ([architecture §8, §9](../../../../docs/arc
 | `fake/` | the in-memory model; `fake/tests/contract.test.ts` runs the contract on it |
 | `tests/` | the port-level tests: `boundary.test.ts`, the refused tools and provider options; `contract.test.ts`, a vendor's stream failing |
 | `anthropic/` | the Anthropic adapter; [its README](anthropic/README.md) has the vendor's terms, the key and the models |
+| `openai/` | the OpenAI adapter; [its README](openai/README.md) has the vendor's terms, the key, the models and the reasoning effort |
 
 ## The port
 

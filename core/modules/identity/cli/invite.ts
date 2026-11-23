@@ -1,27 +1,36 @@
-// `pnpm invite <email> [--workspace <id or slug>]` (README.md "The invite command"): an engineer
-// invites an email to a workspace, WORKSPACE_SLUG by default, and gets the sign-in page's address to
-// pass on, never a link that signs in. A second run for the email reports the invite and exits 0. On
-// a database with no organization, the default workspace is made first, the email its Owner. Each
-// line starts with a code: organization_created, invite_created, invite_exists, or the refusal's.
+// `pnpm invite <email> [--workspace <id or slug>] [--no-mail]` (README.md "The invite command"): an
+// engineer invites an email to a workspace, WORKSPACE_SLUG by default, as Owner, and the invite mail
+// goes to it as from the Invites screen (domain/mail.ts); the line gives the sign-in page, never a
+// link that signs in. A second run for an email with an open invite, or a member's, reports it and
+// exits 0. On a database with no organization, the default workspace is made first, the email its
+// Owner. Each line starts with a code: organization_created, invite_created, invite_exists,
+// already_member, mail_sent, mail_skipped, mail_failed, or the refusal's.
 import { parseArgs } from "node:util";
 import { isAppError } from "@whytide/platform";
 import { findWorkspaceBySlug, settings } from "@whytide/tenancy";
-import { bootstrapFirstWorkspace, createInvite } from "../domain/invites.ts";
+import { bootstrapFirstWorkspace, createInvite, type Invite } from "../domain/invites.ts";
+import { appOrigin, mailInvite } from "../domain/mail.ts";
 import { normalizeEmail } from "../domain/rules.ts";
 import { errors } from "../errors.ts";
+import { EXIT, SIGN_IN_PATH } from "./constants.ts";
 
-const USAGE = "usage: pnpm invite <email> [--workspace <id or slug>]";
+const USAGE = "usage: pnpm invite <email> [--workspace <id or slug>] [--no-mail]";
+/** The refusals that leave the email able to sign in: a second run is harmless. */
+const ANSWERED: readonly string[] = [errors.invite_exists, errors.already_member];
 
-/** The command with its arguments; the exit code: 0 invited, 1 refused, 2 a usage error. */
+/**
+ * The command with its arguments; the exit code: 0 invited, 1 refused, 2 a usage error, 3 the
+ * invite made and its mail failed.
+ */
 export async function runInvite(args: string[], print: (line: string) => void): Promise<number> {
   const parsed = parse(args);
   if (parsed === null) {
     print(USAGE);
-    return 2;
+    return EXIT.usage;
   }
-  const { email, named, chosen } = parsed;
+  const { email, named, chosen, mail } = parsed;
   // APP_PUBLIC_ORIGIN, the api's variable, is the web app's origin; unset, the path alone.
-  const signIn = `${(process.env.APP_PUBLIC_ORIGIN ?? "").replace(/\/+$/, "")}/sign-in`;
+  const signIn = `${appOrigin()}${SIGN_IN_PATH}`;
   // An id has an underscore and a slug none (tenancy's docs/concepts.md).
   let workspaceId: string | undefined = named;
   try {
@@ -35,24 +44,47 @@ export async function runInvite(args: string[], print: (line: string) => void): 
     }
     if (workspaceId === undefined) {
       print(`workspace_not_found: no single workspace has the slug ${named}: pass its id`);
-      return 1;
+      return EXIT.refused;
     }
-    await createInvite({ workspaceId, email });
+    const invite = await createInvite({ workspaceId, email, role: "Owner", invitedBy: null });
     print(`invite_created: ${email} may sign in to ${workspaceId} at ${signIn}`);
+    return mail ? await mailed(invite, print) : skipped("--no-mail", print);
   } catch (error) {
     if (!isAppError(error) || error.status >= 500) throw error;
-    if (error.code !== errors.invite_exists) {
+    if (!ANSWERED.includes(error.code)) {
       print(`${error.code}: ${named}`);
-      return 1;
+      return EXIT.refused;
     }
-    print(`invite_exists: ${email} is invited to ${workspaceId} already; sign-in page ${signIn}`);
+    const already = error.code === errors.invite_exists ? "is invited to" : "is a member of";
+    print(`${error.code}: ${email} ${already} ${workspaceId} already; sign-in page ${signIn}`);
+    return EXIT.done;
   }
-  return 0;
 }
 
-function parse(args: string[]): { email: string; named: string; chosen: boolean } | null {
+/** The invite mail's line: sent, skipped while APP_PUBLIC_ORIGIN is empty, or failed with exit 3. */
+async function mailed(invite: Invite, print: (line: string) => void): Promise<number> {
+  const outcome = await mailInvite(invite);
+  if (outcome.mail === "failed") {
+    print(`mail_failed: ${outcome.mailCode}: no mail went to ${invite.email}; the invite is made`);
+    return EXIT.mailFailed;
+  }
+  if (outcome.mail === "skipped") {
+    return skipped("APP_PUBLIC_ORIGIN is empty, and a path alone is no use in a mail", print);
+  }
+  print(`mail_sent: ${invite.email}`);
+  return EXIT.done;
+}
+
+function skipped(reason: string, print: (line: string) => void): number {
+  print(`mail_skipped: ${reason}`);
+  return EXIT.done;
+}
+
+function parse(
+  args: string[],
+): { email: string; named: string; chosen: boolean; mail: boolean } | null {
   try {
-    const options = { workspace: { type: "string" } } as const;
+    const options = { workspace: { type: "string" }, "no-mail": { type: "boolean" } } as const;
     const { positionals, values } = parseArgs({ args, options, allowPositionals: true });
     const email = positionals.length === 1 ? normalizeEmail(positionals[0]) : null;
     if (email === null) return null;
@@ -60,6 +92,7 @@ function parse(args: string[]): { email: string; named: string; chosen: boolean 
       email,
       named: values.workspace ?? settings.WORKSPACE_SLUG,
       chosen: values.workspace !== undefined,
+      mail: values["no-mail"] !== true,
     };
   } catch {
     return null; // an unknown option, or --workspace without a value

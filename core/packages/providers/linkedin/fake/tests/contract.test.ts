@@ -1,11 +1,17 @@
 // The fake's contract suite (README.md "The contract suite"). Its world seeds a post of ninety
-// engagers and a profile, connects through connectOnVisit() mounted on a node:http server of the
+// engagers, a profile and a relation's, connects through connectOnVisit() mounted on a node:http server of the
 // test's own (fetch, to 127.0.0.1 only), signs webhooks with emitWebhook, gives a member to invite,
-// a relation to message (seedRelation) and a disconnected account, and an event of every kind from
+// a relation to message (seedRelation) and a disconnected account, an event of every kind from
 // the event helpers (an unknown type signed with TEST_WEBHOOK_SECRET, as the fake signs under
-// APP_ENV=test), forged with forge(). Then the fake's own: failNext's retryAfterSec, every code and a
-// reason, recordedCalls, answerNext, the send side's refusals and acceptInvite, create() and the
-// route under APP_ENV=test only, every account's memberRef, and an extra key on each kind.
+// APP_ENV=test), forged with forge(), and posts for each read: seven since postedSince and two
+// before it, a phrase's, a member's, a company's and the account's own, and one long post, and a
+// company page (seedCompany), read by its link in another case with a trailing slash, and a
+// member's "Contact info" emails (seedContactEmails), five in mixed case, one twice: three answered
+// lower case, each once (gamma-en-087). Then the
+// fake's own: failNext's retryAfterSec, every code and a reason, recordedCalls, answerNext, the send
+// side's refusals and acceptInvite, create() and the route under APP_ENV=test only, every account's
+// memberRef, an extra key on each kind, the post reads' bounds with nothing called and their
+// accounts, and the engagers' dateKnown.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHmac } from "node:crypto";
@@ -18,14 +24,15 @@ import { bindPort, type PortErrorCode } from "../../../_pattern/index.ts";
 import { contractSuite } from "../../../testing/index.ts";
 import { type LinkedinWorld, linkedinCases, RETURN_URLS } from "../../contract.ts";
 import {
-  type Engager,
   LINKEDIN_WEBHOOK_KINDS,
+  type LinkedinPost,
   type LinkedinWebhook,
   type LinkedinWebhookEvent,
   linkedinPort,
+  type PostAuthor,
 } from "../../port.ts";
 import { TEST_WEBHOOK_SECRET } from "../constants.ts";
-import { linkedinFake, linkedinFakeAdapter, SIGNATURE_HEADER } from "../index.ts";
+import { type FakeEngager, linkedinFake, linkedinFakeAdapter, SIGNATURE_HEADER } from "../index.ts";
 
 const POST = "https://www.linkedin.com/feed/update/urn:li:activity:7000000000000000001/";
 const ADA = {
@@ -40,7 +47,14 @@ const ADA = {
   locationText: "London, United Kingdom",
   industry: "Software Development",
 };
-const engager = (i: number): Engager => ({
+/** A profile whose member the world makes a relation of the account's. */
+const CHIDI = {
+  ...ADA,
+  providerMemberRef: "fake-member-chidi",
+  profileUrl: "https://www.linkedin.com/in/chidi-example",
+  firstName: "Chidi",
+};
+const engager = (i: number): FakeEngager => ({
   providerMemberRef: `fake-member-${i}`,
   profileUrl: `https://www.linkedin.com/in/member-${i}`,
   name: `Member ${i}`,
@@ -49,6 +63,49 @@ const engager = (i: number): Engager => ({
   ...(i % 3 === 0 ? { commentText: "Useful, thanks" } : {}),
   engagedAt: new Date(Date.UTC(2026, 9, 1, 8, i)),
 });
+/** The posts' date line: the world's posts are hours after it, or before it. */
+const SINCE = new Date(Date.UTC(2026, 9, 1));
+const HOUR_MS = 3_600_000;
+const MEMBER_AUTHOR = {
+  kind: "member",
+  providerMemberRef: "fake-member-ada",
+  profileUrl: "https://www.linkedin.com/in/ada-example",
+  name: "Ada Example",
+  headline: "Head of Growth at Example",
+} as const satisfies PostAuthor;
+const COMPANY_AUTHOR = {
+  kind: "company",
+  companyUrl: "https://www.linkedin.com/company/example-ltd",
+  name: "Example Ltd",
+} as const satisfies PostAuthor;
+/** A company page, every fact known. */
+const EXAMPLE_PAGE = {
+  companyUrl: "https://www.linkedin.com/company/example-ltd",
+  name: "Example Ltd",
+  website: "https://example.com/",
+  industry: "Software Development",
+  employeeCount: 140,
+  employeeRange: { from: 51, to: 200 },
+  headquartersCountry: "GB",
+  description: "A synthetic company.",
+  foundedYear: 2012,
+} as const;
+const LONG_AUTHOR = { ...MEMBER_AUTHOR, profileUrl: "https://www.linkedin.com/in/long-example" };
+/** Over 500 characters, with a family emoji of five code points across the 500th. */
+const LONG_TEXT = `${"a".repeat(498)}👨‍👩‍👧 and the rest of the post`;
+/** A post of a source's: its hour from SINCE sets its date, the two set its link. */
+const fakePost = (source: number, hour: number, author: PostAuthor): LinkedinPost => ({
+  postUrl: `https://www.linkedin.com/feed/update/urn:li:activity:7${source}${String(hour + 50).padStart(17, "0")}`,
+  postedAt: new Date(SINCE.getTime() + hour * HOUR_MS),
+  excerpt: `Post ${hour} on sales automation`,
+  author,
+});
+/** Seven posts since SINCE and two before it, by the authors in turn. */
+const sourceOf = (source: number, authors: readonly PostAuthor[]) =>
+  [-2, -1, 1, 2, 3, 4, 5, 6, 7].map((hour, i) =>
+    fakePost(source, hour, authors[i % authors.length] as PostAuthor),
+  );
+const SINCE_POSTS = 7;
 const EVENTS_ACCOUNT = "fake-account-events";
 const EVENTS_MEMBER = "fake-member-events";
 const EVENTS_CHAT = "fake-chat-events";
@@ -149,7 +206,12 @@ const world: LinkedinWorld = {
   },
   profile: async () => {
     linkedinFake.seedProfile(ADA);
-    return { profileUrl: ADA.profileUrl, expected: ADA };
+    return { profileUrl: ADA.profileUrl, expected: { ...ADA, connected: false } };
+  },
+  connection: async (providerAccountRef) => {
+    linkedinFake.seedProfile(CHIDI);
+    linkedinFake.seedRelation(providerAccountRef, CHIDI.providerMemberRef);
+    return { profileUrl: CHIDI.profileUrl };
   },
   webhook: async ({ kind, providerAccountRef }, { forged = false } = {}) => {
     const webhook = linkedinFake.emitWebhook(kind, providerAccountRef);
@@ -168,6 +230,42 @@ const world: LinkedinWorld = {
   disconnected: async () => {
     linkedinFake.emitWebhook("account.disconnected", "fake-account-disconnected");
     return "fake-account-disconnected";
+  },
+  company: async () => {
+    linkedinFake.seedCompany(EXAMPLE_PAGE.companyUrl, EXAMPLE_PAGE);
+    return {
+      companyUrl: "https://www.linkedin.com/company/Example-Ltd/",
+      expected: structuredClone(EXAMPLE_PAGE),
+    };
+  },
+  contactEmails: async () => {
+    const memberRef = "fake-member-contact";
+    const given = ["Ada@Example.com", "ada@example.com", "ada.home@example.org", "a@example.net"];
+    linkedinFake.seedContactEmails(memberRef, [...given, "late@example.com"]);
+    return {
+      memberRef,
+      withoutRef: "fake-member-no-contact",
+      expected: ["ada@example.com", "ada.home@example.org", "a@example.net"],
+    };
+  },
+  posts: async (providerAccountRef) => {
+    linkedinFake.seedSearch("sales automation", sourceOf(1, [MEMBER_AUTHOR, COMPANY_AUTHOR]));
+    linkedinFake.seedAuthorPosts(MEMBER_AUTHOR.profileUrl, sourceOf(2, [MEMBER_AUTHOR]));
+    linkedinFake.seedAuthorPosts(COMPANY_AUTHOR.companyUrl, sourceOf(3, [COMPANY_AUTHOR]));
+    linkedinFake.seedOwnPosts(providerAccountRef, sourceOf(4, [MEMBER_AUTHOR]));
+    const long = { ...fakePost(5, 1, LONG_AUTHOR), excerpt: LONG_TEXT };
+    linkedinFake.seedAuthorPosts(LONG_AUTHOR.profileUrl, [long]);
+    const count = SINCE_POSTS;
+    return {
+      postedSince: SINCE,
+      // In another case and spacing than seeded: the fake matches a phrase as a search does.
+      search: { phrase: "Sales  AUTOMATION", count },
+      member: { authorUrl: MEMBER_AUTHOR.profileUrl, count },
+      // With a trailing slash: the same company page.
+      company: { authorUrl: `${COMPANY_AUTHOR.companyUrl}/`, count },
+      own: { count },
+      long: { authorUrl: LONG_AUTHOR.profileUrl, text: LONG_TEXT },
+    };
   },
 };
 
@@ -413,5 +511,101 @@ test("each kind parses from the fake to its exact shape; one key more is linkedi
       }),
       kind,
     );
+  }
+});
+
+test("the post reads refuse a phrase, an author link or a limit off the port's bounds with linkedin_input_invalid, calling nothing; the bounds themselves pass", async () => {
+  const linkedin = boundFake();
+  const page = { providerAccountRef: ACCOUNT, postedSince: SINCE, limit: 10 };
+  const phrase = "one two three four five";
+  const refused = [
+    () => linkedin.searchPosts({ ...page, phrase: `${phrase} six` }),
+    () => linkedin.searchPosts({ ...page, phrase: "x".repeat(101) }),
+    () => linkedin.searchPosts({ ...page, phrase: " " }),
+    () => linkedin.listAuthorPosts({ ...page, authorUrl: "https://www.linkedin.com/school/ada" }),
+    () => linkedin.listAuthorPosts({ ...page, authorUrl: "https://www.example.com/in/ada" }),
+    () => linkedin.listAuthorPosts({ ...page, authorUrl: "http://www.linkedin.com/in/ada" }),
+    () => linkedin.listOwnPosts({ ...page, limit: 0 }),
+    () => linkedin.listOwnPosts({ ...page, limit: 51 }),
+  ];
+  for (const call of refused) {
+    await assert.rejects(call(), (error: unknown) => {
+      failsWith("linkedin_input_invalid")(error);
+      const said = JSON.stringify([(error as Error).message, isAppError(error) && error.details]);
+      for (const value of [phrase, "xxxx", "/ada"]) assert.ok(!said.includes(value), value);
+      return true;
+    });
+  }
+  assert.deepEqual(linkedinFake.recordedCalls, [], "nothing called");
+  const empty = { posts: [], nextCursor: null };
+  assert.deepEqual(await linkedin.searchPosts({ ...page, phrase }), empty);
+  assert.deepEqual(await linkedin.searchPosts({ ...page, phrase: "x".repeat(100) }), empty);
+  assert.deepEqual(await linkedin.listOwnPosts({ ...page, limit: 1 }), empty);
+  assert.deepEqual(await linkedin.listOwnPosts({ ...page, limit: 50 }), empty);
+});
+
+test("the post reads check the account as the other reads, and failNext applies to them; a phrase or an account with no posts seeded gives an empty last page", async () => {
+  const linkedin = boundFake();
+  const page = { postedSince: SINCE, limit: 10 };
+  const authorUrl = MEMBER_AUTHOR.profileUrl;
+  linkedinFake.seedAuthorPosts(authorUrl, sourceOf(2, [MEMBER_AUTHOR]));
+  linkedinFake.failNext("linkedin_rate_limited");
+  await assert.rejects(
+    linkedin.listAuthorPosts({ providerAccountRef: ACCOUNT, authorUrl, ...page }),
+    failsWith("linkedin_rate_limited", { retryAfterSec: 60 }),
+  );
+  const { posts } = await linkedin.listAuthorPosts({
+    providerAccountRef: ACCOUNT,
+    authorUrl,
+    ...page,
+  });
+  assert.equal(posts.length, SINCE_POSTS);
+  await assert.rejects(
+    linkedin.listOwnPosts({ providerAccountRef: "fake-account-unknown", ...page }),
+    failsWith("linkedin_not_found"),
+  );
+  assert.deepEqual(await linkedin.listOwnPosts({ providerAccountRef: ACCOUNT, ...page }), {
+    posts: [],
+    nextCursor: null,
+  });
+  linkedinFake.emitAccountStatus(ACCOUNT, "restricted");
+  await assert.rejects(
+    linkedin.searchPosts({ providerAccountRef: ACCOUNT, phrase: "sales automation", ...page }),
+    failsWith("linkedin_account_disconnected", { reason: "restricted" }),
+  );
+});
+
+test("seedPost's engagers carry dateKnown: true, unless one is seeded false", async () => {
+  const linkedin = boundFake();
+  linkedinFake.seedPost(POST, [engager(1), { ...engager(2), dateKnown: false }]);
+  const { engagers } = await linkedin.listPostEngagers({
+    providerAccountRef: ACCOUNT,
+    postUrl: POST,
+    limit: 10,
+  });
+  assert.deepEqual(
+    engagers.map(({ providerMemberRef, dateKnown }) => [providerMemberRef, dateKnown]),
+    [
+      ["fake-member-2", false],
+      ["fake-member-1", true],
+    ],
+  );
+});
+
+test("a post answered with a vendor's email on its author, or a key more, is linkedin_output_invalid", async () => {
+  const linkedin = boundFake();
+  const post = fakePost(6, 1, MEMBER_AUTHOR);
+  const query = { providerAccountRef: ACCOUNT, postedSince: SINCE, limit: 10 };
+  const answers = [
+    { ...post, author: { ...MEMBER_AUTHOR, email: "ada@example.com" } },
+    { ...post, likes: 12 },
+  ];
+  for (const answer of answers) {
+    linkedinFake.answerNext("listOwnPosts", { posts: [answer], nextCursor: null });
+    await assert.rejects(linkedin.listOwnPosts(query), (error: unknown) => {
+      failsWith("linkedin_output_invalid")(error);
+      assert.ok(!JSON.stringify(isAppError(error) && error.details).includes("ada@example.com"));
+      return true;
+    });
   }
 });

@@ -109,7 +109,7 @@
     },
     "fake": [
       {
-        "text": "Lena, I saw you liked the post on cutting CRM cleanup time in half. When leads go cold before sales calls them, where does your team lose the most time?"
+        "text": "Lena, cutting CRM cleanup time in half is a goal many RevOps teams share. When leads go cold before sales calls them, where does your team lose the most time?"
       }
     ],
     "expected": { "words": ["Lena", "CRM"] }
@@ -270,7 +270,7 @@
     },
     "fake": [
       {
-        "text": "Amara, I noticed you liked the post on five lessons from a first outbound hire. A related number: Northwind booked 40% more meetings in a quarter once its team called leads that showed buying signals. Shall I send the short write-up of how they did it?"
+        "text": "Amara, the lessons of a first outbound hire matter to any revenue leader. A related number: Northwind booked 40% more meetings in a quarter once its team called leads that showed buying signals. Shall I send the short write-up of how they did it?"
       }
     ],
     "expected": { "words": ["Amara", "Northwind"] }
@@ -517,7 +517,7 @@
     },
     "fake": [
       {
-        "text": "Hanne, I saw you liked the post on five checks before a van goes out in winter. Which check saves Vlinder the most breakdowns?"
+        "text": "Hanne, five checks before a van goes out in winter make a useful list. Which check saves Vlinder the most breakdowns?"
       }
     ],
     "expected": { "words": ["Hanne", "winter"] }
@@ -1029,7 +1029,7 @@
     },
     "fake": [
       {
-        "text": "Dario, I saw you liked a post saying speed to lead is the number to watch this year. Signal Radar shows which people are showing buying signals, so your reps can reach them first. Which part of speed to lead is hardest for your team?"
+        "text": "Dario, making speed to lead the number to watch this year makes sense for a growth team. Signal Radar shows which people are showing buying signals, so your reps can reach them first. Which part of speed to lead is hardest for your team?"
       }
     ],
     "expected": {
@@ -1241,5 +1241,194 @@
       }
     ],
     "expected": { "words": ["Amara", "winter checks"], "colleagues": ["Jordan Lee"] }
+  },
+  {
+    "name": "v3-act-reaction-note",
+    "input": {
+      "channel": { "channel": "linkedin_note", "minCharacters": 1, "maxCharacters": 200 },
+      "dossier": {
+        "sender": { "name": { "f_1": "Sam Writer" } },
+        "offer": {
+          "oneLiner": {},
+          "products": { "f_2": "Signal Radar" },
+          "painPoints": { "f_3": "Leads go cold before sales calls them." },
+          "proofPoints": { "f_4": "Northwind booked 40% more meetings in a quarter." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_5": "Kasia" },
+        "headline": {},
+        "title": { "f_6": "Sales Operations Lead" },
+        "location": {},
+        "company": {
+          "name": { "f_7": "Brightwater" },
+          "industry": {},
+          "sizeRange": {},
+          "country": {}
+        }
+      },
+      "why_now": [
+        {
+          "reaction": { "f_10": "like" },
+          "at": { "f_11": "2026-10-20T09:00:00.000Z" },
+          "excerpt": { "f_9": "Three ways to keep a pipeline review short." },
+          "comment": {}
+        }
+      ],
+      "plan": { "angle": "signal_reaction", "factIds": ["f_5", "f_9", "f_3"], "cta": "question" },
+      "failures": [[{ "gate": "signal_act", "phrase": "saw you liked" }]],
+      "replaced": null
+    },
+    "fake": [
+      {
+        "text": "Kasia, keeping a pipeline review short is hard when leads go cold before sales calls them. Which part of the review takes your team the longest?"
+      }
+    ],
+    "expected": { "words": ["Kasia", "pipeline review"] }
+  },
+  {
+    "name": "v3-act-comment-retry",
+    "input": {
+      "channel": { "channel": "linkedin_message", "minCharacters": 150, "maxCharacters": 300 },
+      "dossier": {
+        "sender": { "name": { "f_1": "Sam Writer" } },
+        "offer": {
+          "oneLiner": {},
+          "products": { "f_2": "Signal Radar" },
+          "painPoints": { "f_3": "Leads go cold before sales calls them." },
+          "proofPoints": { "f_4": "Northwind booked 40% more meetings in a quarter." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_5": "Oren" },
+        "headline": {},
+        "title": { "f_6": "Head of Inside Sales" },
+        "location": {},
+        "company": {
+          "name": { "f_7": "Calderway" },
+          "industry": {},
+          "sizeRange": {},
+          "country": {}
+        }
+      },
+      "why_now": [
+        {
+          "reaction": { "f_11": "comment" },
+          "at": { "f_12": "2026-10-22T11:00:00.000Z" },
+          "excerpt": { "f_9": "Do SDR teams still need cold lists?" },
+          "comment": { "f_10": "We dropped cold lists in March and doubled our reply rate." }
+        }
+      ],
+      "plan": { "angle": "signal_comment", "factIds": ["f_5", "f_10", "f_2"], "cta": "question" },
+      "failures": [[{ "gate": "signal_act", "phrase": "your comment on" }]],
+      "replaced": null
+    },
+    "fake": [
+      {
+        "text": "Oren, thanks for commenting on whether SDR teams still need cold lists. Dropping them and doubling the reply rate is a strong result. Signal Radar lists the people showing buying signals, so the next list is warm from the start. What replaced the cold lists for your team?"
+      },
+      {
+        "text": "Oren, dropping cold lists and doubling the reply rate is a strong result for any inside sales team. Signal Radar lists the people showing buying signals, so the next list is warm from the start. What replaced the cold lists for your team?"
+      }
+    ],
+    "expected": { "words": ["Oren", "cold lists"] }
+  },
+  {
+    "name": "v3-colleague-phrase",
+    "input": {
+      "channel": { "channel": "linkedin_message", "minCharacters": 150, "maxCharacters": 300 },
+      "dossier": {
+        "sender": { "name": { "f_1": "Sam Writer" } },
+        "offer": {
+          "oneLiner": {},
+          "products": { "f_2": "Signal Radar" },
+          "painPoints": { "f_3": "Leads go cold before sales calls them." },
+          "proofPoints": { "f_4": "Northwind booked 40% more meetings in a quarter." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_5": "Priya" },
+        "headline": {},
+        "title": { "f_6": "Revenue Operations Lead" },
+        "location": {},
+        "company": {
+          "name": { "f_7": "Ashgrove" },
+          "industry": {},
+          "sizeRange": {},
+          "country": {}
+        }
+      },
+      "why_now": [
+        {
+          "reaction": { "f_11": "comment" },
+          "at": { "f_12": "2026-10-24T08:30:00.000Z" },
+          "excerpt": { "f_9": "How fast should a new lead get a call?" },
+          "comment": { "f_10": "Our rule is ten minutes, and we track it every week." }
+        }
+      ],
+      "step": { "kind": "first_message", "earlier": [] },
+      "plan": { "angle": "signal_comment", "factIds": ["f_5", "f_10", "f_2"], "cta": "question" },
+      "failures": [[{ "gate": "colleague_signal", "phrase": "your teammate" }]],
+      "replaced": null
+    },
+    "fake": [
+      {
+        "text": "Priya, a ten-minute rule for every new lead, tracked each week, is a high bar. Signal Radar flags the people showing buying signals, so the calls that count go first. How does your team handle the leads that arrive after hours?"
+      }
+    ],
+    "expected": { "words": ["Priya", "ten-minute"] }
+  },
+  {
+    "name": "v3-colleague-name-follow-up",
+    "input": {
+      "channel": { "channel": "linkedin_message", "minCharacters": 150, "maxCharacters": 300 },
+      "dossier": {
+        "sender": { "name": { "f_1": "Ines Porter" } },
+        "offer": {
+          "oneLiner": { "f_2": "Fleetwise plans the maintenance of delivery fleets." },
+          "products": { "f_3": "Fleetwise" },
+          "painPoints": { "f_4": "Vans break down between services." },
+          "proofPoints": { "f_5": "Cut breakdowns by 30% at a 200-van fleet." }
+        }
+      },
+      "lead": {
+        "firstName": { "f_6": "Tariq" },
+        "headline": {},
+        "title": { "f_7": "Fleet Operations Manager" },
+        "location": {},
+        "company": {
+          "name": { "f_8": "Wexbridge" },
+          "industry": {},
+          "sizeRange": {},
+          "country": {}
+        }
+      },
+      "why_now": [
+        {
+          "reaction": { "f_12": "comment" },
+          "at": { "f_13": "2026-10-26T07:00:00.000Z" },
+          "excerpt": { "f_10": "Winter is coming for every fleet." },
+          "comment": { "f_11": "Noor Haddad on my team has our winter checks done already." }
+        }
+      ],
+      "step": {
+        "kind": "follow_up",
+        "earlier": [
+          {
+            "stepKey": "message_1",
+            "text": "Tariq, thanks for connecting. Fleet teams like the one at Wexbridge often see vans break down between services. Fleetwise plans the maintenance of delivery fleets, so each van is serviced on time. How does your team plan its services today?"
+          }
+        ]
+      },
+      "plan": { "angle": "proof_point", "factIds": ["f_6", "f_5", "f_3"], "cta": "soft_ask" },
+      "failures": [[{ "gate": "colleague_signal", "phrase": "Noor Haddad" }]],
+      "replaced": null
+    },
+    "fake": [
+      {
+        "text": "Tariq, one number from a fleet like yours: Fleetwise cut breakdowns by 30% at a 200-van fleet by planning each service before a van fails. Having the winter checks done early is a good start. Would you be open to a short talk about the rest of the year?"
+      }
+    ],
+    "expected": { "words": ["Tariq", "Fleetwise"], "colleagues": ["Noor Haddad"] }
   }
 ]

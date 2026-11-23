@@ -3,10 +3,13 @@
 // credits migration and its grants, `app` cannot insert, update or delete a plan, a subscription, a
 // grant, a price or a balance, while it reads them, nor delete a usage row, move it to another
 // organization or workspace, make it negative or change it once settled (credits_reserve);
-// `billing_writer` inserts and updates the first four, never below zero, and deletes none, and the
-// trigger moves the balance it cannot write. Last,
-// the schema's start: the statements the roles migration runs on `public`, replayed with the schema's
-// name, and no other migration naming `public`, which a test schema would silently miss.
+// `billing_writer` inserts and updates the first four, never below zero, and deletes none, a price
+// only by its withdrawal (credits_price_notice), and the trigger moves the balance it cannot write.
+// `app` reads and inserts a credit alert and updates its notified_at and tries only, deleting none,
+// and billing_writer does not see it (credits_alerts); it reads and inserts an alert's mail, once per
+// alert and user, and changes or deletes none (credits_alert_mails). Last, the schema's start: the
+// statements the roles migration runs on `public`, replayed with the schema's name, and no other
+// migration naming `public`, which a test schema would silently miss.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -40,7 +43,7 @@ const rows: Record<(typeof TABLES)[number], { insert: string; update: string }> 
   },
   price_list: {
     insert: `("id", "action", "credits", "unit", "version", "effective_from") VALUES ('pl_test', 'test.action', 1, 'call', 1, '2026-10-01T00:00:00Z')`,
-    update: `"credits" = 2`,
+    update: `"withdrawn_at" = '2026-09-30T00:00:00Z'`,
   },
 };
 const NAMES_PUBLIC = /\bSCHEMA\s+public\b/i;
@@ -119,6 +122,11 @@ test("billing_writer inserts and updates a plan, a subscription, a grant and a p
     "42501",
     "billing_writer does not read the balances",
   );
+  assert.equal(
+    await sqlstate(billing.$executeRawUnsafe(`UPDATE "price_list" SET "credits" = 2`)),
+    "42501",
+    "billing_writer changes no price once written",
+  );
   for (const negative of [
     `"plans" SET "monthly_allowance" = -1`,
     `"credit_grants" SET "amount" = -1`,
@@ -140,6 +148,93 @@ test("billing_writer inserts and updates a plan, a subscription, a grant and a p
     ),
     [{ organization_id: "org_test", granted: "20000000" }],
     "the trigger keeps the balance billing_writer cannot write",
+  );
+});
+
+test("app reads and inserts a credit alert, a threshold of 80, 95 or 100, updates only its notified_at and tries and deletes none; billing_writer does not see it", async () => {
+  const app = asRole("app");
+  const insert = (id: string, threshold: number) =>
+    `INSERT INTO "credit_alerts" ("id", "organization_id", "period_start", "threshold", "used", "granted") VALUES ('${id}', 'org_test', '2026-10-01T00:00:00Z', ${threshold}, 80, 100)`;
+  assert.equal(await app.$executeRawUnsafe(insert("calert_test", 80)), 1, "app inserts an alert");
+  assert.equal(
+    await sqlstate(app.$executeRawUnsafe(insert("calert_odd", 90))),
+    "23514",
+    "a threshold is 80, 95 or 100",
+  );
+  assert.equal(
+    await app.$executeRawUnsafe(
+      `UPDATE "credit_alerts" SET "notified_at" = now(), "tries" = "tries" + 1`,
+    ),
+    1,
+    "app marks the alert's mail",
+  );
+  for (const set of [
+    `"id" = "id"`,
+    `"organization_id" = 'org_other'`,
+    `"period_start" = now()`,
+    `"threshold" = 95`,
+    `"used" = 0`,
+    `"granted" = 0`,
+    `"created_at" = now()`,
+  ]) {
+    assert.equal(
+      await sqlstate(app.$executeRawUnsafe(`UPDATE "credit_alerts" SET ${set}`)),
+      "42501",
+      `app must not update ${set}`,
+    );
+  }
+  assert.equal(
+    await sqlstate(app.$executeRawUnsafe(`DELETE FROM "credit_alerts"`)),
+    "42501",
+    "app must not delete an alert",
+  );
+  assert.deepEqual(
+    await app.$queryRawUnsafe(`SELECT "id", "tries" FROM "credit_alerts"`),
+    [{ id: "calert_test", tries: 1 }],
+    "app reads the alert",
+  );
+  const billing = asRole("billing_writer");
+  assert.equal(
+    await sqlstate(billing.$queryRawUnsafe(`SELECT "id" FROM "credit_alerts"`)),
+    "42501",
+    "billing_writer does not read the alerts",
+  );
+});
+
+test("app reads and inserts a credit alert's mail, once per alert and user, updates and deletes none; billing_writer does not see it (review-gaps-2)", async () => {
+  const app = asRole("app");
+  await app.$executeRawUnsafe(
+    `INSERT INTO "credit_alerts" ("id", "organization_id", "period_start", "threshold", "used", "granted") VALUES ('calert_mails', 'org_test', '2026-10-01T00:00:00Z', 80, 80, 100)`,
+  );
+  const insert = (user: string) =>
+    `INSERT INTO "credit_alert_mails" ("alert_id", "user_id") VALUES ('calert_mails', '${user}')`;
+  assert.equal(await app.$executeRawUnsafe(insert("usr_a")), 1, "app records a recipient");
+  assert.equal(
+    await sqlstate(app.$executeRawUnsafe(insert("usr_a"))),
+    "23505",
+    "one row per alert and user",
+  );
+  for (const set of [`"user_id" = 'usr_b'`, `"alert_id" = 'calert_other'`, `"mailed_at" = now()`]) {
+    assert.equal(
+      await sqlstate(app.$executeRawUnsafe(`UPDATE "credit_alert_mails" SET ${set}`)),
+      "42501",
+      `app must not update ${set}`,
+    );
+  }
+  for (const statement of [`DELETE FROM "credit_alert_mails"`, `TRUNCATE "credit_alert_mails"`]) {
+    assert.equal(await sqlstate(app.$executeRawUnsafe(statement)), "42501", statement);
+  }
+  assert.deepEqual(
+    await app.$queryRawUnsafe(`SELECT "alert_id", "user_id" FROM "credit_alert_mails"`),
+    [{ alert_id: "calert_mails", user_id: "usr_a" }],
+    "app reads the record",
+  );
+  assert.equal(
+    await sqlstate(
+      asRole("billing_writer").$queryRawUnsafe(`SELECT "user_id" FROM "credit_alert_mails"`),
+    ),
+    "42501",
+    "billing_writer does not read the mails",
   );
 });
 

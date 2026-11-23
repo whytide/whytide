@@ -37,7 +37,7 @@ test("a decision is append-only: app cannot update one; erasePerson deletes the 
   assert.equal(await sqlstate(update), "42501", "app must not update a decision");
 
   const { counts } = await run(() => erasePerson(personId));
-  assert.deepEqual(counts, { review_decisions: 2, leads: 1, persons: 1 });
+  assert.deepEqual(counts, { person_email_hashes: 0, review_decisions: 2, leads: 1, persons: 1 });
   const left = [app.reviewDecision.count(), app.lead.count(), app.person.count()];
   assert.deepEqual(await Promise.all(left), [0, 0, 0]);
 });

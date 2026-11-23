@@ -1,0 +1,34 @@
+# email's mailboxes (core/modules/email/README.md "API", gamma-p1-010): a member's session,
+# email.connect to connect, return from the consent and disconnect, email.read to list. The connect
+# answers the provider's consent address; on the mailbox fake (PROVIDER_MAILBOX=fake) that address is
+# the redirect address itself, `/email/callback`, with `code` and `state` in its query: copy both into
+# http-client.private.env.json within 10 minutes, with your workspaceId and a `mailboxId` the list
+# answers. A write sends the cookie, so it sends Origin too. No answer holds a token.
+
+### POST /v1/workspaces/{workspaceId}/email/mailboxes/connect: the provider's consent address for your own mailbox, its state living 10 minutes; 409 mailbox_exists when yours here is connected, 400 mailbox_time_zone_invalid
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/email/mailboxes/connect
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "provider": "google", "timeZone": "Europe/Berlin" }
+
+### POST /v1/workspaces/{workspaceId}/email/mailboxes/callback: claims the state, exchanges the code, and stores the mailbox the exchange proves, connected; 400 connect_state_invalid (unknown, used, expired, another's), 400 mailbox_consent_incomplete, 409 mailbox_in_use, 409 mailbox_exists, 502 mailbox_connect_failed
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/email/mailboxes/callback
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "state": "{{state}}", "code": "{{code}}" }
+
+### GET /v1/workspaces/{workspaceId}/email/mailboxes: your mailboxes, or every mailbox here for a holder of email.manage, oldest first, each with mine, its owner and status, never a token
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/email/mailboxes
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### DELETE /v1/workspaces/{workspaceId}/email/mailboxes/{id}: disconnects your own mailbox at once, the worker then revoking and deleting its tokens; 204; 404 email_mailbox_not_found, 403 not_mailbox_owner
+DELETE {{baseUrl}}/v1/workspaces/{{workspaceId}}/email/mailboxes/{{mailboxId}}
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}

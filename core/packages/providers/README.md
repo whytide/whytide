@@ -1,11 +1,11 @@
 # @whytide/providers
 
-The ports and their adapters (docs/architecture.md §9, docs/rules/coding.md §6): a port in our words at `<port>/port.ts`, one adapter per folder at `<port>/<vendor>/`, a fake for every port, a registry that loads the adapter a name selects, one contract suite per port run against every adapter, and `provider_refs` for vendor ids. Alpha's ports, authentication, LLM, LinkedIn, files and app mail, arrive with their own tasks on this pattern. Node runs the sources; `tsc -b` writes `dist/`, which the package exports as `@whytide/providers` and, for tests, `@whytide/providers/testing` and `@whytide/providers/<port>/testing`.
+The ports and their adapters (docs/architecture.md §9, docs/rules/coding.md §6): a port in our words at `<port>/port.ts`, one adapter per folder at `<port>/<vendor>/`, a fake for every port, a registry that loads the adapter a name selects, one contract suite per port run against every adapter, and `provider_refs` for vendor ids. Alpha's ports, authentication, LLM, LinkedIn, files and app mail, arrive with their own tasks on this pattern. Node runs the sources; `tsc -b` writes `dist/`, which the package exports as `@whytide/providers` and, for tests, `@whytide/providers/testing` and `@whytide/providers/<port>/testing`; the mailbox port's constants, which import nothing, also as `@whytide/providers/mailbox/constants`, for a screen's client code, which cannot load the package's server code.
 
 | Path | Holds |
 |---|---|
-| `_pattern/` | `definePort`, `bindPort`, `defineAdapter`, `createFake`, `providerSelector`, `setProviderRef`, `resolveAdapter`, the pattern's codes, the generator |
-| `registry.ts` | `getAdapter(port, selector)`, over the generated loaders |
+| `_pattern/` | `definePort`, `bindPort`, `defineAdapter`, `createFake`, `providerSelector`, `providerList`, `allowance`, `setProviderRef`, `resolveAdapter`, `resolveAdapters`, the pattern's codes, the generator |
+| `registry.ts` | `getAdapter(port, selector)` and `getAdapters(port, names)`, over the generated loaders |
 | `registry.generated.ts` | `adapterLoaders`, `"<port>/<adapter>"` to `() => import("./<port>/<adapter>/index.ts")`, written by `_pattern/generate.ts`; ignored by git, never committed |
 | `testing/` | `contractSuite` |
 | `<port>/` | `port.ts`, `config.ts`, `contract.ts`, `README.md`; one folder per adapter, `fake/` and `<vendor>/`, each with `index.ts` and `tests/contract.test.ts` (a vendor's with `README.md`); `tests/` for port-level tests only; optionally `testing/` for the port's test helpers, `@whytide/providers/<port>/testing` |
@@ -46,6 +46,31 @@ export const llmConfig = defineConfig("packages/providers", { PROVIDER_LLM: prov
 `providerSelector()` is an optional adapter folder name, so that importing the package never throws. Every `<port>/port.ts` re-exports its config, `export { llmConfig } from "./config.ts";`, so that a host imports the port, its config and `getAdapter` from the package root; `await getAdapter(llmPort, llmConfig.PROVIDER_LLM)` fails at start with `provider_not_configured` when it is empty and `provider_unknown`, listing the names the registry knows, when nothing is registered or loadable under it. The list of adapters lives in the registry, never in the schema. Organization-level selection comes later, at the same call.
 
 `<port>/README.md` documents the port: its methods, its codes, what it will never have, how a method is added (with its contract case). The package `index.ts` gets one line, `export * from "./<port>/port.ts";`, in alphabetical order; the fakes and adapters are not exported, the registry reaches them. A port's test helpers, `<port>/testing/index.ts`, reach other packages' tests as `@whytide/providers/<port>/testing` (`signInAs` from `auth/testing`, `readMailpit` from `app-mail/testing`) through the one `./*/testing` pattern of `package.json`, so a port adds no export of its own.
+
+## Many adapters per port
+
+A port whose caller asks several vendors in turn, the company-data port first, takes a list instead of the single selector: `PROVIDER_<PORT>` holds adapter folder names separated by commas, no space, in the order the caller asks them, each once:
+
+```ts
+export const companyDataConfig = defineConfig("packages/providers", { PROVIDER_COMPANY_DATA: providerList() });
+
+const sources = await getAdapters(companyDataPort, companyDataConfig.PROVIDER_COMPANY_DATA); // at start
+```
+
+`providerList()` reads `wikidata,companies-house` as `["wikidata", "companies-house"]`, and empty as none, `[]`; a name that is no folder name, or one named twice, fails at start (`config_invalid`). `getAdapters(port, names)` loads and binds each adapter in the list's order, each the instance `getAdapter` gives, kept for the process; a name the registry does not know fails with `provider_unknown`, and one given twice with `provider_list_invalid` (500), before any adapter loads. The list is only the order: the port knows nothing of waterfalls; the caller calls the adapters one after another and decides what each answer means. `getAdapter` and the other ports' single selectors do not change.
+
+An adapter declares its free allowance, the vendor's free calls per day or month, from its own `<ADAPTER>_ALLOWANCE`, read with `allowance()`: `100/day` or `300/month`, the count 1 to 10,000,000, parsed to `{ calls, per }`; empty, `null`, no limit; anything else fails at start. The vendor sets the number and the owner copies it; a paid plan raises or clears it, with no code change:
+
+```ts
+export const exampleConfig = defineConfig("packages/providers", { EXAMPLE_ALLOWANCE: allowance() });
+export const exampleAdapter = defineAdapter(companyDataPort, {
+  name: "example",
+  allowance: exampleConfig.EXAMPLE_ALLOWANCE, // EXAMPLE_ALLOWANCE=100/day
+  create: () => …,
+});
+```
+
+The bound adapter exposes it as `allowance`, `{ calls, per }` or null, and `openData`, true when the adapter's data is open data (default false): enrichment shows such an adapter's facts as `open_data` and every other's as `data_vendor`, so a new adapter needs no change there. Neither is among the bound adapter's keys, which stay the port's methods, and no port may name a method `allowance` or `openData` (`port_invalid`). A fake passes a function, `allowance: () => …`, read on every access, so that a test sets it. Counting the calls is the caller's, never the port's: enrichment names its counters `<port>/<adapter>`, so each port's `fake` counts apart. A vendor's "out of credits" or "quota used" answer is the port's `<prefix>_allowance_spent`, never retried.
 
 ## An adapter
 
@@ -105,7 +130,7 @@ A vendor's id for one of our rows (a Unipile account, a Stripe customer) sits in
 
 ## Tests
 
-`tests/pattern.test.ts`, end to end: the fixture port of `tests/fixtures/pattern/fixture/` with its fake and two more adapters, `echo` and `lazy`, run the same contract suite through `node --test`, each from its `tests/contract.test.ts`; the `broken` adapter, whose `greet` returns a vendor field, fails the suite naming `greet`; the `needs-key` adapter's suite is skipped without `FIXTURE_API_KEY` and exits 0; `PROVIDER_FIXTURE=fake` through `defineConfig` returns the fake and `getAdapter(fixturePort, "nope")` fails with `provider_unknown` listing `echo` and `fake`; the boundary parses inputs and, in test mode, refuses a vendor field, a vendor object, a wrong type and a transform; an unmapped error is wrapped in every environment and carries its cause in test mode only; under `APP_ENV=production`, in a child process (`tests/fixtures/pattern/production.ts`), no output check and no cause by default, both on where a binding asks, and the LinkedIn port's outputs checked whatever the binding says; the fake records, fails on demand, answers on demand (`answerNext`), resets and refuses a stray method; the shape check; the definitions' checks; `setProviderRef`. `tests/registry.test.ts`: the generated loaders from a folder tree, the registered adapters, one bound instance per adapter, the `lazy` adapter loaded through a loader and nothing else, nothing kept when a loader, `create()` or the shape check fails. `tests/exports.test.ts`: the contract harness and the ports' test helpers imported through the package name, from `dist/`; a fake's folder not exported, and no `testing/` folder but the package's and a port's, beside its `port.ts` (a `_*` folder is no port), since `*` in `./*/testing` spans folders.
+`tests/pattern.test.ts`, end to end: the fixture port of `tests/fixtures/pattern/fixture/` with its fake and two more adapters, `echo` and `lazy`, run the same contract suite through `node --test`, each from its `tests/contract.test.ts`; the `broken` adapter, whose `greet` returns a vendor field, fails the suite naming `greet`; the `needs-key` adapter's suite is skipped without `FIXTURE_API_KEY` and exits 0; `PROVIDER_FIXTURE=fake` through `defineConfig` returns the fake and `getAdapter(fixturePort, "nope")` fails with `provider_unknown` listing `echo` and `fake`; the boundary parses inputs and, in test mode, refuses a vendor field, a vendor object, a wrong type and a transform; an unmapped error is wrapped in every environment and carries its cause in test mode only; under `APP_ENV=production`, in a child process (`tests/fixtures/pattern/production.ts`), no output check and no cause by default, both on where a binding asks, and the LinkedIn port's outputs checked whatever the binding says; the fake records, fails on demand, answers on demand (`answerNext`), resets and refuses a stray method; the shape check; the definitions' checks; `setProviderRef`. `tests/registry.test.ts`: the generated loaders from a folder tree, the registered adapters, one bound instance per adapter, the `lazy` adapter loaded through a loader and nothing else, nothing kept when a loader, `create()` or the shape check fails; a list of one, of two in its order, of an unknown name, of a name given twice, and an empty one; `providerList()` and `allowance()` read and refused; `allowance` and `openData` on the bound adapter. `tests/exports.test.ts`: the contract harness and the ports' test helpers imported through the package name, from `dist/`; a fake's folder not exported, and no `testing/` folder but the package's and a port's, beside its `port.ts` (a `_*` folder is no port), since `*` in `./*/testing` spans folders.
 
 `tests/safety/`, run by `test:safety` and never by `test`: the send path's safety cases, each naming the rule it holds. `port-idempotency.test.ts`: the LinkedIn fake ignores the idempotency key and records every repeat, so a double send shows as two calls. `port-never-list.test.ts`: no LinkedIn method name holds a never-list word, in the types and at run time, and an adapter adding one fails the shape check.
 
@@ -116,3 +141,35 @@ A vendor's id for one of our rows (a Unipile account, a Stripe customer) sits in
 ## Metrics
 
 `bindPort` counts every call of a bound method as `providers.calls` (port, adapter, method, outcome: `ok` or the port's code), declared in `_pattern/metrics.ts` (alpha-p10-060; [deploy/docs/observability.md](../../../deploy/docs/observability.md)). A rate limit is the `<prefix>_rate_limited` outcome.
+
+## The mailbox port
+
+`mailbox/` (gamma-p0-010) connects a member's own Google or Microsoft mailbox by OAuth, sends one finished message under the platform's own Message-ID, and reads what is new in the platform's own threads, polled with a cursor; the match, inside every adapter, keeps personal mail out. Its fake plays replies, bounces, complaints and unsubscribe mails; `tests/safety/mailbox-*.test.ts` hold its safety cases: the raw checks before any call, one send per key recorded as such, nothing outside the platform's threads, and its never list. [mailbox/README.md](mailbox/README.md) has the port, the events, the match, the fake and the codes.
+
+## The alerts port
+
+`alerts/` (gamma-p7-030) posts one short text to the team channel, one incoming webhook per instance in the server's `.env`, through the `webhook` adapter, which takes Slack's, Discord's and a Teams workflow's. `PROVIDER_ALERTS` is empty by default, and an empty selector binds nothing: the caller (gamma-p7-040) sends no alert. [alerts/README.md](alerts/README.md) has the method, the codes and the fake; [alerts/webhook/README.md](alerts/webhook/README.md) the URL's rules, the bounded read and the channels' differences.
+
+## The company-data port
+
+`company-data/` (gamma-en-010) looks up a company's facts from its LinkedIn page, its domain or its name: one method, `lookupCompany`, whose input holds a company's keys and nothing about a person, and whose outputs are checked in every environment. It is the first port on a list, `PROVIDER_COMPANY_DATA` ("Many adapters per port"). Its fake seeds companies and sets the allowance it exposes; a live run of its suite makes one lookup. Its adapters: `wikidata` and `companies-house`, open data, and `google-kg` (gamma-en-030); `diffbot` and `pdl`, Diffbot and People Data Labs on their free plans (gamma-en-035). [company-data/README.md](company-data/README.md) has the method, the codes, the fake and the one-lookup rule.
+
+## The email-finder port
+
+`email-finder/` (gamma-en-015) finds a person's work address from their first name, last name and company domain, and nothing else of them: one method, `findEmail`, answering the address, with the vendor's own verdict as `vendorVerdict` when it checked the address itself, or `not_found`; its outputs are checked in every environment. Its adapters are a list, `PROVIDER_EMAIL_FINDER` ("Many adapters per port"), asked in its order by enrichment (gamma-en-080). Its fake finds `<first>.<last>@<companyDomain>`, answers `not_found` or a vendor's verdict for a person a test names, and sets the allowance it exposes; a live run of its suite makes one lookup. Its adapters, on their free plans: `hunter`, `tomba`, `prospeo` and `snov`, Hunter, Tomba, Prospeo and Snov.io (gamma-en-090). [email-finder/README.md](email-finder/README.md) has the method, the codes, the fake and the one-lookup rule.
+
+## The email-verifier port
+
+`email-verifier/` (gamma-en-015) gives one address, and nothing else, one of the five verdicts of RB-7.1.1, `valid`, `catch_all`, `risky`, `invalid` or `unknown`, `catch_all` never folded into `valid`: one method, `verifyEmail`, its outputs checked in every environment. Its adapters are a list, `PROVIDER_EMAIL_VERIFIER`, the order enrichment gives them their turns in, each until its free checks for the period are spent. Its fake answers `valid` unless a test set another verdict for the address, and sets the allowance it exposes; a live run of its suite makes one check. Its adapters, on their free plans: `quickemailverification`, `mailboxvalidator`, `verifalia` (gamma-en-095), `zerobounce` and `reoon` (gamma-en-096), each with its verdict table. `tests/registry.test.ts` loads both lists in their order and fails an unknown name at start. [email-verifier/README.md](email-verifier/README.md) has the method, the codes, the fake and the one-check rule.
+
+## The web-search port
+
+`web-search/` (gamma-en-020) answers a few web results for a query: one method, `searchWeb`, whose input is the query, the site the results stay on and their count, and nothing else, and whose outputs, https links with a plain-text title and snippet, are checked in every environment. It is on a list, `PROVIDER_WEB_SEARCH` ("Many adapters per port"): `fake` in development, `brave` in production. Its fake seeds results under a query and sets the allowance it exposes; a live run of its suite makes one search. [web-search/README.md](web-search/README.md) has the method, the codes, the fake and the one-search rule; [web-search/brave/README.md](web-search/brave/README.md) the request, the mapping and error tables, the free credit and the spending limit.
+
+## The browser port
+
+`browser/` (gamma-en-025) renders a page in a headless browser, for a company website that shows nothing until its scripts run: one method, `renderPage`, answering the page's final URL, its status, its visible text and its links, never its HTML; its outputs are checked in every environment. `PROVIDER_BROWSER` names one adapter: `playwright`, a Chromium in the browser service, fenced off by its network, by a route filter that sends every request of the page through the egress rules, and by a proxy where nothing answers for what Chromium sends by itself; `fake`, pages a test seeded; or empty, none, and the caller keeps the plain fetch's page. `pnpm -F providers test:browser` runs the adapter's tests on a running service. [browser/README.md](browser/README.md) has the method, the codes, the fake and the suite; [browser/playwright/README.md](browser/playwright/README.md) the fences, the route filter, the limits and how to run the service locally.
+
+## deploy:check's table
+
+deploy:check imports no module, so `deploy/scripts/constants.ts` lists, for the browser port and the ports enrichment lists, each adapter but the fake with the variables it cannot run without, its `requires` (gamma-en-051). `tests/deploy-table.test.ts` fails when an adapter of those ports is added, removed or given another variable until its line there follows: adding such an adapter changes that line too.

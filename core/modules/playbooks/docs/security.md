@@ -1,0 +1,8 @@
+# playbooks: security
+
+- **Who may do what:** every route sits under `/v1/workspaces/{ws}`: the caller's membership is checked on every request, then the route's action: `playbooks.read` and `playbooks.write` (Owner, Admin, Member). A change of an agent, its PATCH and its sources' PUT, then asks platform's `canWriteOwned` (gamma-p6-015): its owner, or a holder of `playbooks.manage` (Owner, Admin), else 403 `forbidden` before anything is written. An agent of another workspace is 404 `playbook_not_found`; the readers and commands run in the request's tenant run, and the raw lock query names the workspace itself.
+- **A removed member's agents** (gamma-p6-075): `tenancy.member_removed` pauses them with `member_removed`, so no Owner restarts an agent whose campaign would send from a departed member's accounts: only the agent's owner, a member again, resumes it; an Owner's resume is 409 `playbook_owner_removed`. A pause of an agent paused already keeps its reason, so a pause and a resume cannot lift the removal's.
+- **Personal data:** none. The tables hold ids, a name the member typed, a status and its reason; the events carry ids and a status; the removal subscriber logs nothing.
+- **Sources:** a link is never accepted unchecked. The source checker signals registers says whose account reads each source, and an agent links only sources read through its owner's own account; without a checker, every link is refused.
+- **Screens:** they read and write through the routes as the visitor, with the visitor's permissions; the owners' names and emails come from tenancy's members route, which every member may read already.
+- **Data leaving the system:** none. No provider call, no AI call, no new permission beyond the three above.

@@ -1,0 +1,25 @@
+# The leads of one source (core/modules/contacts/README.md "Routes"): `source`, a source's ref, an
+# import job's id or a signal source's, as {{sourceRef}} from the private file, on the lead list, its
+# counts, a lead's neighbours and the CSV export: a member's session, leads.read (exports.read for the
+# CSV). A ref off its shape (letters, digits and _) is 400 validation_failed. The lead is
+# {{personId}} from the private file.
+
+### GET /v1/workspaces/{workspaceId}/contacts/leads?source: the leads of the source, by fit
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads?source={{sourceRef}}&status=qualified&sort=fit
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/contacts/leads/counts?source: how many of the source's leads are in each status
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/counts?source={{sourceRef}}
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/contacts/leads/{personId}/neighbours?source: the leads before and after it among the source's
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/{{personId}}/neighbours?source={{sourceRef}}&status=qualified&sort=fit
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/contacts/exports/leads.csv?source: the source's leads as a CSV file
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/exports/leads.csv?source={{sourceRef}}
+Accept: text/csv
+Cookie: {{sessionCookie}}

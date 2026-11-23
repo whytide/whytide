@@ -3,9 +3,10 @@
 // actions slot, and Approve's failure under it; a needs_review lead's unknown criteria; then two
 // columns. The first: the person's business fields each with its source and time, and the LinkedIn
 // link; the why; the snapshot, the model's summary under its label, the verdicts behind a disclosure
-// and the disqualifiers; the evidence and draft slots. Beside it: the decision and its time (the
-// snapshot's, else when the lead was decided) with the cost slot, then the review and outreach
-// slots; in one column, on a phone, they come right after the why, so that the review is near.
+// (verdicts.tsx, where a member edits one) and the disqualifiers; the evidence and draft slots.
+// Beside it: the decision and its time (the snapshot's, else when the lead was decided) with the
+// cost slot, then the review and outreach slots; in one column, on a phone, they come right after
+// the why, so that the review is near.
 // Codes that qualification stores (a why bullet, a criterion, a verdict, a disqualifier) are worded
 // by its keys, read as data through useKeyText, as the lead list words a why bullet: a code without
 // a key shows nothing, on both screens. A status and a confidence take the list's words. The
@@ -13,26 +14,12 @@
 // panels page.tsx rendered, each slot behind its own boundary (slot-boundary.tsx).
 "use client";
 
-import {
-  Badge,
-  type BadgeTone,
-  Card,
-  type Column,
-  DataTable,
-  Link,
-  Meter,
-  Toast,
-  useKeyText,
-} from "@whytide/ui";
+import { Badge, Card, Link, Meter, Toast, useKeyText } from "@whytide/ui";
 import {
   Ban,
   ChevronDown,
   CircleCheck,
-  CircleDot,
-  CircleHelp,
-  CircleX,
   ExternalLink,
-  type LucideIcon,
   Sparkles,
   TriangleAlert,
 } from "@whytide/ui/icons";
@@ -45,6 +32,7 @@ import { LeadHeader, LeadNav, StatusBadge, useProvenance } from "./header.tsx";
 import type { Lead, Neighbours, Snapshot } from "./page.tsx";
 import { SlotBoundary } from "./slot-boundary.tsx";
 import type { LeadSlot } from "./slots.ts";
+import { Verdicts } from "./verdicts.tsx";
 
 type Props = {
   workspace: string;
@@ -58,16 +46,6 @@ type Props = {
   slots: Partial<Record<LeadSlot, ReactNode>>;
   /** Whether the user has a connected LinkedIn account of their own, without which Approve waits. */
   hasSender: boolean;
-};
-type VerdictRow = Snapshot["verdicts"][number] & { id: string };
-type Verdict = VerdictRow["verdict"];
-
-/** Each verdict's colour and icon, beside its words. */
-const VERDICT: Record<Verdict, [tone: BadgeTone, Icon: LucideIcon]> = {
-  met: ["success", CircleCheck],
-  partially_met: ["warning", CircleDot],
-  not_met: ["danger", CircleX],
-  unknown: ["neutral", CircleHelp],
 };
 const SECTION = "grid content-start gap-4 rounded-xl border border-line bg-surface p-5 shadow-xs";
 const HEADING = "font-semibold text-ink";
@@ -178,39 +156,8 @@ export function LeadView(props: Props) {
           </li>,
         ];
   });
-  const profile = normalizeLinkedinUrl(person.linkedinUrl);
-  const columns: Column<VerdictRow>[] = [
-    {
-      id: "criterion",
-      header: t("criterion"),
-      cell: ({ criterion }) => (
-        <span className="text-ink">{keyText(`qualification.criterion.${criterion}`)}</span>
-      ),
-    },
-    {
-      id: "verdict",
-      header: t("verdict"),
-      cell: ({ verdict }) => {
-        const [tone, Icon] = VERDICT[verdict] ?? VERDICT.unknown;
-        return (
-          <Badge tone={tone}>
-            <Icon aria-hidden="true" />
-            {keyText(`qualification.verdict.${verdict}`)}
-          </Badge>
-        );
-      },
-    },
-    {
-      id: "evidence",
-      header: t("evidence"),
-      cell: ({ evidence }) => evidence && <q>{evidence}</q>,
-    },
-    {
-      id: "weight",
-      header: t("weight"),
-      cell: ({ weight }) => (weight === null ? null : format.number(weight)),
-    },
-  ];
+  // A person without a profile (gamma-rf-050) has no link.
+  const profile = person.linkedinUrl === null ? null : normalizeLinkedinUrl(person.linkedinUrl);
 
   return (
     <>
@@ -331,7 +278,8 @@ export function LeadView(props: Props) {
                 </div>
                 <p className="text-pretty leading-relaxed text-ink">{snapshot.summary}</p>
               </section>
-              <details className="group border-t border-line pt-4">
+              {/* min-w-0: the verdicts table scrolls inside its own box on a phone. */}
+              <details className="group min-w-0 border-t border-line pt-4">
                 <summary className="-mx-1.5 flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-md px-1.5 py-1 font-medium text-ink transition-colors hover:bg-hover [&::-webkit-details-marker]:hidden">
                   <ChevronDown
                     aria-hidden="true"
@@ -340,13 +288,10 @@ export function LeadView(props: Props) {
                   {t("verdicts")}
                 </summary>
                 <div className="mt-3">
-                  <DataTable
-                    caption={t("verdicts")}
-                    columns={columns}
-                    rows={snapshot.verdicts.map((verdict) => ({
-                      ...verdict,
-                      id: verdict.criterion,
-                    }))}
+                  <Verdicts
+                    workspace={workspace}
+                    personId={lead.personId}
+                    verdicts={snapshot.verdicts}
                   />
                 </div>
               </details>
@@ -369,6 +314,7 @@ export function LeadView(props: Props) {
             </div>
           )}
           {place("evidence", "grid gap-4")}
+          {place("company", "grid gap-4")}
           {place("draft", "grid gap-4")}
         </div>
       </div>

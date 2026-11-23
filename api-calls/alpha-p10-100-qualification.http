@@ -1,12 +1,13 @@
-# qualification's route as the lead page's Re-score sends it (core/modules/qualification/README.md
-# "Screen", "The re-score"): one person, answered 202 with the request's id and `marked`, the leads the
-# worker's run moves with the saved criteria: 0 when the criteria that scored the lead are the saved
-# ones, or when it has no scored snapshot at the ICP's version. The snapshot the page then asks for
-# is alpha-p6-060-lead-page.http's; every scored lead at once, alpha-p6-040-rescore.http's.
+# qualification's re-score of one person (core/modules/qualification/README.md "The re-score"; the
+# lead page's Re-score sends lead-rescore-ai.http's request instead): answered 202 with the
+# request's id and `marked`, the leads the worker's run moves with the saved criteria: 0 when the
+# criteria that scored the lead are the saved ones, or when it has no scored snapshot at the ICP's
+# version. The lead's snapshot is alpha-p6-060-lead-page.http's; every scored lead at once,
+# alpha-p6-040-rescore.http's.
 # A write sends the cookie, so it sends Origin: {{appOrigin}} too. `personId` is a person of your
 # workspace with a lead: put it in http-client.private.env.json.
 
-### POST /v1/workspaces/{workspaceId}/qualification/rescore: the lead page's Re-score of one person
+### POST /v1/workspaces/{workspaceId}/qualification/rescore: the re-score of one person
 POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/qualification/rescore
 Accept: application/json
 Content-Type: application/json

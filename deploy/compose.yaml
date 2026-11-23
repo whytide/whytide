@@ -253,6 +253,8 @@ services:
         condition: service_healthy
       temporal:
         condition: service_healthy
+    # The browser network too, where it reaches the browser service when that runs.
+    networks: [default, browser]
     restart: unless-stopped
 
   # The web app, Next.js's standalone server on 3000: no environment file and no secret, on the edge
@@ -304,6 +306,38 @@ services:
       retries: 6
     restart: unless-stopped
 
+  # ---- browser (gamma-en-025) ----
+  # Playwright's run-server on 3000, built from browser/Dockerfile: a headless Chromium for each
+  # client, two at a time (core/packages/providers/browser/playwright/README.md). Its own profile,
+  # beside production where enrichment renders pages, so that the image, about 2 GB, is built and run
+  # only there (README.md "The browser service"). Only on the browser network, which is internal: no
+  # data service, no route out, only the worker, which fetches every request of a page through the
+  # egress rules. It publishes no port.
+  browser:
+    profiles: [browser]
+    build: ./browser
+    container_name: ${COMPOSE_PROJECT_NAME:-whytide}-browser
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:size=256m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 1024
+    networks: [browser]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then((answer) => process.exit(answer.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   postgres:
   minio:
@@ -318,3 +352,6 @@ networks:
       config:
         - subnet: ${EDGE_PREFIX:-192.168.255}.0/28
           ip_range: ${EDGE_PREFIX:-192.168.255}.8/29
+  # The browser service and the worker, nothing else; internal, so that nothing on it reaches out.
+  browser:
+    internal: true

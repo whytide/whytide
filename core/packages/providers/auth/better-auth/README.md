@@ -4,7 +4,7 @@
 
 **Vendor and terms.** None: a library inside the api process that sends nothing anywhere. Its telemetry, logger and rate limiter are off (the api host limits every `/api/auth/*` request per address, alpha-p2-030). The adapter refuses to start while any `BETTER_AUTH_*` variable is set (`config_invalid`, naming the variable, never its value): `BETTER_AUTH_SECRET(S)`, `BETTER_AUTH_URL`, `BETTER_AUTH_TRUSTED_ORIGINS` and `BETTER_AUTH_TELEMETRY*` would win over its settings or add to them.
 
-**Variables** (`deploy/.env.example`, read when the adapter starts; `requires` names none, the tests run on the worktree's database and Mailpit):
+**Variables** (`deploy/.env.example`, read when the adapter starts; `requires` names `AUTH_SECRET` and `AUTH_BASE_URL`, both required under `APP_ENV=production`, so that deploy:check refuses a server without one (gamma-en-105); the contract suite passes the adapter with no `requires`, since the tests run outside production on the worktree's database and Mailpit):
 
 | Variable | |
 |---|---|

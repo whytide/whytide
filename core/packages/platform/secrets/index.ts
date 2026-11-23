@@ -34,4 +34,5 @@ export function encryptSecret(
 }
 
 export { parseSecretBlob, type SecretBlob, type SecretContext } from "./blob.ts";
+export { deriveSecret } from "./derive.ts";
 export { type KeyWrapper, loadMasterKeys, newMasterKey, type SecretKeys } from "./keys.ts";

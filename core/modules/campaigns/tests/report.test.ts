@@ -2,9 +2,10 @@
 // calls it, in a workspace's tenant run, on rows seeded in two workspaces of this file's schema: a
 // planted violation of each zero beside a clean send, and the boundaries (the edit ratio, the 7-day
 // age, the 21-day span, weekdays in the sender's zone, a suppression entry added after and removed
-// before a send). Each figure answers its own workspace's rows only. The command and its lines are
-// tests/report-cli.test.ts.
+// before a send). Each figure answers its own workspace's rows only. gamma-p4-070: the approval mode's
+// reason and the lock rule. The command and its lines are tests/report-cli.test.ts.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { ids as approvalsIds } from "@whytide/approvals";
 import { createApprovalItem } from "@whytide/approvals/testing";
@@ -168,7 +169,7 @@ test("actions_against_suppressed: a send to a person opted out or on the never-c
   await A.suppress(erased.personId, { createdAt: after(-60) });
   await A.run(() => eraseContact(erased.personId));
 
-  const found = await A.run(async () =>
+  const { suppressed: found } = await A.run(async () =>
     actionsAgainstSuppressed((await readSends({ since: EPOCH })).sends),
   );
   assert.deepEqual(
@@ -370,4 +371,69 @@ test("decision_days: of the weekdays among the 7 local days before the run's day
   // On a Monday, the two days before are a weekend; the third is Friday.
   assert.deepEqual(weekdaysBefore("2026-10-26", 2), []);
   assert.deepEqual(weekdaysBefore("2026-10-26", 3), ["2026-10-23"]);
+});
+
+test("sends_without_approval by the approval mode (gamma-p4-070): a follow-up the mode approved, sent in review_first_touches, counts as none; the mode's approval counts mode_not_allowed for a send before its campaign's review_locked_until whatever jit_checks says, a send stored before the mode, and a first touch; each violation names the mode it counts in", async () => {
+  await A.account();
+  const clean = await A.enrolledLead("report-mode-clean");
+  const locked = await A.enrolledLead("report-mode-locked");
+  const unstored = await A.enrolledLead("report-mode-unstored");
+  const first = await A.enrolledLead("report-mode-first");
+  await A.setMode("review_first_touches", EPOCH);
+  // The lock's end after the approvals, as a campaign 6 days old has it: the run reads the row's.
+  const lockedUntil = new Date(Date.now() + DAY_MS);
+  const afterLock = new Date(lockedUntil.getTime() + MINUTE_MS);
+  await A.modeApprovedSend(clean.steps.follow_up_1, { at: afterLock });
+  await A.modeApprovedSend(locked.steps.follow_up_1, {
+    at: new Date(lockedUntil.getTime() - MINUTE_MS),
+  });
+  await A.modeApprovedSend(unstored.steps.follow_up_1, { at: afterLock, approval: null });
+  // A first message's item opens for a person; the mode's approval of it is planted.
+  await A.dueAt(first.steps.message_1, new Date());
+  assert.equal(await A.queue(first.steps.message_1), "opened");
+  await A.draftReady(first.steps.message_1, TEXT);
+  const item = await A.itemOf(first.steps.message_1);
+  assert.ok(item?.draftId);
+  const frozen = `${TEXT}\n\nWritten with AI assistance and sent without a person's review.`;
+  const contentHash = createHash("sha256").update(frozen, "utf8").digest("hex");
+  const draft = { status: "approved", approvedAt: new Date(), editedText: frozen } as const;
+  await A.app().messageDraft.update({
+    where: { id: item.draftId },
+    data: { ...draft, disclosureApplied: true },
+  });
+  const byMode = { decisionOrigin: "approval_mode", approvalBy: "mode", decidedBy: null } as const;
+  await A.app().approvalItem.update({
+    where: { id: item.id },
+    data: {
+      status: "approved",
+      approvedContentHash: contentHash,
+      decidedAt: new Date(),
+      ...byMode,
+    },
+  });
+  const firstChecks = { approvalItemId: item.id, status: "approved", contentHash };
+  const stored = { mode: "review_first_touches", firstTouch: true, origin: "approval_mode" };
+  await A.sendStep(first.steps.message_1, {
+    at: afterLock,
+    jitChecks: { approvalItemId: item.id, contentHash, approval: { ...firstChecks, ...stored } },
+  });
+  await A.setMode("review_first_touches", lockedUntil);
+
+  const found = await A.run(async () =>
+    sendsWithoutApproval((await readSends({ since: EPOCH })).sends),
+  );
+  assert.deepEqual(
+    found.map(({ stepExecutionId, reason, mode }) => `${stepExecutionId} ${reason} ${mode}`).sort(),
+    [
+      `${locked.steps.follow_up_1} mode_not_allowed review_everything`,
+      `${unstored.steps.follow_up_1} mode_not_allowed review_everything`,
+      `${first.steps.message_1} mode_not_allowed review_first_touches`,
+    ].sort(),
+  );
+  // The mode a send counts in is the one stored with it: the campaign's later change is no matter.
+  await A.setMode("review_everything", lockedUntil);
+  const later = await A.run(async () =>
+    sendsWithoutApproval((await readSends({ since: EPOCH })).sends),
+  );
+  assert.deepEqual(later, found);
 });

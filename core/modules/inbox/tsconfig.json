@@ -16,13 +16,16 @@
   "include": ["**/*.ts"],
   "exclude": ["dist", "node_modules", ".tmp"],
   "references": [
+    { "path": "../../packages/ai" },
     { "path": "../../packages/platform" },
     { "path": "../../packages/db" },
     { "path": "../../packages/providers" },
     { "path": "../approvals" },
     { "path": "../campaigns" },
     { "path": "../contacts" },
+    { "path": "../enrichment" },
     { "path": "../linkedin" },
+    { "path": "../messaging" },
     { "path": "../tenancy" }
   ]
 }

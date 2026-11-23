@@ -5,8 +5,9 @@
 // reads left; the connection requests and messages today against their limits, the connection
 // requests of the last seven days against the weekly cap and every action against the 200, each on a
 // meter of its own; and the working-hours window, open or closed, with the next window's start in
-// the account's own time zone while it is closed. Below them, for a member who may manage the
-// account, its daily read limit (read-limit.tsx); a saved one is the cap here at once.
+// the account's own time zone while it is closed. Below them, for the account's owner (gamma-p6-070:
+// an Owner reads a teammate's usage, nothing to edit), its daily read limit (read-limit.tsx); a saved
+// one is the cap here at once.
 import { ErrorState, LoadingState, Meter } from "@whytide/ui";
 import { Clock, Gauge, Moon } from "@whytide/ui/icons";
 import { ApiError, browserApi, data } from "@whytide/web/api/browser";
@@ -19,8 +20,8 @@ type Props = {
   workspaceId: string;
   accountId: string;
   timeZone: string;
-  /** The account's canManage: the daily read limit's field shows. */
-  canManage: boolean;
+  /** The account's canEdit, its owner's: the daily read limit's field shows. */
+  canEdit: boolean;
   /** The cap changed here: the screen asks for the account again. */
   onCapChange: () => Promise<unknown>;
 };
@@ -39,7 +40,7 @@ function Budget({ text, used, limit }: { text: string; used: number; limit: numb
   );
 }
 
-export function UsageSummary({ workspaceId, accountId, timeZone, canManage, onCapChange }: Props) {
+export function UsageSummary({ workspaceId, accountId, timeZone, canEdit, onCapChange }: Props) {
   const t = useTranslations("linkedin.usage");
   const format = useFormatter();
   const title = useId();
@@ -129,7 +130,7 @@ export function UsageSummary({ workspaceId, accountId, timeZone, canManage, onCa
               </div>
             </div>
           )}
-          {canManage ? (
+          {canEdit ? (
             <div className="border-t border-line pt-5">
               <ReadLimit
                 workspaceId={workspaceId}

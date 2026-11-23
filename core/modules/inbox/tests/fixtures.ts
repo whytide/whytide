@@ -81,23 +81,25 @@ export type Fixture = {
   /** A person whose lead is in_campaign, enrolled on the account, the steps as STEPS has them. */
   readonly enrolled: (senderAccountId: string, slug: string) => Promise<string>;
   /**
-   * The person's message_1 sent with `text` at `executedAt`, approved an hour before by OWNER: the
-   * step `succeeded`, its frozen draft and approved item, linkedin's outreach row with the refs, and
-   * the touch the send recorded.
+   * The person's message_1, or the step given, sent with `text` at `executedAt`, approved an hour
+   * before by OWNER, or by the campaign's mode (the text then frozen with `line` after it, no
+   * approver; gamma-p4-090): the step `succeeded`, its frozen draft and approved item, linkedin's
+   * outreach row with the refs, and the touch the send recorded.
    */
   readonly sent: (
     senderAccountId: string,
     personId: string,
     text: string,
     executedAt?: Date,
+    approval?: { readonly stepKey?: string; readonly line?: string },
   ) => Promise<SentStep>;
   /** The account's own message through inbox_store's body, its file put on the files fake first. */
   readonly storeOwn: (
     input: { readonly personId: string; readonly senderAccountId: string },
     file: MessageFile,
   ) => Promise<{ readonly result: StoreResult; readonly fileKey: string }>;
-  /** The approver's connected account. */
-  readonly account: () => Promise<{ id: string }>;
+  /** The approver's connected account, OWNER's unless given another owner. */
+  readonly account: (ownerUserId?: string) => Promise<{ id: string }>;
   /** The person's steps as [key, status, skip_reason], by position. */
   readonly stepsOf: (personId: string) => Promise<(string | null)[][]>;
   readonly leadOf: (personId: string) => Promise<string>;
@@ -158,22 +160,31 @@ export function fixture(workspaceId: string): Fixture {
     personId: string,
     text: string,
     executedAt = new Date(),
+    approval: { readonly stepKey?: string; readonly line?: string } = {},
   ): Promise<SentStep> {
-    const where = { personId, stepKey: "message_1" };
+    const { stepKey = "message_1", line } = approval;
+    const where = { personId, stepKey };
     const { id: stepExecutionId } = await app().stepExecution.findFirstOrThrow({ where });
     const approvedAt = new Date(executedAt.getTime() - HOUR_MS);
-    const step = { stepExecutionId, stepKey: "message_1" };
+    const step = { stepExecutionId, stepKey };
     const draftId = newId("mdr");
+    // The mode's approval freezes the text with its line after a blank line, as messaging does.
+    const frozen = line === undefined ? text : `${text}\n\n${line}`;
+    const byMode = line === undefined ? {} : { editedText: frozen, disclosureApplied: true };
     await app().messageDraft.create({
       data: {
-        ...{ id: draftId, workspaceId, personId, ...step, text, approvedAt },
+        ...{ id: draftId, workspaceId, personId, ...step, text, approvedAt, ...byMode },
         ...({ channel: "linkedin_message", kind: "outbound_step", status: "approved" } as const),
       },
     });
+    const decided =
+      line === undefined
+        ? { decidedBy: OWNER }
+        : { decisionOrigin: "approval_mode" as const, approvalBy: "mode" as const };
     const approvalItemId = await createApprovalItem(
       {
         ...{ workspaceId, personId, senderAccountId, ...step, status: "approved", draftId },
-        ...{ approvedContentHash: sha256(text), decidedBy: OWNER, decidedAt: approvedAt },
+        ...{ approvedContentHash: sha256(frozen), decidedAt: approvedAt, ...decided },
       },
       app(),
     );
@@ -192,7 +203,7 @@ export function fixture(workspaceId: string): Fixture {
       data: { lastStepExecutionId: stepExecutionId, lastMessageRef: refs.messageRef },
     });
     await run(() => recordTouch(personId, executedAt));
-    return { stepExecutionId, ...refs, text, executedAt, approvedAt };
+    return { stepExecutionId, ...refs, text: frozen, executedAt, approvedAt };
   }
 
   async function storeOwn(
@@ -214,7 +225,7 @@ export function fixture(workspaceId: string): Fixture {
     enrolled,
     sent,
     storeOwn,
-    account: () => createConnectedAccount(workspaceId, { ownerUserId: OWNER }),
+    account: (ownerUserId = OWNER) => createConnectedAccount(workspaceId, { ownerUserId }),
     stepsOf: async (personId) =>
       (
         await app().stepExecution.findMany({ where: { personId }, orderBy: { position: "asc" } })

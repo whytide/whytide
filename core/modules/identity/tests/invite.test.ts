@@ -15,6 +15,8 @@ import { useIdentityClient } from "../testing/index.ts";
 withTestDb();
 useTenancyClient(asRole("app"));
 useIdentityClient(asRole("app"));
+/** An invite as `pnpm invite` makes one: Owner, by no user. */
+const byCommand = { role: "Owner", invitedBy: null } as const;
 
 /** The command's exit code and lines. */
 async function invite(...args: string[]) {
@@ -57,14 +59,14 @@ test("pnpm invite: one invite, lowercased, in WORKSPACE_SLUG; a second run repor
 
 test("allowSignIn: an invited email in any case, an existing member; nobody else, nor a disabled user, and it creates no user", async () => {
   const [a, b] = await createTwoWorkspaces();
-  await createInvite({ workspaceId: a.workspace.id, email: "invited@example.test" });
+  await createInvite({ ...byCommand, workspaceId: a.workspace.id, email: "invited@example.test" });
   assert.equal(await allowSignIn("INVITED@Example.Test"), true);
   assert.equal(await allowSignIn(a.user.email), true);
   assert.equal(await allowSignIn("stranger@example.test"), false);
   assert.equal(await allowSignIn("not an email"), false);
   assert.equal(await asRole("app").user.count(), 2);
   // A disabled member with a pending invite: refused, given its disabledAt, the invite left pending.
-  await createInvite({ workspaceId: b.workspace.id, email: a.user.email });
+  await createInvite({ ...byCommand, workspaceId: b.workspace.id, email: a.user.email });
   await disable(a.user.id);
   assert.equal(await allowSignIn(a.user.email), false);
   assert.ok((await findOrCreateByEmail(a.user.email)).disabledAt instanceof Date);

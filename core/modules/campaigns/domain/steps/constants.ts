@@ -53,6 +53,12 @@ export const RECOVERY_CODES = [
 ] as const;
 
 /**
+ * gamma-p3-060's: a step that waits, unplaced, while its enrollment is paused or its campaign is
+ * not active (the gate's error_code); invite_accepted, the fallback's skip, is a withdrawal's code.
+ */
+export const PAUSE_CODES = ["enrollment_paused", "campaign_not_active"] as const;
+
+/**
  * What a step's skip_reason and error_code may hold: contacts' suppression reasons a step can stop
  * on, a reply, an enrollment that ended, and a person already touched on the day; the owner's skip
  * in "Up next" (the step, and the steps a skipped connection request cancels); the gate's two
@@ -74,10 +80,25 @@ export const STEP_REASON_CODES = [
   "member_ref_unknown",
   // The profile read before a connection request found no profile: the step `failed` (beta-p4-030).
   "profile_unreadable",
+  // The connection request's person is a connection already, as LinkedIn refused the invite or the
+  // read before it said: the step `skipped`, the fallback's emails too (connect-already-connected).
+  "already_connected",
+  // A not-interested reply's held steps, `cancelled` (gamma-p4-050, ../replies/apply.ts); an
+  // opt-out reply's carry opted_out, above.
+  "not_interested",
+  // gamma-p6-040: the sender's owner no longer an active member, the enrollment's pending steps
+  // `cancelled` (../no-sender.ts); an email step's mailbox owned by another member than the
+  // enrollment's sender's, the step `skipped` at the gate.
+  "owner_removed",
+  "sender_mismatch",
+  // gamma-rf-050: a LinkedIn step of a person known by an email address alone, with no profile,
+  // `failed` before any read or request (../send/profile.ts, ../send/prepare.ts).
+  "no_linkedin_profile",
   ...SEND_REFUSAL_CODES,
   // A withdrawal's (beta-p4-060): ../withdraw/constants.ts.
   ...WITHDRAWAL_CODES,
   ...RECOVERY_CODES,
+  ...PAUSE_CODES,
 ] as const;
 
 /**
@@ -93,6 +114,10 @@ export const EXIT_DETAILS = [
   // beta-p4-040: a replaced account (no_sender), a request off the port's schema (send_refused).
   "account_replaced",
   "linkedin_input_invalid",
+  // gamma-p6-040: the sender's owner no longer an active member (no_sender).
+  "owner_removed",
+  // gamma-rf-050: a LinkedIn step of a person without a profile (send_refused).
+  "no_linkedin_profile",
 ] as const;
 
 /**
@@ -105,8 +130,21 @@ export const APPROVED_ACTIONS = ["invite", "message"] as const;
  * item. Every other action, one added later included, needs its approved item at the gate.
  */
 export const APPROVAL_EXEMPT_ACTIONS = ["withdraw"] as const;
+/**
+ * The actions whose follow-up the campaign's mode may approve in review_first_touches (gamma-p4-070):
+ * a LinkedIn message and an email. A connection request is a first touch, always, and approvals'
+ * mode never approves one; any other action, one added later included, needs a person.
+ */
+export const MODE_ACTIONS = ["message", "email"] as const;
+/**
+ * The one status of a step whose message reached the person (review-gaps): a follow-up is a first
+ * touch until a step of its action in its enrollment has it. Skipped, failed, held, cancelled,
+ * planned, scheduled and executing steps sent nothing the person surely received.
+ */
+export const SENT_STEP_STATUS = "succeeded";
 
 export type StepReasonCode = (typeof STEP_REASON_CODES)[number];
+export type PauseCode = (typeof PAUSE_CODES)[number];
 export type SendRefusalCode = (typeof SEND_REFUSAL_CODES)[number];
 export type ExitDetail = (typeof EXIT_DETAILS)[number];
 export type ApprovedAction = (typeof APPROVED_ACTIONS)[number];

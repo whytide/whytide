@@ -5,10 +5,12 @@
 // sender account by label, its zone named, its table's four rows by today, the last 7 days and since
 // the start, the days Kolkata's (a send at 23:30 local yesterday not today, one at 00:10 local today
 // today, one seven local days ago only since the start); every other step status, a withdrawal and a
-// completed sequence left out; an account linkedin no longer holds last, in UTC. Without an
-// enrollment, the empty state; the loading state while the e2e api holds the read, and the error
-// state when it fails it, whose Try again reads again (core/apps/api/tests/e2e-hold.ts); a phone's
-// width, each table within its card. Every text from its key; axe on each state.
+// completed sequence left out; an account linkedin no longer holds last, in UTC; a line saying
+// whose (gamma-p6-070): an Owner's every member's, a Member's, made by the e2e api's members route,
+// their own account's card alone. Without an enrollment, the empty state; the loading state while
+// the e2e api holds the read, and the error state when it fails it, whose Try again reads again
+// (core/apps/api/tests/e2e-hold.ts); a phone's width, each table within its card. Every text from
+// its key; axe on each state.
 import { AxeBuilder } from "@axe-core/playwright";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { createTranslator } from "next-intl";
@@ -53,6 +55,8 @@ type Enrollment = {
   status: string;
   endedAt?: string;
   removedAccount?: boolean;
+  /** A teammate's account rather than the signed-in user's. */
+  senderAccountId?: string;
   steps: Step[];
 };
 
@@ -141,14 +145,23 @@ function scenario(): Enrollment[] {
   ];
 }
 
-/** The workspace's enrollments replaced with these, from the user's account in Kolkata. */
-async function seed(page: Page, origin: string | undefined, enrollments: Enrollment[]) {
-  const data = { account: { label: LABEL, timeZone: ZONE }, enrollments };
+/**
+ * The workspace's enrollments replaced with these, from the user's account, in Kolkata by default:
+ * that account's id.
+ */
+async function seed(
+  page: Page,
+  origin: string | undefined,
+  enrollments: Enrollment[],
+  account = { label: LABEL, timeZone: ZONE },
+): Promise<string> {
+  const data = { account, enrollments };
   const answer = await page.request.post(`${E2E}/counts`, {
     data,
     headers: { origin: origin ?? "" },
   });
   expect(answer.status(), await answer.text()).toBe(200);
+  return ((await answer.json()) as { accountId: string }).accountId;
 }
 
 /** The e2e api holds (`e2e_hold`) or fails (`e2e_fail`) each read of the page's path. */
@@ -194,6 +207,13 @@ const rows = (...measures: [string, number, number, number][]) => [
 ];
 const read = { useInnerText: true };
 const REMOVED = () => t("campaigns.counts.account_removed");
+/** A Member of the workspace with an account of their own, in UTC. */
+const MEMBER = {
+  email: "e2e-counts-member@example.com",
+  displayName: "Cora Counts",
+  role: "Member",
+};
+const MEMBER_LABEL = "Member counts";
 
 test.use({ timezoneId: "America/New_York" });
 
@@ -217,9 +237,10 @@ test("Counts in the LinkedIn group after the accounts: a card per sender account
   await expect(link).toHaveAttribute("href", PATH);
   await expect(link).toHaveAttribute("aria-current", "page");
 
-  // By label, the removed account last.
+  // By label, the removed account last; every member's, as the line says.
   const cards = page.getByRole("main").getByRole("region");
   await expect(cards.getByRole("heading", { level: 2 })).toHaveText([LABEL, REMOVED()]);
+  await expect(page.getByText(t("campaigns.counts.scope_all"), { exact: true })).toBeVisible();
   const own = card(page, LABEL);
   await expect(own.getByText(t("campaigns.counts.zone", { zone: ZONE }))).toBeVisible();
   await expect(table(own, LABEL).getByRole("row")).toHaveText(
@@ -244,6 +265,50 @@ test("Counts in the LinkedIn group after the accounts: a card per sender account
   );
   // Read-only: nothing on the page acts.
   await expect(page.getByRole("main").getByRole("button")).toHaveCount(0);
+  await axe(page);
+});
+
+test("whose accounts: an Owner's page holds every member's, a Member's their own account's card alone, each line saying whose; axe", async ({
+  page,
+  signInAs,
+  baseURL,
+}) => {
+  test.slow(); // three sign-ins, sixteen enrollments seeded and two pages of cards read
+  const headers = { origin: baseURL ?? "" };
+  await signInAs();
+  const members = { members: [MEMBER] };
+  const added = await page.request.post(`${E2E}/members`, { data: members, headers });
+  expect(added.status(), await added.text()).toBe(200);
+  // The Member's account, made by the seed route as the Member; then the Owner's scenario, with one
+  // connection request today from the Member's account.
+  await signInAs(MEMBER.email);
+  const senderAccountId = await seed(page, baseURL, [], { label: MEMBER_LABEL, timeZone: "UTC" });
+  await signInAs();
+  const now = new Date().toISOString();
+  const theirs = { stepKey: "connect", status: "succeeded", executedAt: now };
+  await seed(page, baseURL, [
+    ...scenario(),
+    { status: "active", senderAccountId, steps: [theirs] },
+  ]);
+  await page.goto(PATH);
+  const cards = page.getByRole("main").getByRole("region");
+  const titles = cards.getByRole("heading", { level: 2 });
+  await expect(titles).toHaveText([LABEL, MEMBER_LABEL, REMOVED()]);
+  await expect(page.getByText(t("campaigns.counts.scope_all"), { exact: true })).toBeVisible();
+
+  await signInAs(MEMBER.email);
+  await page.reload();
+  await expect(titles).toHaveText([MEMBER_LABEL]);
+  await expect(page.getByText(t("campaigns.counts.scope_own"), { exact: true })).toBeVisible();
+  await expect(table(card(page, MEMBER_LABEL), MEMBER_LABEL).getByRole("row")).toHaveText(
+    rows(
+      ["invites_sent", 1, 1, 1],
+      ["messages_sent", 0, 0, 0],
+      ["accepted", 0, 0, 0],
+      ["replied", 0, 0, 0],
+    ),
+    read,
+  );
   await axe(page);
 });
 

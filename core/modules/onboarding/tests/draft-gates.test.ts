@@ -1,7 +1,10 @@
 // The drafter's gates without a model (alpha-p4-030; docs/security.md "The drafter"), a document's
-// source checked like a page's (knowledge-draft), and the cut of a page's text. The runs are the worker's test, core/apps/worker/tests/onboarding-draft.test.ts.
+// source checked like a page's (knowledge-draft), and the input's bound on a text, all that a page or
+// a document keeps (draft-full-text). The runs are the worker's test,
+// core/apps/worker/tests/onboarding-draft.test.ts.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { DOCUMENT_LIMITS } from "../domain/constants.ts";
 import {
   DRAFT_GATES,
   limitsGate,
@@ -9,12 +12,12 @@ import {
   quotesGate,
   sourcesGate,
 } from "../domain/draft-gates.ts";
-import { cutPage } from "../domain/drafter.ts";
 import {
-  DRAFT_PAGE_CHARS,
   type DraftInput,
   type DraftOutput,
+  draftInput,
 } from "../schemas/draft-company-knowledge.ts";
+import { FETCH_LIMITS } from "../workflows/fetch-website.ts";
 
 const HOME = "https://acme.test/";
 const ABOUT = "https://acme.test/about";
@@ -130,12 +133,14 @@ test("limits: a list past twenty items, a text past its field's length, an item 
   assert.deepEqual(limitsGate(atLimit).issues, []);
 });
 
-test("a page's text is cut to what the drafter reads, never inside a character; a shorter one stays", () => {
-  const page = { url: HOME, title: "Acme", text: "short" };
-  assert.equal(cutPage(page), page);
-  const long = { ...page, text: "x".repeat(DRAFT_PAGE_CHARS + 10) };
-  assert.equal(cutPage(long).text.length, DRAFT_PAGE_CHARS);
-  // An emoji, two UTF-16 units, across the limit: it goes whole.
-  const across = { ...page, text: `${"x".repeat(DRAFT_PAGE_CHARS - 1)}😀 and more` };
-  assert.equal(cutPage(across).text, "x".repeat(DRAFT_PAGE_CHARS - 1));
+test("the drafter's input takes a page's and a document's text whole, as much as the fetch and the documents keep; a character more is refused", () => {
+  assert.equal(DOCUMENT_LIMITS.text, FETCH_LIMITS.text);
+  const page = (text: string) => ({ pages: [{ url: HOME, title: "Acme", text }] });
+  const full = "x".repeat(FETCH_LIMITS.text);
+  assert.deepEqual(draftInput.parse(page(full)), page(full));
+  const over = draftInput.safeParse(page(`${full}x`));
+  assert.deepEqual(
+    over.error?.issues.map((issue) => issue.path.join(".")),
+    ["pages.0.text"],
+  );
 });

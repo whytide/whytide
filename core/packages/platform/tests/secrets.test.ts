@@ -5,9 +5,11 @@
 // APP_MASTER_KEY is malformed imports the package, fails at start with the variable's name, and never
 // logs the key. The lint allow-list on the worker entry is proven by the rule's own fixtures,
 // tools/lint/fixtures/decrypt-in-worker-only, which `pnpm -F lint test` runs; a platform test cannot
-// plant a file under core/apps/api/.
+// plant a file under core/apps/api/. deriveSecret (gamma-p1-010) derives a value from the current
+// master key without opening anything.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHmac, hkdfSync } from "node:crypto";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import * as platform from "../index.ts";
@@ -16,8 +18,15 @@ import { unwrapperOf } from "../secrets/keys.ts";
 import { decryptSecret } from "../secrets/worker.ts";
 import { collectLogs, throwsCode } from "../testing/index.ts";
 
-const { createLogger, encryptSecret, isAppError, loadMasterKeys, newMasterKey, parseSecretBlob } =
-  platform;
+const {
+  createLogger,
+  deriveSecret,
+  encryptSecret,
+  isAppError,
+  loadMasterKeys,
+  newMasterKey,
+  parseSecretBlob,
+} = platform;
 const context = { organizationId: "org_01JAB3K5ZQ7W9R2M4T6V8X0Y1C", purpose: "linkedin_account" };
 /** The fixed part of a blob, before the ciphertext; the value's nonce starts at VALUE_AT. */
 const HEADER_BYTES = 98;
@@ -43,7 +52,7 @@ test("the api encrypts through the package root; decryption exists only in the w
   assert.equal("registerUnwrapper" in platform, false);
   assert.equal(typeof decryptSecret, "function");
   const keys = keyring(newMasterKey());
-  assert.deepEqual(Object.keys(keys.current), ["keyVersion", "wrap"]);
+  assert.deepEqual(Object.keys(keys.current), ["keyVersion", "wrap", "derive"]);
   assert.equal("unwrap" in keys.current, false);
   assert.equal(typeof unwrapperOf(keys.current), "function");
 });
@@ -295,4 +304,45 @@ test("a tampered blob fails: the key version, the wrapped key, then the value", 
     () => decryptSecret(blob.subarray(0, blob.length - 1), context, keys),
     "secret_blob_invalid",
   );
+});
+
+test("deriveSecret: 32 bytes, the same for one input and purpose, other bytes for another input, purpose or key", () => {
+  const key = newMasterKey();
+  const keys = keyring(key);
+  const purpose = { purpose: "email.pkce_verifier" };
+  const value = deriveSecret("wsp_01.nonce", purpose, keys);
+  assert.equal(value.length, 32);
+  assert.deepEqual(deriveSecret("wsp_01.nonce", purpose, keyring(key)), value);
+  assert.deepEqual(deriveSecret(Buffer.from("wsp_01.nonce"), purpose, keys), value);
+  assert.notDeepEqual(deriveSecret("wsp_01.other", purpose, keys), value);
+  assert.notDeepEqual(deriveSecret("wsp_01.nonce", { purpose: "email.other" }, keys), value);
+  assert.notDeepEqual(deriveSecret("wsp_01.nonce", purpose, keyring(newMasterKey())), value);
+  // The recipe: HKDF-SHA-256 of the master key under the label, for the purpose, then an HMAC.
+  const derived = hkdfSync(
+    "sha256",
+    Buffer.from(key, "base64"),
+    "whytide.secrets.derive.v1",
+    "email.pkce_verifier",
+    32,
+  );
+  const expected = createHmac("sha256", Buffer.from(derived)).update("wsp_01.nonce").digest();
+  assert.deepEqual(value, expected);
+  const plain = createHmac("sha256", Buffer.from(key, "base64")).update("wsp_01.nonce").digest();
+  assert.notDeepEqual(value, plain);
+  throwsCode(() => deriveSecret("wsp_01.nonce", { purpose: "" }, keys), "secret_context_invalid");
+});
+
+test("deriveSecret under a rotated key derives from the new current key, and opens nothing", () => {
+  const [oldKey, newKey] = [newMasterKey(), newMasterKey()];
+  const purpose = { purpose: "email.pkce_verifier" };
+  const before = deriveSecret("wsp_01.nonce", purpose, keyring(oldKey));
+  const during = deriveSecret("wsp_01.nonce", purpose, keyring(newKey, oldKey));
+  assert.notDeepEqual(during, before);
+  assert.deepEqual(during, deriveSecret("wsp_01.nonce", purpose, keyring(newKey)));
+  // A copy of the wrapper has no unwrap registered: the derivation never needs one.
+  const keys = keyring(newKey);
+  const copy = { ...keys.current };
+  assert.equal(unwrapperOf(copy), undefined);
+  assert.deepEqual(deriveSecret("wsp_01.nonce", purpose, { current: copy }), during);
+  assert.equal(typeof deriveSecret, "function");
 });

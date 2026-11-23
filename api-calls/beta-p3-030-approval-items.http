@@ -1,11 +1,11 @@
 # approvals' queue routes (core/modules/approvals/README.md "Routes"): a member's session,
 # approvals.read to read the queue, approvals.decide to approve or skip; only the owner of an item's
-# sender account decides it. Both POSTs are @Idempotent(): the Idempotency-Key is an example UUID;
-# the same key answers the first press again. A write sends the cookie, so it sends
-# Origin: {{appOrigin}} too. `approvalItemId` is a pending item of your workspace: put it in
-# http-client.private.env.json with your workspaceId.
+# sender, the account or an email's mailbox, reads and decides it (gamma-p6-050). Both POSTs are
+# @Idempotent(): the Idempotency-Key is an example UUID; the same key answers the first press again.
+# A write sends the cookie, so it sends Origin: {{appOrigin}} too. `approvalItemId` is a pending item
+# of your own account: put it in http-client.private.env.json with your workspaceId.
 
-### GET /v1/workspaces/{workspaceId}/approvals/items: the queue, every pending item and every approved one whose step waits, by due time, each with its lead, draft, sender account, stale and needsAttention flags and canDecide; counts.toApprove and counts.decidedToday
+### GET /v1/workspaces/{workspaceId}/approvals/items: your own queue, whatever your role: the pending items and the approved ones whose step waits of your own senders, by due time, each with its lead, draft, sender, stale and needsAttention flags and canDecide; senders, by label, each { accountId, mailboxId, label, timeZone, toApprove, decidedToday }, today in its own zone; counts.toApprove and counts.decidedToday, their sums
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/approvals/items
 Accept: application/json
 Cookie: {{sessionCookie}}

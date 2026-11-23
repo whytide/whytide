@@ -1,0 +1,98 @@
+// The tables of core/modules/email (its docs/data.md), gamma-p1-010; migration
+// 20261101163425_email_mailboxes. Three tenant tables: the workspace's sending domains, its members'
+// mailboxes, connected by OAuth with PKCE (F11 §4.1), and the connects waiting for their callback.
+// A mailbox's tokens are stored only sealed (core/packages/platform "Secrets at rest"), one blob that
+// only the worker opens, and nulled once revoked; a connect keeps its state's nonce's SHA-256 only,
+// never the state, the code or the PKCE verifier. Hand-written SQL in the migration: the CHECK that
+// ties the reason, the time and the tokens to the status, one connected mailbox per member and
+// workspace, and one connected mailbox per address across workspaces. No foreign key to workspaces
+// or users, as linkedin.prisma says.
+
+/// tenant
+model SendingDomain {
+  id          String    @id
+  workspaceId String    @map("workspace_id")
+  /// Lower case: the part of a mailbox's address after the @.
+  domain      String
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  mailboxes   Mailbox[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, domain])
+  @@map("sending_domains")
+}
+
+/// tenant
+model Mailbox {
+  id                 String                     @id
+  workspaceId        String                     @map("workspace_id")
+  ownerUserId        String                     @map("owner_user_id")
+  sendingDomainId    String                     @map("sending_domain_id")
+  provider           MailboxProvider
+  /// Lower case: the address the code exchange proved.
+  /// pii: business_contact
+  emailAddress       String                     @map("email_address")
+  /// The owner's name at the connect.
+  /// pii: business_contact
+  displayName        String                     @map("display_name")
+  /// The granted scopes, `send` and `read`.
+  scopes             String[]
+  /// The sealed `{ refreshToken, accessToken, expiresAt }`; null once revoked.
+  oauthTokenRef      Bytes?                     @map("oauth_token_ref")
+  /// The address's domain is a public provider's (FREE_CONSUMER_DOMAINS).
+  isFreeConsumer     Boolean                    @map("is_free_consumer")
+  status             MailboxStatus
+  /// Set exactly while disconnected, as disconnected_at is.
+  disconnectedReason MailboxDisconnectedReason? @map("disconnected_reason")
+  /// An IANA zone, the browser's at the connect.
+  timeZone           String                     @map("time_zone")
+  connectedAt        DateTime                   @map("connected_at") @db.Timestamptz()
+  disconnectedAt     DateTime?                  @map("disconnected_at") @db.Timestamptz()
+  /// When the worker last refreshed the access token.
+  tokenCheckedAt     DateTime?                  @map("token_checked_at") @db.Timestamptz()
+  sendingDomain      SendingDomain              @relation(fields: [workspaceId, sendingDomainId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([workspaceId, emailAddress])
+  @@index([workspaceId, status])
+  @@map("mailboxes")
+}
+
+/// tenant
+model MailboxConnect {
+  id          String          @id
+  workspaceId String          @map("workspace_id")
+  userId      String          @map("user_id")
+  provider    MailboxProvider
+  timeZone    String          @map("time_zone")
+  /// SHA-256 of the state's nonce, hex.
+  stateHash   String          @map("state_hash")
+  expiresAt   DateTime        @map("expires_at") @db.Timestamptz()
+  /// When the callback claimed it: once only.
+  usedAt      DateTime?       @map("used_at") @db.Timestamptz()
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz()
+
+  @@unique([workspaceId, stateHash])
+  @@map("mailbox_connects")
+}
+
+enum MailboxProvider {
+  google
+  microsoft
+
+  @@map("mailbox_provider")
+}
+
+enum MailboxStatus {
+  connected
+  disconnected
+
+  @@map("mailbox_status")
+}
+
+enum MailboxDisconnectedReason {
+  user
+  token_revoked
+  member_removed
+
+  @@map("mailbox_disconnected_reason")
+}

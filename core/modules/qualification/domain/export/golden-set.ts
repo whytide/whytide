@@ -56,7 +56,7 @@ export async function exportGoldenSet(
 export async function goldenLines(reviews: readonly LatestReview[]): Promise<GoldenLine[]> {
   const snapshots = await snapshotsOf(reviews.flatMap(({ snapshotId }) => snapshotId ?? []));
   const prompts = await rawPrompts([...snapshots.values()].map((s) => s.decisionRecordId));
-  let icp: Icp | undefined;
+  const icps = new Map<string, Icp>();
   const lines: GoldenLine[] = [];
   for (const review of reviews) {
     const snapshot = review.snapshotId === null ? null : (snapshots.get(review.snapshotId) ?? null);
@@ -66,7 +66,11 @@ export async function goldenLines(reviews: readonly LatestReview[]): Promise<Gol
       lines.push(goldenLine({ review, snapshot, input: { from: "decision_record", value: kept } }));
       continue;
     }
-    icp ??= (await readIcpForScoring(currentTenant().workspaceId)).icp;
+    // The audience the snapshot was assessed against, read once each; none, the default.
+    const icpId = snapshot?.icpId ?? undefined;
+    const icp =
+      icps.get(icpId ?? "") ?? (await readIcpForScoring(currentTenant().workspaceId, icpId)).icp;
+    icps.set(icpId ?? "", icp);
     const value = await rebuilt(review.personId, icp);
     lines.push(goldenLine({ review, snapshot, input: { from: "rebuilt", value } }));
   }
@@ -79,9 +83,16 @@ async function rebuilt(personId: string, icp: Icp): Promise<AssessFitInput> {
   return assessmentInput(person, company, icp);
 }
 
-type Stored = GoldenSnapshot & { readonly decisionRecordId: string };
+/** A snapshot with its decision record and its audience (gamma-p5-050), which no line holds. */
+type Stored = GoldenSnapshot & {
+  readonly decisionRecordId: string;
+  readonly icpId: string | null;
+};
 
-/** The snapshots named, with their verdicts, by id. */
+/**
+ * The snapshots named, with the model's verdicts, by id: a member's verdict is no eval data (README
+ * "A member's verdict"), so a row a member wrote alone is left out.
+ */
 async function snapshotsOf(ids: readonly string[]): Promise<Map<string, Stored>> {
   if (ids.length === 0) return new Map();
   const where = { id: { in: [...ids] } };
@@ -93,9 +104,12 @@ async function snapshotsOf(ids: readonly string[]): Promise<Map<string, Stored>>
   return new Map(
     rows.map((row) => {
       const { id, modelId, promptVersion, status, fitScore, tier, disqualifiers } = row;
-      const own = verdicts.filter((verdict) => verdict.snapshotId === id);
+      const own = verdicts.flatMap(({ snapshotId, criterion, verdict, evidence }) =>
+        snapshotId === id && verdict !== null ? [{ criterion, verdict, evidence }] : [],
+      );
       const snapshot = { modelId, promptVersion, status, fitScore, tier, disqualifiers };
-      return [id, { ...snapshot, decisionRecordId: row.decisionRecordId, verdicts: own }];
+      const { decisionRecordId, icpId } = row;
+      return [id, { ...snapshot, decisionRecordId, icpId, verdicts: own }];
     }),
   );
 }

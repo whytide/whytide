@@ -3,36 +3,53 @@
 // its thresholds, naming the checks and the cases. Live, it writes each task's record to
 // evals/<task>/runs/<date>.json. As the pipeline's step `eval` (tools/ci sets WHYTIDE_CI_LOCAL) with
 // no task named, it runs only when a file under core/modules/*/agents/ or this package's evals/
-// changed since the branch left main (changes.ts); otherwise it says so and passes.
-//   node evals/run.ts [<task> | <module>] [--dir <folder>]    --dir: the evals' folder, this one by default
-import { mkdirSync, writeFileSync } from "node:fs";
+// changed since the branch left main (changes.ts); otherwise it says so and passes. EVAL_LIVE=1 is
+// refused there, before any call. `--cases <file>` (gamma-p7-065) adds inbox's reply golden set to
+// inbox.classify-reply's cases, live only, from a file outside the repository: real replies are never
+// committed, and the record keeps the golden cases' names and scores only.
+//   node evals/run.ts [<task> | <module>] [--dir <folder>] [--cases <file>]
+//   --dir: the evals' folder, this one by default; --cases: a golden file, with inbox.classify-reply
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { llmConfig } from "@whytide/providers";
 import { loadAgentTasks } from "../registry/define.ts";
 import { evalsChanged } from "./changes.ts";
 import { evalConfig } from "./config.ts";
-import { evalFolders, failureOf, formatReport, runEval, runRecord } from "./runner.ts";
+import { GOLDEN_TASK } from "./constants.ts";
+import { goldenCases } from "./inbox.classify-reply/golden.ts";
+import {
+  type EvalCase,
+  evalFolders,
+  failureOf,
+  formatReport,
+  runEval,
+  runRecord,
+} from "./runner.ts";
 
 const say = (text: string) => process.stdout.write(`${text}\n`);
 const root = resolve(import.meta.dirname, "..", "..", "..", "..");
 
 let select: string | undefined;
 let dir = import.meta.dirname;
+let casesFile: string | undefined;
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   const arg = args[i] ?? "";
   if (arg === "--dir") dir = resolve(args[++i] ?? usage("--dir needs a folder"));
+  else if (arg === "--cases") casesFile = resolve(args[++i] ?? usage("--cases needs a file"));
   else if (arg.startsWith("-") || select !== undefined) usage(`unexpected argument ${arg}`);
   else select = arg;
 }
 
+const live = evalConfig.EVAL_LIVE === "1";
+if (live && process.env.WHYTIDE_CI_LOCAL) usage("EVAL_LIVE=1 is refused in the pipeline");
 if (process.env.WHYTIDE_CI_LOCAL && select === undefined && !evalsChanged(root)) {
   say("eval: skipped, nothing under core/modules/*/agents/ or core/packages/ai/evals/ changed");
   process.exit(0);
 }
-const live = evalConfig.EVAL_LIVE === "1";
+const golden = casesFile === undefined ? [] : readGolden(casesFile);
 if (live && (llmConfig.PROVIDER_LLM ?? "fake") === "fake") {
   usage("EVAL_LIVE=1 runs on the model of PROVIDER_LLM: name a vendor's adapter, its key set");
 }
@@ -54,7 +71,7 @@ const failed: string[] = [];
 for (const name of folders) {
   say(`== ${name}, on ${live ? `${llmConfig.PROVIDER_LLM}, live` : "the fake"}`);
   try {
-    const report = await runEval(dir, name, live);
+    const report = await runEval(dir, name, live, golden);
     say(formatReport(report));
     if (!report.pass) failed.push(`${name} (${failureOf(report)})`);
     if (live) {
@@ -73,9 +90,34 @@ const tasks = `${folders.length} task${folders.length === 1 ? "" : "s"}`;
 say(failed.length ? `eval: failed: ${failed.join(", ")}` : `eval: ok, ${tasks} passed`);
 process.exit(failed.length ? 1 : 0);
 
+/**
+ * The golden file's cases, refused unless live, for inbox.classify-reply alone, from a file outside
+ * the repository. Its texts stay in memory; a broken line is named by its number only.
+ */
+function readGolden(file: string): EvalCase[] {
+  if (!live)
+    usage("--cases runs live only, with EVAL_LIVE=1: the fake has no answer for a real reply");
+  if (select !== GOLDEN_TASK) usage(`--cases adds the reply golden set to ${GOLDEN_TASK} only`);
+  let real: string;
+  try {
+    real = realpathSync(file);
+  } catch {
+    usage(`--cases: no file ${file}`);
+  }
+  const inRepository = relative(realpathSync(root), real);
+  if (!isAbsolute(inRepository) && inRepository.split(sep)[0] !== "..") {
+    usage("--cases: the file is inside the repository; keep real replies outside it");
+  }
+  try {
+    return goldenCases(readFileSync(real, "utf8"));
+  } catch (error) {
+    usage(`--cases: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function usage(problem: string): never {
   process.stderr.write(
-    `eval: ${problem}\nusage: pnpm -F ai eval [<task> | <module>] [--dir <folder>]\n`,
+    `eval: ${problem}\nusage: pnpm -F ai eval [<task> | <module>] [--dir <folder>] [--cases <file>]\n`,
   );
   process.exit(2);
 }

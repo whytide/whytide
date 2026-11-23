@@ -1,6 +1,6 @@
 "use client";
-// The account's daily read limit (README.md "Screen"), under its reads today, for a member with
-// linkedin.manage only (the account's canManage; the others see the value on the card): the field
+// The account's daily read limit (README.md "Screen"), under its reads today, for the account's
+// owner only (its canEdit, gamma-p6-070; an Owner sees a teammate's on their usage): the field
 // with the bound the usage answers, the warning in a warm box, and its own Save. The api decides:
 // its refusal, read_cap_invalid, shows under the field; another failure in words, with a retry; a
 // saved limit in the toast.

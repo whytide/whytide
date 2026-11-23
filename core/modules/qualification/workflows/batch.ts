@@ -1,16 +1,13 @@
-// The batch's activities (README "The batch", docs/flows.md): each is one database step in one tenant
-// run, or the model call outside any, so no run is held across a call that leaves the process and
-// credits' organization lock lasts one step. Inputs and outputs carry ids, versions and codes only:
-// the verdicts and their evidence stay in the snapshot.
-import {
-  applyQualification,
-  getCompany,
-  getLead,
-  getPerson,
-  leadsPendingQualification,
-} from "@whytide/contacts";
+// The batch's activities (README "The batch", docs/flows.md): each is one database step in one
+// tenant run, or the model call outside any, so no run is held across a call that leaves the
+// process and credits' organization lock lasts one step. Inputs and outputs carry ids, versions and
+// codes only: the verdicts and their evidence stay in the snapshot, and the person's excerpts,
+// which the assessment reads, never leave its activity (gamma-p5-050). Each lead is assessed
+// against its own audience (domain/audience.ts); a step of a batch started before audiences names
+// none, the default's, and its reservation keeps the key of before.
+import { applyQualification, getCompany, getLead, getPerson } from "@whytide/contacts";
 import { type TenantClient, tenantClient, withTenant } from "@whytide/db";
-import { type Icp, readIcpForScoring } from "@whytide/icp";
+import { readIcpForScoring } from "@whytide/icp";
 import {
   type ActivityContext,
   credits,
@@ -19,48 +16,68 @@ import {
   startWorkflow,
 } from "@whytide/platform";
 import { listWorkspaceIds } from "@whytide/tenancy";
+import { EXCERPTS } from "../domain/anonymize/index.ts";
 import { assessmentModel, assessPerson } from "../domain/assess/assess-person.ts";
+import { defaultAudienceId, readAudiences, selectLeads } from "../domain/audience.ts";
 import { givenClient } from "../domain/client.ts";
 import { publishDecision } from "../domain/decision.ts";
-import { prepareHardFilters } from "../domain/hard-filters/index.ts";
+import {
+  type PreparedHardFilters,
+  prepareHardFilters,
+  RETIRED_HARD_FILTER_REASONS,
+} from "../domain/hard-filters/index.ts";
+import { dropIntent, lockPerson } from "../domain/intent/store.ts";
+import { cacheAnswered, decideAgain } from "../domain/member-reassess/index.ts";
+import { roundSpent } from "../domain/member-reassess/rounds.ts";
 import { scoreSnapshot } from "../domain/score/score-snapshot.ts";
+import { signalReader } from "../domain/signal-reader.ts";
 import { buildWhy } from "../domain/why/index.ts";
 import { batchStart } from "../events.ts";
 import { prices } from "../prices.ts";
 import { settings } from "../settings.ts";
 
 type Context = ActivityContext<TenantClient>;
+/** One lead of the batch, its audience and that audience's version; no audience: the default's. */
 type Lead = {
   readonly workspaceId: string;
   readonly personId: string;
+  readonly icpId?: string;
   readonly icpVersion: number;
+};
+/** The leads of one audience that passed its filters, oldest first. */
+export type AudienceGroup = {
+  readonly icpId: string;
+  readonly icpVersion: number;
+  readonly personIds: string[];
 };
 /** The lead with its reservation and the attempt it is for; 1 when an older history names none. */
 type Held = Lead & { readonly usageId: string; readonly attempt?: number };
 const CODE = /^[a-z][a-z0-9_]{0,39}$/;
-/** A lead the provider fails at this attempt, or a later one, is ai_failed; before, it waits. */
-const LAST_ATTEMPT = 3;
 
 /**
- * One assessment per person, ICP version, model, prompt version and attempt: a repeat reserves
- * nothing more. The first attempt's key has no attempt, as before attempts were counted.
+ * One assessment per person, audience, version, model, prompt version and attempt: a repeat
+ * reserves nothing more. The first attempt's key has no attempt, as before attempts were counted; a
+ * key with no audience is the form of before audiences, which a batch started before them still
+ * reserves.
  */
 export function assessmentKey(input: {
   personId: string;
+  icpId?: string;
   icpVersion: number;
   modelId: string;
   promptVersion: number;
   attempt?: number;
 }): string {
-  const { personId, icpVersion, modelId, promptVersion, attempt = 1 } = input;
-  const key = `qual:${personId}:${icpVersion}:${modelId}:${promptVersion}`;
+  const { personId, icpId, icpVersion, modelId, promptVersion, attempt = 1 } = input;
+  const audience = icpId === undefined ? "" : `${icpId}:`;
+  const key = `qual:${personId}:${audience}${icpVersion}:${modelId}:${promptVersion}`;
   return attempt === 1 ? key : `${key}:${attempt}`;
 }
 
 /**
- * The tick's activity: each workspace with a lead to assess against a saved ICP gets its batch
- * started, unless one runs; the check is a run of the workspace's own. A workspace that fails leaves
- * the others started, and the tick then fails with its code. The counts only.
+ * The tick's activity: each workspace with a lead to assess against an audience with targeting gets
+ * its batch started, unless one runs; the check is a run of the workspace's own. A workspace that
+ * fails leaves the others started, and the tick then fails with its code. The counts only.
  */
 export async function startBatches(): Promise<{
   workspaces: number;
@@ -83,59 +100,88 @@ export async function startBatches(): Promise<{
   return counts;
 }
 
-/** In the workspace's own run: its ICP has targeting (an unsaved one has none) and a lead waits. */
-function hasWork(workspaceId: string): Promise<boolean> {
+/**
+ * In the workspace's own run: one of its audiences has targeting (an unsaved one has none) and a
+ * lead of it waits, pending, decided against it at an older version or by a retired rule: the
+ * batch's selection of one lead (domain/audience.ts), which reads one lead at most per audience with
+ * targeting. Exported for the tests.
+ */
+export function hasWork(workspaceId: string): Promise<boolean> {
   const tenant = { workspaceId, principal: servicePrincipal("qualification") };
   const check = async () => {
-    const { icp } = await readIcpForScoring(workspaceId);
-    if (!targeted(icp)) return false;
-    const leads = await leadsPendingQualification({ limit: 1, icpVersion: icp.version });
-    return leads.length > 0;
+    const audiences = await readAudiences(workspaceId);
+    if (audiences.targeted.size === 0) return false;
+    return (await selectLeads(audiences, 1)).length > 0;
   };
   return withTenant(tenant, check, { client: givenClient() });
 }
 
-function targeted(icp: Icp): boolean {
-  const { titles, seniorities, industries, sizeRanges, countries, mustHaves, disqualifiers } = icp;
-  const lists = [titles, seniorities, industries, sizeRanges, countries];
-  return lists.some((list) => list.length > 0) || `${mustHaves}${disqualifiers}`.trim() !== "";
-}
-
 /**
- * The batch's first step, one run: the ICP read and its filters prepared once, the leads selected
- * (pending, or decided at an older ICP version), each one filtered; a miss is hard_filtered with the
- * compared values in its why, and its event. The persons who passed, oldest first.
+ * The batch's first step, one run: the audiences read once, the leads selected, each with its own
+ * audience (domain/audience.ts), and filtered by that audience's filters, prepared once; a lead a
+ * retired filter stopped that passes is pending again; a miss is hard_filtered against its audience
+ * with the compared values in its why, and its event, under the person's lock, and loses its intent
+ * row. The persons who passed, grouped by audience, oldest first. A batch started before audiences
+ * asks without `audiences` and gets the answer of before with no lead: the next batch reads them.
  */
-export async function filterLeads(_input: unknown, context: Context) {
+export async function filterLeads(
+  input: { audiences?: true },
+  context: Context,
+): Promise<
+  | { groups: AudienceGroup[]; filtered: number }
+  | { icpVersion: number; personIds: string[]; filtered: number }
+> {
   const { workspaceId } = context;
   return context.tenant(async () => {
-    const { icp } = await readIcpForScoring(workspaceId);
-    const icpVersion = icp.version;
-    const limit = settings.QUALIFICATION_BATCH_SIZE;
-    const leads = await leadsPendingQualification({ limit, icpVersion });
-    const filters = prepareHardFilters(icp);
-    const personIds: string[] = [];
-    for (const { personId } of leads) {
+    if (input.audiences !== true) {
+      const { icp } = await readIcpForScoring(workspaceId);
+      return { icpVersion: icp.version, personIds: [], filtered: 0 };
+    }
+    const audiences = await readAudiences(workspaceId);
+    const selected = await selectLeads(audiences, settings.QUALIFICATION_BATCH_SIZE);
+    const filters = new Map<string, PreparedHardFilters>();
+    const groups = new Map<string, AudienceGroup>();
+    for (const { lead, icpId, icp } of selected) {
+      const { personId } = lead;
+      const icpVersion = icp.version;
       const person = await getPerson(personId);
       const company = person.companyId === null ? null : await getCompany(person.companyId);
-      const result = filters(person, company);
+      const prepared = filters.get(icpId) ?? prepareHardFilters(icp);
+      filters.set(icpId, prepared);
+      const result = prepared(person, company);
       if (result.passed) {
-        personIds.push(personId);
+        if (retiredFilter(lead)) await applyQualification({ personId, status: "pending" });
+        const group = groups.get(icpId) ?? { icpId, icpVersion, personIds: [] };
+        group.personIds.push(personId);
+        groups.set(icpId, group);
         continue;
       }
       const why = buildWhy({ verdicts: [], criteria: [], disqualifiers: [], hardFilter: result });
       const { reason } = result;
-      await applyQualification({ personId, status: "hard_filtered", reason, why, icpVersion });
+      const decision = { status: "hard_filtered", reason, why, icpId, icpVersion } as const;
+      await lockPerson(personId);
+      await applyQualification({ personId, ...decision });
+      await dropIntent(personId);
       await publishDecision(personId);
     }
-    return { icpVersion, personIds, filtered: leads.length - personIds.length };
+    const passed = [...groups.values()];
+    const count = passed.reduce((sum, { personIds }) => sum + personIds.length, 0);
+    return { groups: passed, filtered: selected.length - count };
   });
 }
 
+/** A lead hard_filtered for a reason no filter gives anymore (the title, title-check-ai). */
+function retiredFilter(lead: { qualificationStatus: string; hardFilterReason: string | null }) {
+  const reasons: readonly string[] = RETIRED_HARD_FILTER_REASONS;
+  return (
+    lead.qualificationStatus === "hard_filtered" && reasons.includes(lead.hardFilterReason ?? "")
+  );
+}
+
 /**
- * One assessment reserved in a run of its own, under the lead's attempt's key, credits' lock held for
- * that run only. Too few credits: the lead waits, with status_reason insufficient_credits if pending,
- * and the batch stops.
+ * One assessment reserved in a run of its own, under the lead's attempt's key, credits' lock held
+ * for that run only. Too few credits: the lead waits, with status_reason insufficient_credits if
+ * pending, and the batch stops.
  */
 export async function reserveLead(
   input: Lead,
@@ -143,15 +189,15 @@ export async function reserveLead(
 ): Promise<
   { status: "reserved"; usageId: string; attempt: number } | { status: "insufficient_credits" }
 > {
-  const { personId, icpVersion } = input;
+  const { personId, icpId, icpVersion } = input;
   const model = await assessmentModel();
   const action = prices["qualification.assessment"];
   const { workspaceId } = context;
   return context.tenant(async () => {
-    const where = { personId, icpVersion };
+    const where = { personId, icpId: icpId ?? (await defaultAudienceId()), icpVersion };
     const stored = await tenantClient.assessmentAttempt.findFirst({ where });
     const attempt = stored?.attempt ?? 1;
-    const idempotencyKey = assessmentKey({ personId, icpVersion, ...model, attempt });
+    const idempotencyKey = assessmentKey({ personId, icpId, icpVersion, ...model, attempt });
     const reservation = { workspaceId, action, quantity: 1, idempotencyKey, subjectRef: personId };
     try {
       const { usageId } = await credits.reserve({ ...reservation, lease: "async" });
@@ -165,8 +211,11 @@ export async function reserveLead(
 }
 
 /**
- * The model's assessment, outside any run (assessPerson opens its own): the snapshot, ai_failed with
- * its reason as a code, or stale when the ICP moved since the batch read it.
+ * The model's assessment, outside any run (assessPerson opens its own), against the lead's
+ * audience, with up to EXCERPTS of the person's own words from the signal reader, read in a run of
+ * their own and handed to assessPerson only: none without a reader, as for an imported person. The
+ * snapshot, ai_failed with its reason as a code, or stale when the audience moved since the batch
+ * read it.
  */
 export async function assessLead(
   input: Lead,
@@ -176,12 +225,16 @@ export async function assessLead(
   | { status: "ai_failed"; reason: string }
   | { status: "stale" }
 > {
-  const { personId, icpVersion } = input;
+  const { personId, icpId, icpVersion } = input;
   const { workspaceId, tenant } = context;
   const client = givenClient();
   const call = client === undefined ? undefined : { client };
+  const reader = signalReader();
+  const evidence =
+    reader === undefined ? [] : await tenant(() => reader.excerpts({ personId, max: EXCERPTS }));
   try {
-    const result = await assessPerson({ personId, icpVersion }, { workspaceId, tenant, call });
+    const assess = { personId, icpId, icpVersion, evidence: [...evidence] };
+    const result = await assessPerson(assess, { workspaceId, tenant, call });
     if (result.status === "assessed") return { status: "assessed", snapshotId: result.snapshotId };
     const code = result.reason.replaceAll("-", "_");
     return { status: "ai_failed", reason: CODE.test(code) ? code : "ai_failed" };
@@ -193,9 +246,12 @@ export async function assessLead(
 
 /**
  * One run: the snapshot scored and the lead given its decision, the reservation committed, the
- * lead's event. An ICP that moved since the assessment releases the reservation instead. A
- * reservation past its 24-hour lease rolls the run back: released, the lead's attempt moved, and the
- * workflow reserves again under the next attempt's key.
+ * lead's event. A snapshot scored already for a lead that waits, which only the model's answer
+ * cache gives back, decides the lead again from it, and the reservation is committed at quantity 0,
+ * no credits: no model call was made under it (README "A new assessment"). An ICP that moved since
+ * the assessment releases the reservation instead. A reservation past its 24-hour lease rolls the
+ * run back: released, the lead's attempt moved, and the workflow reserves again under the next
+ * attempt's key.
  */
 export async function commitLead(
   input: Held & { snapshotId: string },
@@ -203,15 +259,20 @@ export async function commitLead(
 ): Promise<{ status: "committed" | "stale" | "lease_expired" }> {
   try {
     return await context.tenant(async () => {
+      let cached = false;
       try {
-        await scoreSnapshot(input.snapshotId);
+        cached = await cacheAnswered(input.snapshotId);
+        if (cached) await decideAgain(input.snapshotId);
+        else await scoreSnapshot(input.snapshotId);
       } catch (error) {
         // Thrown before any write: the run goes on.
         if (!isAppError(error) || error.code !== "icp_version_stale") throw error;
         await credits.release(input.usageId);
         return { status: "stale" };
       }
-      await credits.commit(input.usageId);
+      // Committed, not released, at the cache's answer too: this step run again finds it settled.
+      // One committed by a run of this step before a member's press keeps its charge.
+      await credits.commit(input.usageId, cached ? 0 : undefined);
       await publishDecision(input.personId);
       return { status: "committed" };
     });
@@ -224,41 +285,55 @@ export async function commitLead(
 
 /**
  * One run: the reservation released and the lead's attempt moved, so that its key is never reserved
- * again. Given a reason, the lead is ai_failed at the batch's version, unless the provider failed
- * before the last attempt: then it waits for a later batch, with the reason if pending.
+ * again. Given a reason, the lead is ai_failed against the batch's audience and version, under the
+ * person's lock, and loses its intent row, unless the provider failed before the last attempt of a
+ * round of attempts (README "A new assessment"): then it waits for a later batch, with the reason
+ * if pending.
  */
 export async function releaseLead(input: Held & { reason?: string }, context: Context) {
   await context.tenant(async () => {
     await credits.release(input.usageId);
-    const next = await moveAttempt(input);
+    const icpId = input.icpId ?? (await defaultAudienceId());
+    const next = await moveAttempt({ ...input, icpId });
     const { personId, icpVersion, reason } = input;
     if (reason === undefined) return;
-    if (reason === "provider_failed" && next <= LAST_ATTEMPT) {
+    if (reason === "provider_failed" && !roundSpent(next)) {
       await waitPending(personId, reason);
       return;
     }
-    await applyQualification({ personId, status: "ai_failed", reason, icpVersion });
+    await lockPerson(personId);
+    await applyQualification({ personId, status: "ai_failed", reason, icpId, icpVersion });
+    await dropIntent(personId);
     await publishDecision(personId);
   });
 }
 
-/** The lead's next attempt at this version, stored in the caller's run: a repeat moves it no further. */
-async function moveAttempt({ workspaceId, personId, icpVersion, attempt = 1 }: Held) {
+/**
+ * The lead's next attempt against this audience at this version, stored in the caller's run: a
+ * repeat moves it no further.
+ */
+async function moveAttempt(input: Held & { icpId: string }) {
+  const { workspaceId, personId, icpId, icpVersion, attempt = 1 } = input;
   const next = attempt + 1;
-  const where = { personId, icpVersion, attempt: { lt: next } };
+  const where = { personId, icpId, icpVersion, attempt: { lt: next } };
   const { count } = await tenantClient.assessmentAttempt.updateMany({
     where,
     data: { attempt: next },
   });
   if (count === 0) {
-    const data = [{ workspaceId, personId, icpVersion, attempt: next }];
+    const data = [{ workspaceId, personId, icpId, icpVersion, attempt: next }];
     await tenantClient.assessmentAttempt.createMany({ data, skipDuplicates: true });
   }
   return next;
 }
 
-/** A pending lead given the reason it waits; a lead decided at an older ICP version stays as it was. */
+/**
+ * A pending lead given the reason it waits, with the snapshot it waits with (README "A new
+ * assessment"); a lead decided at an older ICP version stays as it was.
+ */
 async function waitPending(personId: string, reason: string) {
-  if ((await getLead(personId)).qualificationStatus !== "pending") return;
-  await applyQualification({ personId, status: "pending", reason });
+  const lead = await getLead(personId);
+  if (lead.qualificationStatus !== "pending") return;
+  const snapshotId = lead.currentScoreSnapshotId ?? undefined;
+  await applyQualification({ personId, status: "pending", reason, snapshotId });
 }

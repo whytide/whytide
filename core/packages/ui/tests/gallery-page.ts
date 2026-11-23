@@ -9,7 +9,7 @@ import { build } from "esbuild";
 import postcss, { type AcceptedPlugin } from "postcss";
 
 export type Messages = Record<string, string>;
-type Bundle = { gallery: { render: (messages: Messages) => void } };
+type Bundle = { gallery: { render: (messages: Messages, locale: string) => void } };
 
 const here = import.meta.dirname;
 const address = "http://127.0.0.1/gallery";
@@ -35,8 +35,11 @@ export function keysOnly(messages: Messages): Messages {
   return Object.fromEntries(Object.keys(messages).map((key) => [key, key]));
 }
 
-/** The gallery in `page`, rendered with `messages`; it resolves once the gallery's `main` is there. */
-export async function openGallery(page: Page, messages: Messages): Promise<void> {
+/**
+ * The gallery in `page`, rendered with `messages`, its numbers and dates formatted for `locale`; it
+ * resolves once the gallery's `main` is there.
+ */
+export async function openGallery(page: Page, messages: Messages, locale = "en"): Promise<void> {
   bundle ??= build({
     entryPoints: [`${here}/gallery-entry.tsx`],
     bundle: true,
@@ -55,9 +58,12 @@ export async function openGallery(page: Page, messages: Messages): Promise<void>
     .then((result) => result.css);
   await page.addStyleTag({ content: await styles });
   await page.addScriptTag({ content: await bundle });
-  await page.evaluate((m) => {
-    document.title = m["ui.gallery.title"] ?? "";
-    (globalThis as unknown as Bundle).gallery.render(m);
-  }, messages);
+  await page.evaluate(
+    ({ m, locale }) => {
+      document.title = m["ui.gallery.title"] ?? "";
+      (globalThis as unknown as Bundle).gallery.render(m, locale);
+    },
+    { m: messages, locale },
+  );
   await page.getByRole("main").waitFor();
 }

@@ -1,0 +1,59 @@
+{
+  "object": "PostList",
+  "items": [
+    {
+      "provider": "LINKEDIN",
+      "id": "7000000000000000301",
+      "share_url": "https://www.linkedin.com/posts/fixture_post-activity-7000000000000000301-AbCd?rcm=fixture-tracking-id",
+      "date": "1d",
+      "social_id": "urn:li:activity:7000000000000000301",
+      "text": "fixture-body-marker: Example Ltd is hiring",
+      "parsed_datetime": "2026-10-02T07:00:00.000Z",
+      "is_repost": false,
+      "author": {
+        "public_identifier": "example-ltd",
+        "id": "1000001",
+        "name": "Example Ltd",
+        "is_company": true,
+        "headline": null
+      }
+    },
+    {
+      "social_id": "urn:li:share:7000000000000000302",
+      "text": "fixture-body-marker: our autumn release",
+      "parsed_datetime": "2026-09-30T07:00:00.000Z",
+      "author": {
+        "public_identifier": "example-ltd",
+        "id": "1000001",
+        "name": "Example Ltd",
+        "is_company": true,
+        "headline": null
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000303",
+      "text": "fixture-body-marker: a customer story",
+      "parsed_datetime": "2026-09-26T07:00:00.000Z",
+      "author": {
+        "public_identifier": "example-ltd",
+        "id": "1000001",
+        "name": "Example Ltd",
+        "is_company": true,
+        "headline": null
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000304",
+      "text": "fixture-body-marker: an older update",
+      "parsed_datetime": "2026-09-10T07:00:00.000Z",
+      "author": {
+        "public_identifier": "example-ltd",
+        "id": "1000001",
+        "name": "Example Ltd",
+        "is_company": true,
+        "headline": null
+      }
+    }
+  ],
+  "cursor": null
+}

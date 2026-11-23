@@ -4,7 +4,7 @@
 // saves the website, starts the Draft with its documents, prints the summary, accepts with --accept;
 // with no worker it times out, and a later Draft supersedes its run. A refusal writes nothing. And
 // requestDraft's documents (README "The documents"): written in the run's transaction, replaced by
-// the next Draft's, removed by a Draft without any.
+// the next Draft's, removed by a Draft without any; with no website, a Draft from them alone.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -198,6 +198,31 @@ test("a Draft started meanwhile, from the Company screen, supersedes the script'
   const record = await inRun(workspaceId, (tx) => tx.companyKnowledge.findFirstOrThrow({}));
   assert.equal(record.fetchStatus, "fetching");
   assert.deepEqual(await inRun(workspaceId, () => listCompanyDocuments(record.id)), []);
+});
+
+test("--file without a website drafts from the documents alone: the run reads no page, the drafter the documents; the summary prints them and the draft", async () => {
+  const workspaceId = "wsp_cli_documents_only";
+  await createOrganizationWithWorkspace({ workspaceId });
+  const lines: string[] = [];
+  const args = ["--workspace", workspaceId, "--file", join(FIXTURES, "notes.txt")];
+  const working = (async () => {
+    const run = await started(workspaceId);
+    await inRun(workspaceId, () => recordFetch(run, { ok: true, pages: [] }));
+    const fields = { ...NOTHING_DRAFTED, products: [cite("Rate card", "document:notes.txt")] };
+    const draft = { model: "fake-model", promptVersion: 2, decisionRecordId: "dec_cli", fields };
+    await inRun(workspaceId, () => recordDraft(run, { ok: true, draft }, 0));
+    return run;
+  })();
+  assert.equal(await runDraft(args, (line) => lines.push(line), options), EXIT.done);
+  const run = await working;
+  assert.deepEqual(lines, [
+    `draft_requested: run ${run.draftRunId} in ${workspaceId}, 1 document(s)`,
+    "document: notes.txt (read)",
+    "field products: 1 item(s)",
+    `draft_ready: review it in the Company screen, /w/${workspaceId}/company`,
+  ]);
+  const record = await inRun(workspaceId, () => getCompanyKnowledge(workspaceId));
+  assert.deepEqual([record.sourceUrl, record.pendingDraft?.fields.products.length], [null, 1]);
 });
 
 test("a refusal writes nothing: a usage error, a sixth file, a file of another type, a PDF with no text, no such workspace, a website that is not http or https, no website", async () => {

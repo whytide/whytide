@@ -1,5 +1,6 @@
 // contacts' rules in domain/ (alpha-p5-010, alpha-p5-020, alpha-p9-040, alpha-p9-050): the URL
-// normalization, the salted hash and its kind prefix, the provenance merge, the country of a location,
+// normalization, the salted hash and its kind prefix, the provenance merge and a member's edit
+// (lead-fields-edit), the country of a location,
 // the expiry of a hash, a lead's source merge, the list's cursor, the weekly review summary and the
 // CSV's cells. Pure: no database.
 import assert from "node:assert/strict";
@@ -15,6 +16,7 @@ import {
   normalizeDomain,
   normalizeLinkedinUrl,
 } from "../domain/linkedin-url.ts";
+import { memberEdit } from "../domain/person-edit.ts";
 import { mergeFields, splitName } from "../domain/provenance.ts";
 import {
   summarize,
@@ -102,7 +104,7 @@ test("the provenance merge: a value brought takes its stamp unless the stored on
   assert.deepEqual(splitName("Ada"), { firstName: "Ada", lastName: undefined });
 });
 
-test("the country of a location: its last part, or the whole, by ICU's English names and the usual others", () => {
+test("the country of a location: its last part, or the whole, by ICU's English names and the usual others, and the place list (gamma-en-075)", () => {
   const cases: [string, string | null][] = [
     ["London, England, United Kingdom", "GB"],
     ["Berlin, Germany", "DE"],
@@ -113,7 +115,7 @@ test("the country of a location: its last part, or the whole, by ICU's English n
     ["Basseterre, Saint Kitts and Nevis", "KN"],
     ["Hong Kong SAR", "HK"],
     ["United States", "US"],
-    ["San Francisco Bay Area", null],
+    ["San Francisco Bay Area", "US"],
     ["", null],
   ];
   for (const [location, code] of cases) assert.equal(countryOf(location), code, location);
@@ -294,4 +296,51 @@ test("a CSV cell a spreadsheet would run gets a leading apostrophe: =, +, -, @, 
     assert.equal(neutralize(text), text);
   const cells = ["=SUM(A1)", 'Says "hi", twice', null, 82, "one\ntwo", "\r=1"];
   assert.equal(csvLine(cells), `'=SUM(A1),"Says ""hi"", twice",,82,"one\ntwo","'\r=1"\r\n`);
+});
+
+test("a member's value outranks every source's, a later one too, and gives way to a member's only; an edit stamps the fields it changes, a cleared one too, and the country follows the location (lead-fields-edit)", () => {
+  const at = (day: number) => `2026-10-0${day}T08:00:00.000Z`;
+  const member = { source: "member", provider: null, at: at(2) } as const;
+  const linkedin = { source: "linkedin", provider: "unipile", at: at(1) } as const;
+  const stored = { title: member, headline: linkedin };
+  for (const source of ["linkedin", "import", "website"] as const) {
+    const later = { source, provider: null, at: at(5) };
+    const merged = mergeFields(stored, { title: "Analyst", headline: "Data lead" }, later);
+    assert.deepEqual(merged.values, { headline: "Data lead" }, source);
+    assert.deepEqual(merged.provenance, { title: member, headline: later }, source);
+  }
+  const again = { ...member, at: at(3) };
+  assert.deepEqual(mergeFields(stored, { title: "CTO" }, again).values, { title: "CTO" });
+
+  const person = {
+    firstName: "Ada",
+    lastName: "Example",
+    headline: "Data leader",
+    title: "Head of Data",
+    companyName: "Blue Harbor Labs",
+    locationText: "Lisbon, Portugal",
+    fieldProvenance: { title: linkedin, locationText: linkedin, locationCountry: linkedin },
+  };
+  const now = new Date(at(4));
+  const stamp = { source: "member", provider: null, at: at(4) };
+  const edit = {
+    title: "VP Data",
+    headline: "",
+    lastName: "Example",
+    locationText: "Berlin, Germany",
+  };
+  assert.deepEqual(memberEdit(person, edit, now), {
+    title: "VP Data",
+    headline: null,
+    locationText: "Berlin, Germany",
+    locationCountry: "DE",
+    fieldProvenance: { title: stamp, headline: stamp, locationText: stamp, locationCountry: stamp },
+  });
+  const nowhere = memberEdit(person, { locationText: "Remote" }, now);
+  assert.deepEqual(
+    [nowhere?.locationCountry, nowhere?.fieldProvenance.locationCountry],
+    [null, undefined],
+  );
+  assert.equal(memberEdit(person, { firstName: "Ada", lastName: "Example" }, now), null);
+  assert.equal(memberEdit(person, {}, now), null);
 });

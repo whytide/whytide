@@ -33,9 +33,10 @@ function say(key: string, values: Record<string, string | number> = {}): string 
   return value.replace(/\{(\w+)(?:, number)?\}/g, (_, name: string) => String(values[name]));
 }
 
-/** The words of one case of signals.runs.drops, with its count. */
+/** The words of one case of signals.runs.drops, with its count; one word too, which say() fills. */
 function dropped(reason: string, count: number): string {
-  const words = new RegExp(`[{\\s]${reason} \\{([^{}]*)\\}`).exec(say("signals.runs.drops"))?.[1];
+  const drops = messages["signals.runs.drops"] ?? "";
+  const words = new RegExp(`[{\\s]${reason} \\{([^{}]*)\\}`).exec(drops)?.[1];
   if (words === undefined) throw new Error(`no case ${reason} in signals.runs.drops`);
   return `${words}: ${count}`;
 }
@@ -216,7 +217,7 @@ test("a run opened since the list was read makes Run now the api's 409 in words,
   await expectNoSeriousViolation(page);
 });
 
-test("the runs panel shows a run's drops by reason, the end codes of failed runs in words, and a blocked source links to the LinkedIn screen; axe", async ({
+test("the runs panel shows a run's drops by reason and its events rated and not, the end codes of failed runs in words, and a blocked source links to the LinkedIn screen; axe", async ({
   page,
   request,
   signInAs,
@@ -244,7 +245,8 @@ test("the runs panel shows a run's drops by reason, the end codes of failed runs
   const counts = {
     ...{ staged: 40, created: 5, attached: 2, profiles_read: 26 },
     ...{ dropped_known: 4, dropped_company: 3, dropped_own: 1, dropped_filtered: 2 },
-    dropped_unread: 1,
+    ...{ dropped_unread: 1, dropped_competitor: 2, dropped_recruiter: 6, dropped_job_seeker: 1 },
+    ...{ rated: 7, unrated: 3 },
   };
   await seedRuns(request, counted.id, [
     { status: "done", startedAt: at(20), finishedAt: at(20, 4), counts },
@@ -261,9 +263,14 @@ test("the runs panel shows a run's drops by reason, the end codes of failed runs
     has: page.getByRole("rowheader", { name: say("signals.runs.status.done") }),
   });
   await expect(done).toContainText(say("signals.runs.counts", { staged: 40, created: 5 }));
+  await expect(done).toContainText(say("signals.runs.rated", { rated: 7 }));
+  await expect(done).toContainText(say("signals.runs.unrated", { unrated: 3 }));
   await expect(done.getByRole("listitem")).toHaveText([
     dropped("dropped_company", 3),
     dropped("dropped_own", 1),
+    dropped("dropped_recruiter", 6),
+    dropped("dropped_job_seeker", 1),
+    dropped("dropped_competitor", 2),
     dropped("dropped_known", 4),
     dropped("dropped_filtered", 2),
     dropped("dropped_unread", 1),

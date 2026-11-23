@@ -12,10 +12,15 @@ import { type AnyPort, bindPort, type PortInstance } from "../_pattern/port.ts";
 export type ContractCases<P extends AnyPort> = Readonly<
   Record<string, (adapter: PortInstance<P>, t: TestContext) => Promise<void> | void>
 >;
+/** What the suite reads of an adapter: a definition, or a stand-in that is not registered. */
+export type ContractAdapter<P extends AnyPort> = Pick<
+  AdapterDefinition<P>,
+  "port" | "name" | "requires" | "create"
+>;
 
 export function contractSuite<P extends AnyPort>(
   port: P,
-  adapter: AdapterDefinition<P>,
+  adapter: ContractAdapter<P>,
   cases: ContractCases<P>,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): void {

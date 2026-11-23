@@ -2,7 +2,8 @@
 // stored verdicts, the ICP's criteria, the disqualifiers or the hard filters' miss, never from the
 // model's summary. A bullet is a message key with its params, codes and quotes only, never a word of
 // English, so that the screen words it in the viewer's language (messages/en.json; the params of each
-// key in docs/data.md). Pure.
+// key in docs/data.md). A member's verdict (README "A member's verdict") quotes nothing of the
+// profile: its bullet says the verdict is a member's instead of quoting. Pure.
 import type { WhyBullet } from "@whytide/contacts";
 import type { Criterion, Disqualifier, Verdict } from "../../schemas/assess-fit.ts";
 import type { HardFilterDetail, HardFilterReason } from "../hard-filters/index.ts";
@@ -11,18 +12,23 @@ import { counting, firstDisqualifier, type ScoringCriterion } from "../score/ind
 /** A param's longest text, in code points, as contacts checks a bullet. */
 const PARAM_MAX = 300;
 
-/** The keys buildWhy writes, each with its message in messages/en.json. */
+/** A why's keys, each with its message in messages/en.json: buildWhy's, and the intent's why_now. */
 export type WhyKey =
   | "qualification.why.disqualified"
   | "qualification.why.fit"
+  | "qualification.why.fit_member"
   | "qualification.why.gap"
   | "qualification.why.hard_filtered"
-  | "qualification.why.must_missed";
+  | "qualification.why.must_missed"
+  | "qualification.why.must_missed_member"
+  | "qualification.why.why_now";
 export type WhyInput = {
   readonly verdicts: readonly {
     readonly criterion: Criterion;
     readonly verdict: Verdict;
     readonly evidence: string;
+    /** A member's verdict, which the bullet names as such and never quotes. */
+    readonly byMember?: boolean;
   }[];
   readonly criteria: readonly ScoringCriterion[];
   readonly disqualifiers: readonly Disqualifier[];
@@ -53,8 +59,9 @@ function stopping(input: WhyInput, counted: readonly Counted[]): WhyBullet | nul
   if (disqualifier !== null) return bullet("qualification.why.disqualified", { disqualifier });
   const missed = counted.find((verdict) => verdict.isMust && verdict.verdict === "not_met");
   if (missed === undefined) return null;
-  const params = { criterion: missed.criterion, quote: cut(missed.evidence) };
-  return bullet("qualification.why.must_missed", params);
+  const { criterion } = missed;
+  if (missed.byMember) return bullet("qualification.why.must_missed_member", { criterion });
+  return bullet("qualification.why.must_missed", { criterion, quote: cut(missed.evidence) });
 }
 
 function fit(counted: readonly Counted[]): WhyBullet | null {
@@ -62,8 +69,9 @@ function fit(counted: readonly Counted[]): WhyBullet | null {
   const [strongest] = met;
   if (strongest === undefined) return null;
   const { criterion, evidence } = strongest;
-  const params = { criterion, quote: cut(evidence), met: met.length, total: counted.length };
-  return bullet("qualification.why.fit", params);
+  const counts = { met: met.length, total: counted.length };
+  if (strongest.byMember) return bullet("qualification.why.fit_member", { criterion, ...counts });
+  return bullet("qualification.why.fit", { criterion, quote: cut(evidence), ...counts });
 }
 
 function gap(counted: readonly Counted[]): WhyBullet | null {

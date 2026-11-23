@@ -153,7 +153,8 @@ test("POST …/approve refuses: person_suppressed with its reason, recently_cont
   );
   assert.deepEqual(
     await approve(a, touched),
-    refused(409, "person_suppressed", { reason: "recently_contacted" }),
+    // The days CONTACTS_RECENT_TOUCH_DAYS sets, its default unset, which the lead page names.
+    refused(409, "person_suppressed", { reason: "recently_contacted", days: 90 }),
   );
   for (const status of ["in_campaign", "replied", "finished"] as const) {
     await asService(a, () => recordLeadStatus(campaigned, status, { actor: system }));

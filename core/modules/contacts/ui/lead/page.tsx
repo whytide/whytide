@@ -1,7 +1,7 @@
 // The lead page (README.md "Screens"), read as the member: contacts' lead with its person's business
 // fields and their provenance, whose name titles the document; then, while the loading state shows,
 // its neighbours in the list's view (the URL's query, from the list's row link, else the list's
-// first view: qualified leads by fit), qualification's snapshot of the lead, none until it scores
+// first view: qualified leads by fit, a source's of every status), qualification's snapshot of the lead, none until it scores
 // one, and linkedin's accounts, of which Approve needs the user's own connected one (approve.tsx).
 // Another workspace's person, or one without a lead, is the page's not-found state, and nothing
 // more is read. The title comes before the loading state, since React leaves a fallback's title out
@@ -11,7 +11,7 @@
 import { data, serverApi } from "@whytide/web/api/server";
 import { getTranslations } from "next-intl/server";
 import { type ComponentType, type ReactNode, Suspense } from "react";
-import { type ListQuery, listQueryString, readListQuery } from "../leads/query.ts";
+import { type ListQuery, listQueryString, readListQuery, statusOf } from "../leads/query.ts";
 import { type LeadSlot, type PanelProps, slots } from "./slots.ts";
 import { LeadLoading, LeadNotFound } from "./states.tsx";
 import { LeadView } from "./view.tsx";
@@ -39,8 +39,8 @@ export type Neighbours = { previous: string | null; next: string | null };
 export default async function LeadPage({ params, searchParams, panels }: Props) {
   const { workspace, personId } = await params;
   const named = readListQuery(await searchParams);
-  const { status = "qualified", tier, sort = "fit", review, outreach } = named;
-  const view = { status, tier, sort, review, outreach };
+  const { tier, sort = "fit", review, outreach, source } = named;
+  const view = { status: statusOf(named) || undefined, tier, sort, review, outreach, source };
   const api = await serverApi();
   const path = { workspaceId: workspace, personId };
   const read = await readLead(api, path);
@@ -50,7 +50,10 @@ export default async function LeadPage({ params, searchParams, panels }: Props) 
   const lead = await data(Promise.resolve(read));
   const t = await getTranslations("contacts.leads");
   const { firstName, lastName, linkedinUrl } = lead.person;
-  const name = t("name", { first: firstName ?? "", last: lastName ?? "" }).trim() || linkedinUrl;
+  // A person without a profile (gamma-rf-050) may have no name either.
+  const name =
+    t("name", { first: firstName ?? "", last: lastName ?? "" }).trim() ||
+    (linkedinUrl ?? t("unnamed"));
   const back = `/w/${workspace}/leads${listQueryString(view)}`;
   return (
     <>

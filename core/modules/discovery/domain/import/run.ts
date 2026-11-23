@@ -12,6 +12,7 @@ import {
   errors as contactsErrors,
   createLeadsForPersons,
   isHashed,
+  SOURCE_LABEL_MAX,
   upsertPersonsFromSource,
 } from "@whytide/contacts";
 import { outboxWriter, type TenantClient, tenantClient } from "@whytide/db";
@@ -168,10 +169,19 @@ async function writeChunk(
 }
 
 /**
+ * The leads' source label: the job's file name, trimmed and cut to contacts' limit, so that the lead
+ * list and the evidence panel name the import; none for a name of blanks.
+ */
+function labelOf(fileName: string): { label?: string } {
+  const label = Array.from(fileName.trim()).slice(0, SOURCE_LABEL_MAX).join("").trim();
+  return label === "" ? {} : { label };
+}
+
+/**
  * The chunk's rows: their persons in one call of contacts' batched command, their values stamped
- * with the upload's time, then the leads of those written, from this job, in another. A person
- * erased since the check, or a cell over contacts' limits, is the row's bucket, not a failure. The
- * outcomes, and the persons written in the rows' order.
+ * with the upload's time, then the leads of those written, from this job and named by its file, in
+ * another. A person erased since the check, or a cell over contacts' limits, is the row's bucket,
+ * not a failure. The outcomes, and the persons written in the rows' order.
  */
 async function writeRows(
   job: ImportJob,
@@ -193,7 +203,7 @@ async function writeRows(
     if ("person" in answer) written.push({ id: answer.person.id, created: answer.created });
     else outcomes.push(answer.code === contactsErrors.person_erased ? "skippedErased" : "errors");
   }
-  const source = { kind: "imported" as const, ref: job.id };
+  const source = { kind: "imported" as const, ref: job.id, ...labelOf(job.fileName) };
   if (written.length > 0) await createLeads(written.map(({ id }) => ({ personId: id, source })));
   for (const { created } of written) outcomes.push(created ? "created" : "updated");
   return { outcomes, personIds: written.map(({ id }) => id) };

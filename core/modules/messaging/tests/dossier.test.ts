@@ -130,6 +130,18 @@ test("the fixture's dossier has the five blocks, every value once in facts[] wit
   ]);
 });
 
+test("a research event (gamma-wr-060), whose evidence has no reaction, is no why-now item: the page it names has nothing to cite, and the rest of the dossier is as before", () => {
+  const [first] = inputs.events;
+  assert.ok(first?.evidence);
+  const research = {
+    ...first,
+    id: "sev_01RESEARCH",
+    evidence: { ...first.evidence, id: "evd_01RESEARCH", reaction: null, excerpt: null },
+  };
+  const dossier = assembleDossier({ ...inputs, events: [research, ...inputs.events] });
+  assert.deepEqual(dossier, assembleDossier(inputs));
+});
+
 test("the same inputs give the same ids and hash; a changed proof point changes the hash", () => {
   const dossier = assembleDossier(inputs);
   assert.match(dossier.dossierHash, /^[0-9a-f]{64}$/);

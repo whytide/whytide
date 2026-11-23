@@ -7,6 +7,9 @@
 // again every two seconds while the screen waits: for the provider's webhook while it is pending, two
 // minutes at most, or after Refresh status for the worker's answer, until its status changes, thirty
 // seconds at most. Under the account's card, once it is not pending, its health (health-card.tsx).
+// For an Owner, the list holds every member's account (gamma-p6-070): under their own, a section of
+// their teammates' accounts, each its card (teammate-card.tsx), its health and its usage, read-only
+// but for the pause the rules allow. A Member's list holds their own alone.
 import { ErrorState, LoadingState, Skeleton } from "@whytide/ui";
 import { ApiError, browserApi, data } from "@whytide/web/api/browser";
 import { useTranslations } from "next-intl";
@@ -16,6 +19,7 @@ import { AccountCard } from "./account-card.tsx";
 import { ConnectPanel } from "./connect-panel.tsx";
 import { LOADING_LINES } from "./constants.ts";
 import { HealthCard } from "./health-card.tsx";
+import { TeammateCard } from "./teammate-card.tsx";
 import { UsageSummary } from "./usage-summary.tsx";
 
 /** The account's column and, from xl, its reads today beside it, over every row. */
@@ -34,21 +38,23 @@ const REFRESH_POLLS = 15;
 export function Accounts({ workspaceId }: { workspaceId: string }) {
   const t = useTranslations("linkedin.accounts");
   const id = useId();
-  /** Undefined while it loads; null when the user has no account in the workspace. */
-  const [mine, setMine] = useState<AccountResponse | null>();
+  /** Undefined while it loads; else the accounts the member sees, as the route lists them. */
+  const [accounts, setAccounts] = useState<AccountResponse[]>();
   const [failure, setFailure] = useState<string>();
   const [wait, setWait] = useState<Wait>();
+  /** Undefined while it loads; null when the user has no account in the workspace. */
+  const mine = accounts && (accounts.find((account) => account.mine) ?? null);
+  const teammates = accounts?.filter((account) => !account.mine) ?? [];
 
   const load = useCallback(async () => {
     try {
-      const { accounts } = await data(
+      const answer = await data(
         browserApi().GET("/v1/workspaces/{workspaceId}/linkedin/accounts", {
           params: { path: { workspaceId } },
         }),
       );
-      const found = accounts.find((account) => account.mine) ?? null;
-      setMine(found);
-      return found;
+      setAccounts(answer.accounts);
+      return answer.accounts.find((account) => account.mine) ?? null;
     } catch (error) {
       setFailure(error instanceof ApiError ? error.code : "internal_error");
       setWait(undefined);
@@ -59,7 +65,7 @@ export function Accounts({ workspaceId }: { workspaceId: string }) {
   /** The first load, and the retry: the loading state, then the account; a pending one is watched. */
   const open = useCallback(async () => {
     setFailure(undefined);
-    setMine(undefined);
+    setAccounts(undefined);
     const found = await load();
     if (found?.status === "pending") setWait({ from: "pending", left: PENDING_POLLS });
   }, [load]);
@@ -107,35 +113,71 @@ export function Accounts({ workspaceId }: { workspaceId: string }) {
       </section>
     );
   }
+  const others =
+    teammates.length === 0 ? null : (
+      <section aria-labelledby={`${id}-teammates`} className="mt-8 grid gap-6">
+        <h2 id={`${id}-teammates`} className="text-lg font-semibold text-ink">
+          {t("teammates.title")}
+        </h2>
+        {teammates.map((account) => (
+          <div key={account.id} className={LAYOUT}>
+            <TeammateCard workspaceId={workspaceId} account={account} onChange={load} />
+            {account.status === "pending" ? null : (
+              <HealthCard
+                key={account.status}
+                workspaceId={workspaceId}
+                account={account}
+                onChange={load}
+              />
+            )}
+            <div className={SIDE}>
+              <UsageSummary
+                workspaceId={workspaceId}
+                accountId={account.id}
+                timeZone={account.timeZone}
+                canEdit={account.canEdit}
+                onCapChange={load}
+              />
+            </div>
+          </div>
+        ))}
+      </section>
+    );
   if (mine === null) {
     return (
-      <div className="max-w-3xl">
-        <ConnectPanel workspaceId={workspaceId} intro={t("empty")} />
-      </div>
+      <>
+        <div className="max-w-3xl">
+          <ConnectPanel workspaceId={workspaceId} intro={t("empty")} />
+        </div>
+        {others}
+      </>
     );
   }
   return (
-    <div className={LAYOUT}>
-      <AccountCard
-        workspaceId={workspaceId}
-        account={mine}
-        refreshing={wait !== undefined && wait.from !== "pending"}
-        onRefresh={() => setWait({ from: mine.status, left: REFRESH_POLLS })}
-        onChange={load}
-      />
-      {mine.status === "pending" ? null : (
-        <HealthCard key={mine.status} workspaceId={workspaceId} account={mine} onChange={load} />
-      )}
-      {mine.status === "connected" ? null : <ConnectPanel workspaceId={workspaceId} />}
-      <div className={SIDE}>
-        <UsageSummary
+    <>
+      <div className={LAYOUT}>
+        <AccountCard
           workspaceId={workspaceId}
-          accountId={mine.id}
-          timeZone={mine.timeZone}
-          canManage={mine.canManage}
-          onCapChange={load}
+          account={mine}
+          refreshing={wait !== undefined && wait.from !== "pending"}
+          onRefresh={() => setWait({ from: mine.status, left: REFRESH_POLLS })}
+          onChange={load}
         />
+        {mine.status === "pending" ? null : (
+          <HealthCard key={mine.status} workspaceId={workspaceId} account={mine} onChange={load} />
+        )}
+        {mine.status === "connected" ? null : <ConnectPanel workspaceId={workspaceId} />}
+        <div className={SIDE}>
+          <UsageSummary
+            workspaceId={workspaceId}
+            accountId={mine.id}
+            timeZone={mine.timeZone}
+            canEdit={mine.canEdit}
+            onCapChange={load}
+          />
+        </div>
       </div>
-    </div>
+      {others}
+    </>
   );
 }

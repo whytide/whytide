@@ -2,9 +2,14 @@
 // tenancy's list, by an id that names the tick's slot, one run of it at a time, so the tick's
 // activity tried again in its slot starts no second run while the first is open. Two slots' runs may
 // overlap: each step's move is conditioned on its status, and openItem answers a step's open item.
-import { startWorkflow, type WorkflowStart } from "@whytide/platform";
+// A run's pages (gamma-p0-085): QUEUE_PAGE_SIZE due steps at most, after its cursor in id order,
+// or, under APP_ENV=test only, the size a worker test sets through useQueuePageSize, so that a test
+// continues a run as new over a few steps; any other environment refuses it.
+import { platformConfig, startWorkflow, type WorkflowStart } from "@whytide/platform";
 import { listWorkspaceIds } from "@whytide/tenancy";
-import { MS_PER_MINUTE, TICK_MINUTES } from "./constants.ts";
+import { MS_PER_MINUTE, QUEUE_PAGE_SIZE, TICK_MINUTES } from "./constants.ts";
+
+let pageSize = QUEUE_PAGE_SIZE;
 
 /** The start of the slot of `at`, its TICK_MINUTES in UTC, as `20261029T1015Z`. */
 export function queueSlot(at: Date): string {
@@ -44,4 +49,25 @@ export async function startQueueRuns(at: Date): Promise<{ workspaces: number; st
   }
   if (failures.length > 0) throw failures[0];
   return { workspaces: workspaceIds.length, started };
+}
+
+/** For the worker's tests: the due steps a page holds; undefined puts QUEUE_PAGE_SIZE back. */
+export function useQueuePageSize(size: number | undefined): void {
+  if (platformConfig.APP_ENV !== "test") {
+    throw new Error("useQueuePageSize: only under APP_ENV=test");
+  }
+  pageSize = size ?? QUEUE_PAGE_SIZE;
+}
+
+/**
+ * The page of the due steps after the cursor `afterId`, in id order, and the next page's cursor:
+ * the page's last id while steps remain after it, else null.
+ */
+export function duePage(
+  stepIds: readonly string[],
+  afterId: string | undefined,
+): { stepIds: string[]; next: string | null } {
+  const after = [...stepIds].sort().filter((id) => afterId === undefined || id > afterId);
+  const page = after.slice(0, pageSize);
+  return { stepIds: page, next: after.length > page.length ? (page.at(-1) ?? null) : null };
 }

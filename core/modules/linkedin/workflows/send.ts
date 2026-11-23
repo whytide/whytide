@@ -48,6 +48,7 @@ import {
   sendRequestFile,
 } from "../schemas/send.ts";
 import {
+  CHECK_SENT_ATTEMPTS,
   ID_MAX_CHARS,
   RAW_KEY,
   RAW_KEY_MAX_CHARS,
@@ -269,6 +270,7 @@ export const sendActivities = {
   linkedin_withdraw_invite: sendActivity("withdraw"),
   linkedin_check_sent: defineActivity<typeof checkSentInput, CheckSentResult, TenantClient>({
     kind: "provider",
+    attempts: CHECK_SENT_ATTEMPTS,
     input: checkSentInput,
     run: (input, context) => checkSent(context, input),
   }),

@@ -23,6 +23,7 @@ export async function listUsage(tx: TenantClient, query: UsageQuery): Promise<Us
     createdAt: row.createdAt.toISOString(),
     leaseExpiresAt: row.leaseExpiresAt.toISOString(),
     settledAt: row.settledAt?.toISOString() ?? null,
+    priceListVersion: row.priceListVersion,
   }));
   return { items, nextCursor: rows.length > limit ? (page.at(-1)?.id ?? null) : null };
 }

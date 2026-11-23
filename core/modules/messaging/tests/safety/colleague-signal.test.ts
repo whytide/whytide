@@ -89,7 +89,8 @@ test("an approved draft's text never changes: a second approval, an edit, a rege
   const own = `${GROUNDED} Thanks!`;
   const approval = await approve(draftId, "sx_frozen", own);
   const frozen = await run(workspaceId, () => approvedContent(draftId));
-  assert.deepEqual(frozen, { text: own, contentHash: approval.contentHash });
+  const answer = { text: own, contentHash: approval.contentHash, disclosureApplied: false };
+  assert.deepEqual(frozen, answer);
   const before = await run(workspaceId, (tx) => tx.messageDraft.findFirstOrThrow());
 
   const notEditable = { code: "draft_not_editable" };

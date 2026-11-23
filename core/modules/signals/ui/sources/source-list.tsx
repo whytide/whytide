@@ -1,27 +1,46 @@
 "use client";
 // The workspace's sources (README.md "Screen"), a card each, two side by side on a wide screen, the
-// one whose runs show marked, by its ring and aria-current: the label, the enabled switch, the
-// post, the sender account with a warning and a link to the LinkedIn screen when it is not
-// connected (the source is blocked), the last run, the next fire times (the next one in bold);
+// one whose runs show marked, by its ring and aria-current: its kind, the label, the enabled switch,
+// its target (the post, or that it was erased; the topic's phrase; the own posts; the competitor's
+// name and page; the creator's profile, or that it was erased), the sender account with a warning
+// and a link to the LinkedIn screen when it is not connected (the source is blocked), the last run
+// and whether it stopped at its share of the day's reads, the next fire times (the next one in
+// bold), or that it runs daily (gamma-p5-040); a Web research source (gamma-wr-030) has no sender
+// account, and shows what it looks for, its region, languages and start pages (links that give no
+// referrer, `rel="noopener noreferrer"`), that it runs every N days, and an Edit of those fields;
 // while a run is open, its line in words (run-state.tsx) with Stop ("Stopping…" once asked), apart
 // from the card's actions: Run now (disabled while a run of it is open, described by that line),
-// its runs and Delete, which asks first. A change reads the screen again.
+// its runs, View leads (the lead list of the source), for a Web research source its Companies found
+// (the screen with the source chosen, gamma-wr-111) and Delete, which asks first. A source imported
+// from a CSV file names it (sources-csv-import). Each card names its agent, linked to the agent's
+// page, or says it is in none (gamma-p5-045). A change reads the screen again. Another member's
+// source, for a member without signals.manage, has its switch off limits and no Run now, Stop or
+// Delete, with a hint in their place (README "Decided here").
 import { Button, ButtonLink, Dialog, EmptyState, ErrorState, Link, Switch } from "@whytide/ui";
 import {
+  Bot,
+  Building2,
   Clock,
   ExternalLink,
+  FileSpreadsheet,
   ListChecks,
+  Pencil,
   Play,
   Radar,
   Square,
   Trash2,
   TriangleAlert,
   UserRound,
+  Users,
 } from "@whytide/ui/icons";
 import { ApiError, browserApi, data } from "@whytide/web/api/browser";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { CONNECTED, linkedinScreen, runStateId } from "./constants.ts";
+import { foundScreen } from "../found-companies/constants.ts";
+import { agentScreen, CONNECTED, leadsOf, linkedinScreen, runStateId } from "./constants.ts";
+import { EditResearch } from "./edit-research.tsx";
+import { useLanguageName } from "./research-fields.tsx";
+import { ResearchPlan } from "./research-plan.tsx";
 import { RunState } from "./run-state.tsx";
 import { When } from "./when.tsx";
 
@@ -35,16 +54,30 @@ export type Account = {
 };
 export type Source = {
   id: string;
+  kind: string;
   label: string;
   config: { [key: string]: unknown };
-  senderAccountId: string;
+  /** Null for a source that reads through no LinkedIn account (Web research). */
+  senderAccountId: string | null;
   enabled: boolean;
   lastRunAt: string | null;
   fireTimes: string[];
   nextRunAt: string | null;
   runOpen: boolean;
   openRun: { id: string; status: "running" | "waiting"; stopRequestedAt: string | null } | null;
+  cadence: "daily" | "research" | null;
+  /** How many days apart a research source runs; null for the others. */
+  everyDays: number | null;
+  lastRunBudgetReached: boolean;
+  /** The CSV file the source was imported from, while its import is kept. */
+  sourceImport: { id: string; fileName: string } | null;
+  /** The agent that holds it; null for a source in no agent. */
+  playbook: { id: string; name: string } | null;
+  /** The member who added it, who writes it. */
+  createdBy: string;
 };
+/** Who is signed in: their user id, and whether they hold signals.manage. */
+export type Viewer = { userId: string; manages: boolean };
 /** linkedin's usage of a sender account today, as `GET …/accounts/{id}/usage` answers it. */
 export type Usage = {
   cap: number;
@@ -59,6 +92,8 @@ type Props = {
   accounts: Account[];
   /** The usage of each connected sender account with a waiting run, by its id. */
   usage: ReadonlyMap<string, Usage>;
+  /** Who is signed in: a source is theirs to write, or every one with signals.manage. */
+  viewer: Viewer;
   /** Reads the screen again, after a change. */
   onChange: () => Promise<void>;
   /** A run asked for, by Run now. */
@@ -72,10 +107,12 @@ const codeOf = (error: unknown) => (error instanceof ApiError ? error.code : "in
 const TERM = "text-xs font-medium text-ink-muted";
 
 export function SourceList(props: Props) {
-  const { workspaceId, sources, accounts, usage, onChange, onRan, runsOf } = props;
+  const { workspaceId, sources, accounts, usage, viewer, onChange, onRan, runsOf } = props;
   const t = useTranslations("signals");
   const [failure, setFailure] = useState<string>();
   const [deleting, setDeleting] = useState<Source>();
+  const [editing, setEditing] = useState<Source>();
+  const languageName = useLanguageName();
 
   async function remove(source: Source) {
     setDeleting(undefined);
@@ -93,9 +130,16 @@ export function SourceList(props: Props) {
     }
   }
 
-  const senderOf = (source: Source) => accounts.find(({ id }) => id === source.senderAccountId);
+  const senderOf = (source: Source) =>
+    source.senderAccountId === null
+      ? undefined
+      : accounts.find(({ id }) => id === source.senderAccountId);
   const next = (source: Source) => {
     if (!source.enabled) return t("sources.paused");
+    if (source.cadence === "daily") return t("sources.cadence_daily");
+    if (source.cadence === "research") {
+      return t("sources.cadence_research", { count: source.everyDays ?? 0 });
+    }
     if (source.nextRunAt === null) return t("sources.no_more_runs");
     return (
       <ol className="grid gap-1">
@@ -107,13 +151,98 @@ export function SourceList(props: Props) {
       </ol>
     );
   };
-  const postUrl = (source: Source) =>
-    typeof source.config.postUrl === "string" ? source.config.postUrl : undefined;
+  const kinds: Record<string, string> = {
+    post_engagers: t("kinds.post_engagers.label"),
+    topic_engagement: t("kinds.topic_engagement.label"),
+    competitor_engagement: t("kinds.competitor_engagement.label"),
+    creator_engagement: t("kinds.creator_engagement.label"),
+    my_post_engagement: t("kinds.my_post_engagement.label"),
+    web_research: t("kinds.web_research.label"),
+  };
+  const text = (source: Source, key: string) => {
+    const value = source.config[key];
+    return typeof value === "string" ? value : "";
+  };
+  /** A link out, in a new tab, that gives LinkedIn no address of ours. */
+  const external = (href: string, words: string) => (
+    <Link href={href} target="_blank" rel="noreferrer">
+      {words}
+      <ExternalLink
+        aria-hidden="true"
+        className="ms-1 inline size-3.5 align-[-0.125em] rtl:-scale-x-100"
+      />
+    </Link>
+  );
+  /**
+   * What the source reads: the post, the topic's phrase, the own posts, the competitor's name and
+   * page, the creator's profile; a post or a profile emptied by the erasure says so.
+   */
+  const target = (source: Source) => {
+    if (source.kind === "web_research") return <q className="text-ink">{text(source, "focus")}</q>;
+    if (source.kind === "topic_engagement")
+      return <q className="text-ink">{text(source, "phrase")}</q>;
+    if (source.kind === "my_post_engagement") return t("sources.target_own_posts");
+    if (source.kind === "competitor_engagement")
+      return external(text(source, "companyUrl"), text(source, "companyName"));
+    const creator = source.kind === "creator_engagement";
+    const url = text(source, creator ? "profileUrl" : "postUrl");
+    if (url === "") return t("sources.target_erased");
+    return external(url, creator ? url : t("sources.view_post"));
+  };
+
+  const list = (source: Source, key: string): string[] => {
+    const value = source.config[key];
+    return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+  };
+  /** A research source's other fields: its region, languages and start pages, when it has them. */
+  const research = (source: Source) => {
+    const region = text(source, "region");
+    const languages = list(source, "languages");
+    const pages = list(source, "startPages");
+    if (region === "" && languages.length === 0 && pages.length === 0) return null;
+    return (
+      <dl className="grid gap-4 @md:grid-cols-2">
+        {region === "" ? null : (
+          <div className="grid content-start gap-1">
+            <dt className={TERM}>{t("sources.region")}</dt>
+            <dd className="wrap-anywhere text-ink">{region}</dd>
+          </div>
+        )}
+        {languages.length === 0 ? null : (
+          <div className="grid content-start gap-1">
+            <dt className={TERM}>{t("sources.languages")}</dt>
+            <dd className="text-ink">{languages.map(languageName).join(", ")}</dd>
+          </div>
+        )}
+        {pages.length === 0 ? null : (
+          <div className="grid content-start gap-1 @md:col-span-2">
+            <dt className={TERM}>{t("sources.start_pages")}</dt>
+            <dd>
+              <ul className="grid gap-1">
+                {pages.map((page) => (
+                  <li key={page} className="min-w-0 wrap-anywhere">
+                    <Link href={page} target="_blank" rel="noopener noreferrer">
+                      {page}
+                      <ExternalLink
+                        aria-hidden="true"
+                        className="ms-1 inline size-3.5 align-[-0.125em] rtl:-scale-x-100"
+                      />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        )}
+      </dl>
+    );
+  };
 
   const card = (source: Source) => {
     const sender = senderOf(source);
     const open = source.openRun;
     const heading = `signals-source-${source.id}`;
+    const writable = viewer.manages || source.createdBy === viewer.userId;
     return (
       <article
         key={source.id}
@@ -126,7 +255,7 @@ export function SourceList(props: Props) {
             <Radar aria-hidden="true" className="size-4.5" />
           </span>
           <div className="grid min-w-0 flex-1">
-            <span className="text-xs text-ink-muted">{t("kinds.post_engagers.label")}</span>
+            <span className="text-xs text-ink-muted">{kinds[source.kind] ?? source.kind}</span>
             <h3 id={heading} className="text-pretty font-semibold text-ink wrap-break-word">
               {source.label}
             </h3>
@@ -137,25 +266,50 @@ export function SourceList(props: Props) {
               key={`${source.id}:${source.enabled}`}
               workspaceId={workspaceId}
               source={source}
+              readOnly={!writable}
               onChange={onChange}
               onFailure={setFailure}
             />
           </label>
         </header>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <Link href={postUrl(source)} target="_blank" rel="noreferrer">
-            {t("sources.view_post")}
-            <ExternalLink
-              aria-hidden="true"
-              className="ms-1 inline size-3.5 align-[-0.125em] rtl:-scale-x-100"
-            />
-          </Link>
+          <span className="min-w-0 wrap-break-word text-ink-muted">{target(source)}</span>
+          {source.senderAccountId === null ? null : (
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-ink-muted">
+              <UserRound aria-hidden="true" className="size-4 shrink-0" />
+              <span className="truncate">{sender?.label ?? t("sources.account_unknown")}</span>
+            </span>
+          )}
+          {source.sourceImport ? (
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-ink-muted">
+              <FileSpreadsheet aria-hidden="true" className="size-4 shrink-0" />
+              <span className="min-w-0 wrap-anywhere">
+                {t("sources.imported_from", { file: source.sourceImport.fileName })}
+              </span>
+            </span>
+          ) : null}
           <span className="inline-flex min-w-0 items-center gap-1.5 text-ink-muted">
-            <UserRound aria-hidden="true" className="size-4 shrink-0" />
-            <span className="truncate">{sender?.label ?? t("sources.account_unknown")}</span>
+            <Bot aria-hidden="true" className="size-4 shrink-0" />
+            <span className="min-w-0 wrap-anywhere">
+              {source.playbook ? (
+                <Link href={agentScreen(workspaceId, source.playbook.id)}>
+                  {t("sources.agent", { name: source.playbook.name })}
+                </Link>
+              ) : (
+                t("sources.no_agent")
+              )}
+            </span>
           </span>
         </div>
-        {sender?.status === CONNECTED ? null : (
+        {research(source)}
+        {source.kind === "web_research" ? (
+          <ResearchPlan
+            workspaceId={workspaceId}
+            sourceId={source.id}
+            refreshKey={`${source.lastRunAt ?? ""}|${source.openRun?.id ?? ""}`}
+          />
+        ) : null}
+        {source.senderAccountId === null || sender?.status === CONNECTED ? null : (
           <p className="flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2.5 text-danger-ink">
             <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <span>
@@ -170,6 +324,9 @@ export function SourceList(props: Props) {
             <dd className="text-ink">
               {source.lastRunAt ? <When at={source.lastRunAt} /> : t("sources.never")}
             </dd>
+            {source.lastRunBudgetReached ? (
+              <dd className="text-ink-muted">{t("runs.budget_reached")}</dd>
+            ) : null}
           </div>
           <div className="grid content-start gap-1">
             <dt className={TERM}>{t("sources.next_run")}</dt>
@@ -189,27 +346,33 @@ export function SourceList(props: Props) {
               workspaceId={workspaceId}
               source={source}
               sender={sender}
-              usage={usage.get(source.senderAccountId)}
+              usage={
+                source.senderAccountId === null ? undefined : usage.get(source.senderAccountId)
+              }
             />
-            <StopRun
-              key={open.id}
-              workspaceId={workspaceId}
-              source={source}
-              onStopped={onChange}
-              onFailure={setFailure}
-            />
+            {writable ? (
+              <StopRun
+                key={open.id}
+                workspaceId={workspaceId}
+                source={source}
+                onStopped={onChange}
+                onFailure={setFailure}
+              />
+            ) : null}
           </div>
         ) : null}
         <footer className="mt-auto flex flex-wrap items-center gap-2 border-t border-line pt-4">
-          <RunNow
-            workspaceId={workspaceId}
-            source={source}
-            onRan={onRan}
-            onFailure={(code) => {
-              setFailure(code);
-              if (code !== undefined) void onChange();
-            }}
-          />
+          {writable ? (
+            <RunNow
+              workspaceId={workspaceId}
+              source={source}
+              onRan={onRan}
+              onFailure={(code) => {
+                setFailure(code);
+                if (code !== undefined) void onChange();
+              }}
+            />
+          ) : null}
           <ButtonLink
             href={`?runs=${source.id}`}
             variant="ghost"
@@ -218,11 +381,43 @@ export function SourceList(props: Props) {
             <ListChecks aria-hidden="true" />
             {t("runs.show")}
           </ButtonLink>
-          <span className="ms-auto">
-            <Button variant="ghost" onClick={() => setDeleting(source)}>
-              <Trash2 aria-hidden="true" />
-              {t("sources.delete")}
+          <ButtonLink
+            href={leadsOf(workspaceId, source.id)}
+            variant="ghost"
+            aria-label={t("sources.view_leads_of", { label: source.label })}
+          >
+            <Users aria-hidden="true" />
+            {t("sources.view_leads")}
+          </ButtonLink>
+          {source.kind === "web_research" ? (
+            <ButtonLink
+              href={foundScreen(workspaceId, { source: source.id })}
+              variant="ghost"
+              aria-label={t("sources.companies_found_of", { label: source.label })}
+            >
+              <Building2 aria-hidden="true" />
+              {t("sources.companies_found")}
+            </ButtonLink>
+          ) : null}
+          {writable && source.kind === "web_research" ? (
+            <Button
+              variant="ghost"
+              aria-label={t("sources.edit_of", { label: source.label })}
+              onClick={() => setEditing(source)}
+            >
+              <Pencil aria-hidden="true" />
+              {t("sources.edit")}
             </Button>
+          ) : null}
+          <span className="ms-auto">
+            {writable ? (
+              <Button variant="ghost" onClick={() => setDeleting(source)}>
+                <Trash2 aria-hidden="true" />
+                {t("sources.delete")}
+              </Button>
+            ) : (
+              <span className="text-pretty text-ink-muted text-xs">{t("sources.not_owner")}</span>
+            )}
           </span>
         </footer>
       </article>
@@ -240,6 +435,15 @@ export function SourceList(props: Props) {
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">{sources.map(card)}</div>
       )}
+      {editing ? (
+        <EditResearch
+          key={editing.id}
+          workspaceId={workspaceId}
+          source={editing}
+          onClose={() => setEditing(undefined)}
+          onSaved={onChange}
+        />
+      ) : null}
       <Dialog
         open={deleting !== undefined}
         onClose={() => setDeleting(undefined)}
@@ -352,14 +556,18 @@ function StopRun(props: {
   );
 }
 
-/** The enabled switch: it moves at once and back when the api refuses (the limit, say). */
+/**
+ * The enabled switch: it moves at once and back when the api refuses (the limit, say); off limits
+ * on another member's source.
+ */
 function EnabledSwitch(props: {
   workspaceId: string;
   source: Source;
+  readOnly: boolean;
   onChange: () => Promise<void>;
   onFailure: (code: string | undefined) => void;
 }) {
-  const { workspaceId, source, onChange, onFailure } = props;
+  const { workspaceId, source, readOnly, onChange, onFailure } = props;
   const t = useTranslations("signals");
   const [on, setOn] = useState(source.enabled);
   const [busy, setBusy] = useState(false);
@@ -388,7 +596,7 @@ function EnabledSwitch(props: {
   return (
     <Switch
       checked={on}
-      disabled={busy}
+      disabled={busy || readOnly}
       aria-label={t("sources.enabled_switch", { label: source.label })}
       onChange={(event) => toggle(event.target.checked)}
     />

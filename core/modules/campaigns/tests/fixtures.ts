@@ -1,8 +1,11 @@
 // The setup the module's test files share (tests/*.test.ts, tests/safety/*.test.ts), each file on
-// its own schema (withTestDb, called by the file): a workspace's runs, its approver's connected
-// account, an approved lead enrolled by the subscriber's body, a step moved as later tasks will move
-// it, a step queued, its draft written and its item decided as approvals' routes leave the rows (its
-// commands are its routes' only), the decision delivered, and the rows as the tests read them.
+// its own schema (withTestDb, called by the file): a workspace's runs, its approver as its Owner
+// (gamma-p6-040: a campaign sends from its owner's account, the seeded one from the workspace's
+// Owner's, while the owner is an active member), the approver's connected account, an approved lead
+// enrolled by the subscriber's body, a step moved as later tasks will move it, a step queued, its
+// draft written and its item decided as approvals' routes leave the rows (its commands are its
+// routes' only), by the item's account's owner unless a test says, the decision delivered, and the
+// rows as the tests read them.
 import { createHash } from "node:crypto";
 import { attachStepDraft } from "@whytide/approvals/testing";
 import { createLeadForPerson, recordLeadStatus, upsertPersonFromSource } from "@whytide/contacts";
@@ -10,6 +13,7 @@ import { type PrismaClient, type TenantClient, withTenant } from "@whytide/db";
 import { asRole } from "@whytide/db/testing";
 import { createConnectedAccount } from "@whytide/linkedin/testing";
 import { newId, servicePrincipal } from "@whytide/platform";
+import { createMembership, createOrganizationWithWorkspace } from "@whytide/tenancy/testing";
 import { applyDecision, type DecisionOutcome } from "../domain/decisions.ts";
 import { enrollApproved } from "../domain/enroll/enroll.ts";
 import type { QueueOutcome } from "../domain/queue/constants.ts";
@@ -44,13 +48,19 @@ export type Enrolled = {
 export type Fixture = {
   readonly app: () => PrismaClient;
   readonly run: <T>(fn: (tx: TenantClient) => Promise<T>) => Promise<T>;
-  /** The approver's connected account, in the zone given (UTC by default). */
+  /**
+   * The approver an active Owner of the workspace, its row and its organization written unless the
+   * test has; the oldest Owner, whose the seeded campaign is, unless the test made one before.
+   */
+  readonly owned: () => Promise<typeof APPROVER>;
+  /** The approver's connected account, in the zone given (UTC by default), the approver owning. */
   readonly account: (timeZone?: string) => Promise<{ id: string }>;
   /**
    * A person whose lead is approved as Approve leaves it (contacts' approveLead is its route's
-   * only), enrolled by the subscriber's body.
+   * only), enrolled by the subscriber's body; with `email`, a person known by that address alone,
+   * with no LinkedIn profile (gamma-rf-050).
    */
-  readonly enrolledLead: (slug: string) => Promise<Enrolled>;
+  readonly enrolledLead: (slug: string, keys?: { readonly email: string }) => Promise<Enrolled>;
   /** The step moved as the queue, the approval or the sender's claim will (beta-p3-050, p4-020). */
   readonly moveStep: (id: string, status: StepStatus) => Promise<void>;
   /** The person's steps by position. */
@@ -66,7 +76,10 @@ export type Fixture = {
   readonly itemOf: (id: string) => Promise<ItemRow | null>;
   /** The step's message draft ended `ready` with the text, as its writer leaves it, and attached. */
   readonly draftReady: (id: string, text: string) => Promise<void>;
-  /** The step's item approved by `by` (the approver), as approve leaves it: the draft frozen. */
+  /**
+   * The step's item approved by `by` (its account's owner unless given), as approve leaves it: the
+   * draft frozen.
+   */
   readonly approveItem: (id: string, by?: string) => Promise<string>;
   /** The step's item skipped by the approver at `at` (now), as skip leaves it. */
   readonly skipItem: (id: string, at?: Date) => Promise<string>;
@@ -82,7 +95,8 @@ export type ItemRow = {
   readonly draftId: string | null;
   readonly actionType: string;
   readonly stepKey: string;
-  readonly senderAccountId: string;
+  /** Null on an email item, whose sender is its mailbox (approvals, gamma-p4-090). */
+  readonly senderAccountId: string | null;
   readonly scheduledFor: Date;
 };
 
@@ -93,12 +107,28 @@ export function fixture(workspaceId: string): Fixture {
     withTenant({ workspaceId, principal: servicePrincipal("campaigns_test") }, fn, {
       client: app(),
     });
-  const account = (timeZone?: string) =>
-    createConnectedAccount(workspaceId, { ownerUserId: APPROVER, timeZone });
+  async function owned(): Promise<typeof APPROVER> {
+    const workspace = await app().workspace.findUnique({ where: { id: workspaceId } });
+    if (workspace === null) await createOrganizationWithWorkspace({ workspaceId });
+    const user = { id: APPROVER, email: `${APPROVER}@example.com` };
+    await app().user.upsert({ where: { id: APPROVER }, create: user, update: {} });
+    const member = { workspaceId, userId: APPROVER };
+    if ((await app().membership.count({ where: member })) === 0) {
+      await createMembership({ ...member, role: "Owner" });
+    }
+    return APPROVER;
+  }
+  async function account(timeZone?: string) {
+    await owned();
+    return createConnectedAccount(workspaceId, { ownerUserId: APPROVER, timeZone });
+  }
 
-  async function enrolledLead(slug: string): Promise<Enrolled> {
+  async function enrolledLead(slug: string, keys?: { email: string }): Promise<Enrolled> {
     const personId = await run(async () => {
-      const profile = { linkedinUrl: `https://linkedin.com/in/${slug}`, firstName: "Noor" };
+      const profile =
+        keys === undefined
+          ? { linkedinUrl: `https://linkedin.com/in/${slug}`, firstName: "Noor" }
+          : { email: keys.email, firstName: "Noor" };
       const { person } = await upsertPersonFromSource({
         source: "import",
         provider: "csv",
@@ -139,8 +169,13 @@ export function fixture(workspaceId: string): Fixture {
     if (item === null) throw new Error("decide: no item");
     return run((tx) => applyDecision(tx, { approvalItemId: item.id, stepExecutionId: id }));
   }
-  async function approveItem(id: string, by = APPROVER): Promise<string> {
+  async function approveItem(id: string, by?: string): Promise<string> {
     const item = await pendingItemOf(id);
+    // Its account's owner unless given, as approvals' approvedContent wants; an email item has none.
+    const account =
+      item.senderAccountId === null
+        ? null
+        : await app().senderAccount.findUnique({ where: { id: item.senderAccountId } });
     if (item.draftId === null) throw new Error("approveItem: the draft is being written");
     const draft = await app().messageDraft.update({
       where: { id: item.draftId },
@@ -153,7 +188,7 @@ export function fixture(workspaceId: string): Fixture {
         status: "approved",
         approvedContentHash: sha256(text),
         ...decided(new Date()),
-        decidedBy: by,
+        decidedBy: by ?? account?.ownerUserId ?? APPROVER,
       },
     });
     return item.id;
@@ -162,6 +197,7 @@ export function fixture(workspaceId: string): Fixture {
   return {
     app,
     run,
+    owned,
     account,
     enrolledLead,
     async moveStep(id, status) {

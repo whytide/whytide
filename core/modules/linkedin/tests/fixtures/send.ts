@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { type PrismaClient, withTenant } from "@whytide/db";
 import { asRole } from "@whytide/db/testing";
-import { servicePrincipal } from "@whytide/platform";
+import { type Principal, type Role, servicePrincipal } from "@whytide/platform";
 import type { Day } from "../../domain/quota/days.ts";
 import { reserveReads } from "../../domain/quota/reservations.ts";
 import { reserveSend } from "../../domain/send/reserve.ts";
@@ -57,6 +57,23 @@ export async function sender(
         where: { senderAccountId: id },
         orderBy: { quotaDay: "asc" },
       }),
+  };
+}
+
+/**
+ * A member's principal in the workspace, as the api's guard builds it, an Owner unless `role` says:
+ * who presses the tester's switches (domain/access.ts, gamma-p6-070).
+ */
+export function member(userId: string, workspaceId: string, role: Role = "Owner"): Principal {
+  const membershipId = `mem_${userId}`;
+  return {
+    userId,
+    actorType: "human",
+    authMethod: "session",
+    membershipId,
+    workspaceId,
+    role,
+    scopes: [],
   };
 }
 

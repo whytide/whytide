@@ -3,8 +3,10 @@
 // check: a log call added to the adapter later is seen too. Each method runs against the test's
 // fixture server as it succeeds, then the adapter fails through each error it maps, every fixture's
 // included, and each error is logged as a caller logs it. The webhooks come from the fixtures, the
-// notify's with its pairing token. The cursors handed out and the count of errors go to the test on
-// file descriptor 3, never to stdout. No vendor is called.
+// notify's with its pairing token. The post reads page through their fixtures, a phrase's, a
+// member's, a company's and the account's own, then fail too. The cursors handed out, the count of
+// errors and the call metric's labels go to the test on file descriptor 3, never to stdout. No vendor
+// is called.
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { once } from "node:events";
@@ -12,7 +14,7 @@ import { readdirSync, readFileSync, writeSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
-import { createLogger } from "@whytide/platform";
+import { createLogger, recordedMetrics } from "@whytide/platform";
 import { bindPort } from "../../../_pattern/index.ts";
 import { linkedinPort } from "../../port.ts";
 import { SECRET_HEADER, unipileLinkedin } from "../index.ts";
@@ -81,6 +83,18 @@ const invite = () =>
   linkedin.sendInvite({ ...ada, note: "Hello Ada", idempotencyKey: "step-key-1" });
 const message = () =>
   linkedin.sendMessage({ ...ada, text: "Hello Ada", idempotencyKey: "step-key-2" });
+const since = { postedSince: new Date("2026-09-25T00:00:00.000Z"), limit: 1 };
+const search = { ...account, ...since, phrase: "sales automation" };
+const member = { ...account, ...since, authorUrl: "https://www.linkedin.com/in/ada-example" };
+const company = { ...member, authorUrl: "https://www.linkedin.com/company/example-ltd" };
+const own = { ...account, ...since };
+const at = (cursor?: string) => (cursor ? { cursor } : {});
+const postReads = [
+  (cursor?: string) => linkedin.searchPosts({ ...search, ...at(cursor) }),
+  (cursor?: string) => linkedin.listAuthorPosts({ ...member, ...at(cursor) }),
+  (cursor?: string) => linkedin.listAuthorPosts({ ...company, ...at(cursor) }),
+  (cursor?: string) => linkedin.listOwnPosts({ ...own, ...at(cursor) }),
+];
 
 // Every method as it succeeds.
 await linkedin.createHostedAuthLink({
@@ -107,6 +121,10 @@ await linkedin.sendMessage({
 });
 await message();
 await linkedin.listRecentMessages({ ...chidi, since: new Date("2026-10-02T00:00:00.000Z") });
+for (const read of postReads) {
+  cursor = kept(await read());
+  while (cursor) cursor = kept(await read(cursor));
+}
 
 // Then each failure, an answer queued at the test's server first where one is needed.
 const spare = createServer().listen(0, "127.0.0.1");
@@ -132,6 +150,11 @@ const failures: Failure[] = [
   [{ status: 200, body: "not JSON" }, () => linkedin.listPendingInvites(account)],
   [undefined, () => linkedin.listPendingInvites({ ...account, cursor: "forged.cursor" })],
   [undefined, () => linkedin.listPostEngagers({ ...engagers, cursor: "forged.cursor" })],
+  [undefined, () => linkedin.searchPosts({ ...search, cursor: "forged.cursor" })],
+  [undefined, () => linkedin.listOwnPosts({ ...own, cursor: cursors[0] ?? "" })],
+  [{ status: 401, file: "error-disconnected.json" }, () => linkedin.searchPosts(search)],
+  [{ status: 404, file: "error.json" }, () => linkedin.listAuthorPosts(member)],
+  [{ status: 500, file: "error.json" }, () => linkedin.listOwnPosts(own)],
   ...SOURCES.flatMap((name): Failure[] => [
     [undefined, () => linkedin.parseWebhook(webhook(name, "not the secret"))],
     [undefined, () => linkedin.parseWebhook(unsigned(name))],
@@ -158,4 +181,5 @@ for (const [answer, call] of failures) {
   logger.error({ err: failed }, "linkedin call failed");
   errors += 1;
 }
-writeSync(3, JSON.stringify({ cursors, errors }));
+const labels = recordedMetrics().get("providers.calls") ?? [];
+writeSync(3, JSON.stringify({ cursors, errors, labels }));

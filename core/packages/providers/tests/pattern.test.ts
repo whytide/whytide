@@ -458,7 +458,7 @@ test("the shape check: every port method, nothing the port does not declare, a f
   ]);
 });
 
-test("definitions are checked at start: the name, the <port>_ prefix, a fake's control names, duplicates", () => {
+test("definitions are checked at start: the name, the <port>_ prefix, a fake's control names, an adapter's declarations, duplicates", () => {
   const methods = { ping: { input: z.void(), output: z.object({ ok: z.literal(true) }) } };
   throwsCode(() => definePort({ name: "Fixture", methods, errors: {} }), "port_invalid");
   throwsCode(() => definePort({ name: "fixture", methods, errors: {} }), "duplicate_port");
@@ -483,6 +483,17 @@ test("definitions are checked at start: the name, the <port>_ prefix, a fake's c
     throwsCode(
       () => definePort({ name: "pinger", methods: { [method]: methods.ping }, errors: {} }),
       "port_invalid",
+    );
+  }
+  for (const method of ["allowance", "openData"]) {
+    assert.throws(
+      () => definePort({ name: "pinger", methods: { [method]: methods.ping }, errors: {} }),
+      (error: unknown) => {
+        assert.ok(isAppError(error) && error.code === "port_invalid");
+        const reason = "a method is named like an adapter's declaration";
+        assert.deepEqual(error.details, { port: "pinger", reason, method });
+        return true;
+      },
     );
   }
   // The real app_mail port holds the `mail` prefix now (alpha-p1-110): a second one would be a duplicate code.

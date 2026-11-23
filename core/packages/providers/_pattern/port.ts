@@ -8,6 +8,7 @@
 // alwaysCheckOutputs, as the LinkedIn port is. Every call is counted by its outcome (metrics.ts).
 import { AppError, defineErrors, isAppError, platformConfig } from "@whytide/platform";
 import type { z } from "zod";
+import { ADAPTER_DECLARATIONS } from "./constants.ts";
 import { patternErrors } from "./errors.ts";
 import { FAKE_CONTROLS, isFake } from "./fake.ts";
 import { providerMetrics } from "./metrics.ts";
@@ -86,6 +87,8 @@ export function definePort<M extends MethodSchemas, E extends PortErrors>(defini
     if (!METHOD.test(method)) throw invalid("a method is not a camelCase name", { method });
     if (FAKE_CONTROLS.includes(method))
       throw invalid("a method is named like a fake's control", { method });
+    if (ADAPTER_DECLARATIONS.includes(method))
+      throw invalid("a method is named like an adapter's declaration", { method });
   }
   for (const code of Object.keys(definition.errors)) {
     if (!code.startsWith(`${errorPrefix}_`))

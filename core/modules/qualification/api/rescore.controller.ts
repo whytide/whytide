@@ -13,6 +13,8 @@ import {
   rescoreResponse,
 } from "../schemas/rescore.ts";
 import { GoldenSetController } from "./golden-set.controller.ts";
+import { MemberVerdictController } from "./member-verdict.controller.ts";
+import { ReassessController } from "./reassess.controller.ts";
 import { SnapshotController } from "./snapshot.controller.ts";
 
 @Controller("rescore")
@@ -32,7 +34,16 @@ export class RescoreController {
   }
 }
 
-// The module's routes: the re-score, the lead page's snapshot read (snapshot.controller.ts) and the
-// golden set (golden-set.controller.ts).
-@Module({ controllers: [RescoreController, SnapshotController, GoldenSetController] })
+// The module's routes: the re-score, the lead page's snapshot read (snapshot.controller.ts), a
+// member's verdict (member-verdict.controller.ts), the golden set (golden-set.controller.ts) and a
+// member's new assessment of a lead (reassess.controller.ts).
+@Module({
+  controllers: [
+    RescoreController,
+    SnapshotController,
+    MemberVerdictController,
+    GoldenSetController,
+    ReassessController,
+  ],
+})
 export class QualificationApi {}

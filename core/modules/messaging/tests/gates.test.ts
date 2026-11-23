@@ -3,16 +3,18 @@
 // holds; the placeholders, lengths and red lines of criterion 3; the plan's facts_used against the
 // writer's blocks, which carry the newest three events and no link, source or hash. The colleague
 // gate's phrases, word boundaries, case and names, and checkText per channel and kind against the
-// worktree's database, which holds the lead's colleagues (beta-p3-020).
+// worktree's database, which holds the lead's colleagues (beta-p3-020). The message policies
+// (gamma-p3-070): the act phrases on every channel, an email's subject, a first email's links and
+// length, and the near duplicates of a mailbox, in pure code and in checkText.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { asRole, withTestDb } from "@whytide/db/testing";
 import { useTenancyClient } from "@whytide/tenancy/testing";
 import { assembleDossier } from "../domain/dossier/assemble.ts";
 import { writerBlocks } from "../domain/drafts/blocks.ts";
-import { checkText } from "../domain/gates/check-text.ts";
+import { checkText, type TextCheckInput } from "../domain/gates/check-text.ts";
 import { colleagueIssues, plural } from "../domain/gates/colleague.ts";
-import { COLLEAGUE_SIGNAL_PHRASES } from "../domain/gates/constants.ts";
+import { COLLEAGUE_SIGNAL_PHRASES, SIGNAL_ACT_PHRASES } from "../domain/gates/constants.ts";
 import { extractEntities, groundingIssues } from "../domain/gates/grounding.ts";
 import {
   checkPlan,
@@ -22,7 +24,9 @@ import {
   type Limits,
   limitsOf,
 } from "../domain/gates/index.ts";
-import type { GateIssue } from "../schemas/writer.ts";
+import { nearDuplicateIssues, similarity, subjectIssues } from "../domain/gates/policies.ts";
+import { CHANNELS, type GateIssue, type GateName } from "../schemas/writer.ts";
+import { createStepDraft } from "../testing/index.ts";
 import { inputs } from "./fixtures/dossier/inputs.ts";
 import { COLLEAGUE, run, seed, seedColleague } from "./fixtures/draft.ts";
 
@@ -258,4 +262,225 @@ test("checkText per channel and kind: a step's note may be empty, a lead's note 
     ),
     { code: "person_not_found" },
   );
+});
+
+const SUBJECT = "Warm leads at Acme";
+/** A follow-up's body that passes every gate. */
+const BODY =
+  "Ines, one more thought for Acme: Signal Radar reads public posts every day and sends the warm leads to Lead Review before they go cold.";
+const TOPIC =
+  "Ines, the post on leads that go cold before sales calls them stood out. Does Acme see it?";
+/** The issues of one gate. */
+const only = (gate: GateName, found: readonly GateIssue[]) =>
+  found.filter((issue) => issue.gate === gate);
+const email = (text: string, subject: string | null = SUBJECT, first = true) =>
+  issuesOf(checkWrittenText(text, dossier, limitsOf("email"), [], { subject, first }));
+const near = (similarity: number) => [{ gate: "near_duplicate", similarity }];
+
+test("signal_act refuses each act phrase on every channel, in any case, with marks around it, as the text wrote it, in the writer's gates and in checkText, an email's subject too; a text naming the post's topic passes", async () => {
+  const { workspaceId, personId } = await seed();
+  for (const channel of CHANNELS) {
+    const later = channel === "email" ? { subject: null, first: false } : undefined;
+    const written = (text: string) =>
+      only("signal_act", issuesOf(checkWrittenText(text, dossier, limitsOf(channel), [], later)));
+    const kind = channel === "email" ? { stepKind: "email_follow_up" as const } : {};
+    const checked = async (text: string) => {
+      const target = { personId, channel, kind: "outbound_step" as const, ...kind };
+      const result = await run(workspaceId, () => checkText(text, target));
+      return result.ok ? [] : only("signal_act", result.issues);
+    };
+    for (const phrase of SIGNAL_ACT_PHRASES) {
+      for (const said of [phrase, phrase.toUpperCase()]) {
+        const text = `Ines, “${said}”! The post on warm leads stood out.`;
+        const issue = [{ gate: "signal_act", phrase: said }];
+        assert.deepEqual(
+          [written(text), await checked(text)],
+          [issue, issue],
+          `${channel} ${said}`,
+        );
+      }
+    }
+    assert.deepEqual([written(TOPIC), await checked(TOPIC)], [[], []], channel);
+    assert.deepEqual(written("Ines, your commentary on leads stood out."), [], channel);
+  }
+  const act = (phrase: string) => ({ gate: "signal_act", phrase });
+  assert.deepEqual(only("signal_act", email(TOPIC, "Saw you liked it")), [act("Saw you liked")]);
+  assert.deepEqual(only("signal_act", email("Ines, you reacted.", "You reacted")), [
+    act("You reacted"),
+    act("you reacted"),
+  ]);
+  assert.deepEqual(only("signal_act", email("Ines, you reacted.", "you reacted")), [
+    act("you reacted"),
+  ]);
+});
+
+test("subject: a first email's, trimmed, has 1 to 6 words and at most 60 characters, on one line, with no Re:, Fw: or Fwd: in any case; a follow-up has none", () => {
+  const problems = (subject: string | null, first: boolean) =>
+    subjectIssues(subject, first).flatMap((issue) =>
+      issue.gate === "subject" ? issue.problem : [],
+    );
+  const cases: [string | null, boolean, string[]][] = [
+    [SUBJECT, true, []],
+    ["  One two three four five six  ", true, []],
+    ["x".repeat(60), true, []],
+    ["One two three four five six seven", true, ["too_long"]],
+    ["x".repeat(61), true, ["too_long"]],
+    [null, true, ["missing"]],
+    [" \n ", true, ["missing"]],
+    ["Re: warm leads", true, ["prefix"]],
+    ["FW : warm leads", true, ["prefix"]],
+    ["fwd:warm leads", true, ["prefix"]],
+    ["Warm leads\nat Acme", true, ["line_break"]],
+    ["Regarding warm leads", true, []],
+    ["RE: one two three four five six seven\r\n", true, ["too_long", "prefix"]],
+    [null, false, []],
+    ["  ", false, []],
+    ["Warm leads", false, ["not_allowed"]],
+  ];
+  for (const [subject, first, expected] of cases) {
+    assert.deepEqual(problems(subject, first), expected, `${first} ${subject}`);
+  }
+  assert.deepEqual(only("subject", email(TOPIC, "Re: warm leads")), [
+    { gate: "subject", problem: "prefix" },
+  ]);
+  // Alpha's and beta's text gates read the subject as the body.
+  const onSubject: [string, GateName, GateIssue][] = [
+    ["Re: warm leads", "red_lines", { gate: "red_lines", phrase: "Re:" }],
+    ["Hi {{first_name}}", "placeholders", { gate: "placeholders", placeholder: "{{first_name}}" }],
+    ["Leads at Globex", "grounding", { gate: "grounding", entity: "Globex" }],
+    [
+      "Your colleague liked it",
+      "colleague_signal",
+      { gate: "colleague_signal", phrase: "Your colleague" },
+    ],
+  ];
+  for (const [said, gate, issue] of onSubject) {
+    assert.deepEqual(only(gate, email(TOPIC, said)), [issue], said);
+  }
+});
+
+test("links: a first email's subject or body with an http(s) address, www., an email address or a bare domain fails, each link as written, once; e.g., U.S. and figures pass; a follow-up and a LinkedIn text may hold one", () => {
+  const links = (body: string, subject = SUBJECT) => only("links", email(body, subject));
+  const link = (...found: string[]) =>
+    found.map((said): GateIssue => ({ gate: "links", link: said }));
+  const cases: [string, GateIssue[]][] = [
+    ["See https://acme.io/demo?ref=1.", link("https://acme.io/demo?ref=1")],
+    ["See http://acme.io, then reply.", link("http://acme.io")],
+    ["Visit www.signalradar.com/tour!", link("www.signalradar.com/tour")],
+    ["Write to sam@signalradar.com.", link("sam@signalradar.com")],
+    ["Our site is signalradar.io.", link("signalradar.io")],
+    ["Try app.signal-radar.co.uk (free).", link("app.signal-radar.co.uk")],
+    ["Built on Node.js, twice: Node.js.", link("Node.js")],
+    ["E.g. teams in the U.S. and the U.K. reach warm leads, i.e. sooner.", []],
+    ["Northwind booked 40% more meetings. 2.5 times more.", []],
+  ];
+  for (const [body, expected] of cases) assert.deepEqual(links(body), expected, body);
+  assert.deepEqual(links("Ines, a question.", "See acme.io"), link("acme.io"));
+  assert.deepEqual(links("More at acme.io.", "acme.io"), link("acme.io"));
+  const text = "More at https://acme.io and www.acme.io.";
+  assert.deepEqual(
+    [only("links", email(text, null, false)), only("links", issues(text))],
+    [[], []],
+  );
+});
+
+test("an email's length: the writer's body 50 to 120 words, its issue in words; a typed one 1 character to the hard limit, in characters; checkText's subject and its refusals off an email", async () => {
+  const words = (n: number) => Array.from({ length: n }, () => "lead").join(" ");
+  const counted = (n: number) => ({ gate: "length", length: n, min: 50, max: 120, unit: "words" });
+  assert.deepEqual(
+    [49, 50, 120, 121].map((n) => only("length", email(words(n)))),
+    [[counted(49)], [], [], [counted(121)]],
+  );
+  assert.deepEqual(only("length", email(`${words(25)}\n\n ${words(25)}`)), []);
+
+  const { workspaceId, personId } = await seed();
+  const check = (text: string, target: Partial<TextCheckInput> = {}) =>
+    run(workspaceId, () =>
+      checkText(text, {
+        personId,
+        channel: "email",
+        kind: "lead_draft",
+        subject: SUBJECT,
+        ...target,
+      }),
+    );
+  const typed = (n: number) => ({
+    ok: false,
+    issues: [{ gate: "length", length: n, min: 1, max: 1_900, unit: "characters" }],
+  });
+  assert.deepEqual(await check("Ines?"), { ok: true });
+  assert.deepEqual([await check("  "), await check("x".repeat(1_901))], [typed(0), typed(1_901)]);
+  const subject = (problem: string) => ({ ok: false, issues: [{ gate: "subject", problem }] });
+  assert.deepEqual(await check("Ines?", { subject: null }), subject("missing"));
+  const later = { stepKind: "email_follow_up", subject: null } as const;
+  assert.deepEqual(await check("More at acme.io?", later), { ok: true });
+  assert.deepEqual(await check("Ines?", { ...later, subject: "Hi" }), subject("not_allowed"));
+  const invalid = (field: string) => ({
+    code: "messaging_input_invalid",
+    details: { fields: [field] },
+  });
+  const linkedin = { channel: "linkedin_message", subject: null } as const;
+  await assert.rejects(check("Ines?", { ...linkedin, subject: "Hi" }), invalid("subject"));
+  await assert.rejects(check("Ines?", { ...linkedin, mailboxId: "mbx_1" }), invalid("mailboxId"));
+  await assert.rejects(
+    check("Ines?", { ...linkedin, stepKind: "email_first" }),
+    invalid("stepKind"),
+  );
+  await assert.rejects(check("Ines?", { stepKind: "first_message" }), invalid("stepKind"));
+});
+
+test("near_duplicate: the highest Jaccard similarity of word 3-shingles, from 0.8, with two decimals and never the other text; below 0.8 passes", () => {
+  // 18 words, 16 runs; four more words add four runs (16 / 20), five add five (16 / 21).
+  const base =
+    "Ines, leads that go cold before sales calls them cost data teams like Acme a week of pipeline";
+  const at = `${base} every single quarter, Ines.`;
+  const below = `${base} every single quarter here, sadly.`;
+  assert.deepEqual(nearDuplicateIssues(at, [base]), near(0.8));
+  assert.deepEqual(nearDuplicateIssues(below, [base]), []);
+  assert.deepEqual(nearDuplicateIssues(base.toUpperCase(), [TOPIC, base]), near(1));
+  // 19 shared runs of 22: the highest of the others, rounded.
+  assert.deepEqual(nearDuplicateIssues(at, [TOPIC, below, base]), near(0.86));
+  assert.deepEqual([nearDuplicateIssues(base, []), similarity(new Set(), new Set())], [[], 0]);
+});
+
+test("near_duplicate in checkText: a step's email against the other drafts of its mailbox with a body, made or approved in the last 24 hours, never the draft itself; another mailbox's, another workspace's or one 25 hours old passes", async () => {
+  const { workspaceId, personId } = await seed();
+  const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000);
+  const step = (stepExecutionId: string, mailboxId: string, columns: object = {}) =>
+    createStepDraft({
+      workspaceId,
+      personId,
+      stepExecutionId,
+      stepKey: "email_2",
+      mailboxId,
+      text: BODY,
+      ...columns,
+    });
+  const check = (mailboxId: string, draftId?: string) =>
+    run(workspaceId, () =>
+      checkText(BODY, {
+        personId,
+        channel: "email",
+        kind: "outbound_step",
+        stepKind: "email_follow_up",
+        mailboxId,
+        ...(draftId && { draftId }),
+      }),
+    );
+  const duplicate = { ok: false, issues: near(1) };
+  await step("sx_now", "mbx_now");
+  await step("sx_edited", "mbx_edited", { text: "Ines, a question?", editedText: BODY });
+  await step("sx_approved", "mbx_approved", { createdAt: hoursAgo(25), status: "approved" });
+  const own = await step("sx_own", "mbx_own");
+  await step("sx_old", "mbx_old", { createdAt: hoursAgo(25) });
+  await step("sx_empty", "mbx_empty", { status: "failed", text: null });
+  const theirs = { workspaceId: "wsp_other", personId, stepExecutionId: "sx_theirs" };
+  await createStepDraft({ ...theirs, stepKey: "email_2", mailboxId: "mbx_theirs", text: BODY });
+  for (const mailbox of ["mbx_now", "mbx_edited", "mbx_approved"]) {
+    assert.deepEqual(await check(mailbox), duplicate, mailbox);
+  }
+  for (const mailbox of ["mbx_old", "mbx_empty", "mbx_theirs", "mbx_none"]) {
+    assert.deepEqual(await check(mailbox), { ok: true }, mailbox);
+  }
+  assert.deepEqual(await check("mbx_own", own), { ok: true });
 });

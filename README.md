@@ -1,31 +1,39 @@
 # Whytide
 
-Whytide finds high-intent B2B leads on LinkedIn from buying signals, qualifies them with AI against your ideal customer profile, shows the evidence behind every lead, and sends outreach only after a person approves it. This repository holds the code of Whytide Core, the source-available, self-hosted edition, and of Whytide Cloud, the hosted service that runs the same code.
+Whytide finds high-intent B2B leads from buying signals on LinkedIn and on the web, qualifies them with AI against your ideal customer profile, shows the evidence behind every lead, and runs LinkedIn outreach from your own account, with a person approving every message or every first touch. This repository holds the code of Whytide Core, the source-available, self-hosted edition, and of Whytide Cloud, the hosted service that runs the same code.
 
-**Status:** this is the code at the end of beta, version 0.2.1, published to read. It is not a supported release yet.
+**Status:** this is the code at the end of gamma's LinkedIn work, version 0.3.0, published to read. It is not a supported release yet.
 
 ## What it does
 
-1. **Company Knowledge.** Paste your website: the AI drafts what you sell, to whom and why, and you edit it.
-2. **Ideal customer profile.** Titles, seniorities, industries, company sizes and countries, plus must-haves and disqualifiers in plain text.
-3. **Signals.** Point it at LinkedIn posts (yours, a competitor's, a creator's) and it reads the people who reacted or commented, through your own connected LinkedIn account. Or import a CSV of LinkedIn profiles.
-4. **Qualification.** Hard filters in code first, then an AI verdict on each criterion with its evidence, then a fit score computed in code and a tier.
-5. **Review.** The leads sorted by score, each with the post and what the person did on it. You mark each one Good lead or Not a fit.
-6. **Outreach on LinkedIn.** Approving a lead starts one fixed sequence from your own account: a connection request, a first message once it is accepted, then two follow-ups. The AI drafts each message from the facts Whytide holds, and every message waits in "Up next" until you approve, edit or skip it.
-7. **Safety.** Daily quotas inside your working hours, under hard maximums that no setting raises. Any reply stops the sequence. A never-contact list, opt-outs, and kill switches per account, per workspace and for the whole platform.
-8. **Inbox.** The replies in the threads Whytide started.
+1. **Company Knowledge.** At sign-in, give your website or upload documents: the AI reads them in full and drafts what you sell, to whom and why, and you edit it.
+2. **Audiences.** One or more ideal customer profiles, each drafted by the AI from Company Knowledge: titles, seniorities, industries, company sizes and countries, plus must-haves and disqualifiers in plain text.
+3. **Agents.** Each agent has an audience, its own signal sources and its own campaign, and belongs to the member who made it.
+4. **Signals.** LinkedIn posts by topic, by a competitor, by a creator or your own: Whytide reads the people who reacted or commented, through your own connected LinkedIn account, every day within the account's read budget, and the AI sets the noise aside by headline first. Web research finds companies on the web, then the people on their pages and their LinkedIn profiles. Or import a CSV, or add a lead by hand.
+5. **Enrichment.** Company facts from open data, the company's website read by the AI, its LinkedIn page and the data providers you choose, each fact with its source.
+6. **Qualification.** Hard filters in code first, then an AI verdict on each criterion with its evidence, then a fit score computed in code, intent that fades with time, a tier and why now. Hot leads raise an alert. You can correct a lead's fields and verdicts, and ask the AI again.
+7. **Campaigns on LinkedIn.** A sequence editor with previews and launch checks: a connection request, then messages and follow-ups, sent from the agent owner's own account, Hot leads first. Every message waits in "Up next" until you approve, edit or skip it; with "Review first touches", the follow-ups go without approval and carry an AI disclosure line.
+8. **Inbox.** The replies in the threads Whytide started. The AI labels each reply, each label has a default action, and you answer from the thread, with an AI draft from your brief if you want one.
+9. **Teams.** Owners and Members, invites, and each member's own LinkedIn account, agents, "Up next" and inbox, with an Owner's view of all.
+10. **Safety.** Daily quotas inside your working hours, under hard maximums that no setting raises. Any reply stops the sequence. A never-contact list, exclusion lists for customers and competitors, opt-outs, kill switches per account, per workspace and for the whole platform, and leads in the EU and the UK never contacted are deleted after 30 days.
+11. **Visibility.** Prices shown before you spend credits, credit alerts, each campaign's results, a health page for your LinkedIn accounts, and error alerts to your team's channel.
 
 ## AI agents
 
 ### Inside the product
 
-Several AI agents work inside Whytide, each on one job. They run through Mastra inside Temporal activities, see only the facts they are given (qualification gets anonymized profiles), and return structured output that code checks before anything is saved; nothing reaches a prospect until a person approves it.
+Several AI agents work inside Whytide, each on one job. They run through Mastra inside Temporal activities, see only the facts they are given (qualification gets anonymized profiles), and return structured output that code checks before anything is saved. A person approves every message, or a campaign's first touches when its mode sends the follow-ups, each with an AI disclosure line.
 
 ```mermaid
 flowchart LR
   subgraph SETUP["Setup"]
-    SITE["your website"] --> KNOW["agent: draft Company Knowledge<br/>you edit it"]
-    KNOW --> ICPD["agent: draft the ICP<br/>you edit it"]
+    SITE["your website or documents"] --> KNOW["agent: draft Company Knowledge<br/>you edit it"]
+    KNOW --> ICPD["agent: draft each audience<br/>you edit it"]
+  end
+  subgraph FIND["Finding leads"]
+    POSTS["people on LinkedIn posts"] --> TRIAGE["agent: set the noise aside<br/>by headline"]
+    WEB["agent: web research<br/>plan, search, judge the companies"] --> PEOPLE["agent: the people<br/>on the companies' pages"]
+    COMPANY["agent: read the company's website"]
   end
   subgraph EACHLEAD["Each lead"]
     FILTERS["hard filters and anonymizer<br/>in code"] --> ASSESS["agent: assess the fit<br/>a verdict per criterion"]
@@ -36,9 +44,16 @@ flowchart LR
     PLAN --> WRITE["agent: write the message"]
     WRITE --> CHECKS["checks in code<br/>grounding, length, placeholders"]
   end
+  subgraph EACHREPLY["Each reply"]
+    LABEL["agent: label the reply"] --> DRAFT["agent: draft your answer<br/>from your brief"]
+  end
   ICPD --> FILTERS
+  TRIAGE --> FILTERS
+  PEOPLE --> FILTERS
+  COMPANY --> FILTERS
   SCORE -->|"you approve the lead"| DOSSIER
   CHECKS -->|"Up next: you approve, edit or skip"| SENT["sent on LinkedIn"]
+  SENT -->|"a reply"| LABEL
 ```
 
 ### Building it
@@ -248,6 +263,7 @@ flowchart TB
     O1["organizations, subscriptions"]
     O2["credit_balances, credit_grants, credit_usage"]
     O3["provider keys, the agent-sending setting, the deny list"]
+    O4["group_companies: a sharing group's company facts"]
   end
   subgraph W["Workspace: everything else, RLS fails closed"]
     W1["persons, leads, lists, suppression_entries"]
@@ -276,7 +292,8 @@ erDiagram
   persons ||--o{ contact_points : "has"
   persons ||--o| leads : "becomes"
   persons }o--o| workspace_companies : "works at"
-  workspace_companies }o--|| companies : "global index"
+  workspace_companies }o--o| companies : "global index"
+  companies ||--o{ group_companies : "a sharing group's facts"
   leads ||--o{ score_snapshots : "scored"
   score_snapshots ||--o{ criterion_verdicts : "per criterion"
   leads ||--o{ review_decisions : "labeled"
@@ -538,21 +555,23 @@ core/
     api/             NestJS: mounts every module's API
     worker/          Temporal: registers every module's workflows, runs the agents
   modules/           one folder per feature, all the same shape
-    tenancy/         users, organizations, workspaces and memberships
-    identity/        invite-only sign-in
-    onboarding/      Company Knowledge
-    icp/             the ideal customer profile
-    signals/         signal sources (LinkedIn post engagers) and their runs
+    tenancy/         users, organizations, workspaces, memberships and roles
+    identity/        invite-only sign-in and the invites
+    onboarding/      Company Knowledge, from the website or documents
+    icp/             the audiences: ideal customer profiles
+    playbooks/       the agents: each with an audience, its sources and its campaign
+    signals/         signal sources (LinkedIn posts, web research) and their runs
     discovery/       lead import from a CSV file
-    contacts/        people, companies and leads; the review; the never-contact list
-    qualification/   hard filters, AI verdicts, the fit score and the tier
+    contacts/        people, companies and leads; the review; never-contact and exclusion lists
+    enrichment/      company facts from open data, websites and data providers
+    qualification/   hard filters, AI verdicts, the fit score, intent and the tier
     messaging/       the facts a draft may use, and the AI writer
     linkedin/        connected accounts, quotas, account health, kill switches
     approvals/       the "Up next" approval queue
-    campaigns/       the fixed sequence and the record of each step
-    inbox/           replies, which stop the sequence
-    credits/         the wallet, the plan and the metering
-    privacy/         erasure on request
+    campaigns/       campaigns, their versions and sequences, and the record of each step
+    inbox/           replies, their labels and the reply box; a reply stops the sequence
+    credits/         the wallet, the plan, the prices and the metering
+    privacy/         erasure on request, and the 30-day rule
     _template/       the shape `pnpm module:new` copies
   packages/          what every module uses
     platform/        principal and permissions, config, ids, errors, logs, telemetry, i18n
@@ -580,7 +599,7 @@ pnpm stack:up      # the development stack, in Docker
 pnpm env:create    # this checkout's database, Temporal namespace, bucket and ports, in .env.local
 ```
 
-The LinkedIn and LLM ports start on their fakes. To use the real ones, set `PROVIDER_LINKEDIN=unipile` and `PROVIDER_LLM=anthropic` in `.env.local`, with their keys on the lines marked `# secret`. Then start each host in its own terminal: `pnpm -F api dev`, `pnpm -F worker dev` and `pnpm -F web dev`. `pnpm invite` invites the first user. `pnpm build`, `pnpm typecheck`, `pnpm lint` and `pnpm test` run across every package. [AGENTS.md](AGENTS.md) lists every command.
+The LinkedIn and LLM ports start on their fakes. To use the real ones, set `PROVIDER_LINKEDIN=unipile` and `PROVIDER_LLM=anthropic` (or `openai`) in `.env.local`, with their keys on the lines marked `# secret`; `pnpm unipile:webhooks` registers Unipile's webhooks. `deploy/.env.example` lists the other ports and their adapters. Then start each host in its own terminal: `pnpm -F api dev`, `pnpm -F worker dev` and `pnpm -F web dev`. `pnpm invite` invites the first user. `pnpm build`, `pnpm typecheck`, `pnpm lint` and `pnpm test` run across every package. [AGENTS.md](AGENTS.md) lists every command.
 
 **Self-hosting.** One Linux server with Docker runs Whytide from the same `compose.yaml`, in the `production` profile, with Caddy and automatic HTTPS. The steps are in [deploy/README.md](deploy/README.md), under "Production".
 
@@ -595,9 +614,11 @@ The LinkedIn and LLM ports start on their fakes. To use the real ones, set `PROV
 
 Whytide Core is source-available under the Business Source License 1.1. [LICENSE.md](LICENSE.md) is the binding text; in short:
 
-- Individuals and organizations with up to 3 employees and contractors, counting their affiliates, may use it in production for free. Larger organizations need a commercial license.
+- Individuals and organizations with up to 5 employees and contractors, counting their affiliates, may use it in production for free. Larger organizations need a commercial license.
 - Under this license, nobody may offer it, or a derivative of it, to third parties as a hosted or managed service.
 - Anyone may use it for evaluation, development and testing.
 - Each version becomes Apache 2.0 two years after its release.
 
 `ee/` is not part of Core and not under this license.
+
+https://www.whytide.com

@@ -33,7 +33,7 @@ export const errors = defineErrors({
    * `disconnected`, its reference cleared, and the activity answers it as a result, never retried.
    */
   sender_account_in_use: { status: 409 },
-  /** reserveSend's refusal: the account's three invitations with a note in 30 days are used; with when the oldest leaves them. 429. */
+  /** reserveSend's refusal: the account's LINKEDIN_INVITE_NOTES_PER_MONTH notes in 30 days are used; with when the oldest leaves them. 429. */
   invite_note_budget: { status: 429 },
   /** reserveSend's refusal: the day's connection requests, reserved and made, reach its limit; with the next quota day's start. 429. */
   invite_cap_reached: { status: 429 },
@@ -88,4 +88,8 @@ export const errors = defineErrors({
   reconnect_required: { status: 409 },
   /** The owner's resume with no status checked after the cool-down's end, or one more than 10 minutes old: Check status first. 409. */
   status_check_required: { status: 409 },
+  /** readCompany outside the worker, where no account's reference can be opened (gamma-en-060). 500. */
+  company_read_unavailable: { status: 500 },
+  /** readContactEmails outside the worker, where no account's reference can be opened (gamma-en-087). 500. */
+  contact_read_unavailable: { status: 500 },
 });

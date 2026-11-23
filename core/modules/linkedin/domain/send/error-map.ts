@@ -2,11 +2,26 @@
 // its slot and to the account's retry_at (linkedin's, beta-p1-050), to its credits and its step
 // (campaigns', beta-p4-020 and beta-p4-040), and to the account's health (beta-p6-010's). A frozen
 // constant; sendAnswerOf finds an answer's row, a code the port does not have being an unmapped one.
-import { ACCOUNT_COOLDOWN_MS, PROVIDER_ERROR_PAUSE_MS } from "./constants.ts";
+import {
+  ACCOUNT_COOLDOWN_MS,
+  PROVIDER_ERROR_PAUSE_MS,
+  SEND_REFUSED_REASONS,
+  type SendRefusedReason,
+} from "./constants.ts";
+
+const [ALREADY_CONNECTED] = SEND_REFUSED_REASONS;
 
 export type SendEffect = {
-  /** Committed, released, kept until linkedin_check_sent answers, or committed already. */
-  readonly slot: "commit" | "release" | "keep_until_checked" | "already_committed";
+  /**
+   * Committed, committed with no invitation pending (an invite's count left as it is), released,
+   * kept until linkedin_check_sent answers, or committed already.
+   */
+  readonly slot:
+    | "commit"
+    | "commit_not_pending"
+    | "release"
+    | "keep_until_checked"
+    | "already_committed";
   /** Committed, released, settled as the slot is, or settled as sent once the check says so. */
   readonly credits: "commit" | "release" | "as_slot" | "as_sent_after_check";
   readonly step: StepEffect;
@@ -25,6 +40,11 @@ export type StepEffect =
     }
   /** Failed for good: `exit`, the enrollment's exit reason; `defect`, a call off the port's schema. */
   | { readonly status: "failed"; readonly exit: "send_refused" | null; readonly defect: boolean }
+  /**
+   * Not needed: nothing went out and nothing will, `reason` the step's skip reason; the enrollment
+   * goes on (connect-already-connected: an invitation to a connection, the first message next).
+   */
+  | { readonly status: "skipped"; readonly reason: "already_connected" }
   /**
    * Left executing and checked after the pause (linkedin_check_sent): went out, succeeded; did not,
    * rescheduled; never retried in a loop.
@@ -85,6 +105,17 @@ export const SEND_ERROR_MAP = frozen({
   // A webhook's code, which no send answers: unknown, as an unmapped one is.
   linkedin_webhook_invalid: OUTCOME_UNKNOWN,
   linkedin_send_refused: SEND_REFUSED,
+  /**
+   * An invitation LinkedIn refused because its person is a connection already
+   * (connect-already-connected): the slot counts, as for any call LinkedIn saw, with no invitation
+   * pending; the credits released; the step skipped, and the enrollment goes on to the first message.
+   */
+  "linkedin_send_refused:already_connected": {
+    slot: "commit_not_pending",
+    credits: "release",
+    step: { status: "skipped", reason: "already_connected" },
+    account: null,
+  },
   linkedin_not_found: SEND_REFUSED,
   linkedin_limit_reached: {
     slot: "commit",
@@ -131,16 +162,24 @@ export type SendAnswer = keyof SendErrorMap;
 /**
  * The map's key for an answer: `success`, `refused_before_call`, `committed_repeat`, or the error's
  * code, linkedin_account_disconnected with its `details.reason` when that is `checkpoint` or
- * `restricted`; a code the map does not have is linkedin_error_unmapped's.
+ * `restricted`, and linkedin_send_refused with `already_connected` for an invite (`actionType`)
+ * only; a code the map does not have is linkedin_error_unmapped's.
  */
-export function sendAnswerOf(code: string, reason?: unknown): SendAnswer {
+export function sendAnswerOf(code: string, reason?: unknown, actionType?: string): SendAnswer {
   if (code === "linkedin_account_disconnected") {
     if (reason === "checkpoint") return "linkedin_account_disconnected:checkpoint";
     if (reason === "restricted") return "linkedin_account_disconnected:restricted";
     return code;
   }
+  if (code === "linkedin_send_refused" && reason === ALREADY_CONNECTED && actionType === "invite") {
+    return "linkedin_send_refused:already_connected";
+  }
   return isSendAnswer(code) ? code : "linkedin_error_unmapped";
 }
+
+/** The reason an answer names beside its code (SEND_REFUSED_REASONS): its key's, else none. */
+export const refusedReasonOf = (answer: SendAnswer): SendRefusedReason | undefined =>
+  answer === "linkedin_send_refused:already_connected" ? ALREADY_CONNECTED : undefined;
 
 const isSendAnswer = (code: string): code is SendAnswer => Object.hasOwn(SEND_ERROR_MAP, code);
 

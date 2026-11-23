@@ -2,12 +2,13 @@
 // slice's Temporal and a schema of its database: the host started with credits, linkedin and signals,
 // on the LinkedIn and files fakes set here before the providers load, its outbox loop delivering
 // signals' events to their subscribers, and its canceller bound to cancelWorkflow. A run started under
-// a known id, as a schedule starts one, records that id at its start; asleep on the read cap, a stop
-// asked as the route asks it (stopRun, in a tenant run) cancels it by that id, and it ends cancelled;
-// a run stopped while still scheduled ends cancelled at its start, before any read; deleting a source
-// cancels its waiting run. linkedin's clock (useClock) holds a past working day at 10:00 UTC, so a
-// refusal for the cap waits a second at a time (signals-run.test.ts). Pages cost no credits
-// (beta-p1-090): a run stopped before any profile read holds none.
+// a known id, as a schedule starts one, records that id at its start; asleep outside its account's
+// working hours, a stop asked as the route asks it (stopRun, in a tenant run) cancels it by that id,
+// and it ends cancelled; a run stopped while still scheduled ends cancelled at its start, before any
+// read; deleting a source cancels its waiting run. linkedin's clock (useClock) holds a past Saturday
+// at 10:00 UTC, so a refusal for the hours waits a second at a time (signals-run.test.ts); a run no
+// longer waits on the cap, which ends its day of reading (gamma-p5-040). A run stopped before any
+// read holds no read and no credit.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
@@ -37,7 +38,7 @@ const sources: Sources = await built("signals/dist/domain/sources.js");
 const linkedin: LinkedinTesting = await built("linkedin/dist/testing/index.js");
 const tenancy: TenancyTesting = await built("tenancy/dist/testing/index.js");
 type LinkedinFake = import("@whytide/providers").LinkedinFake;
-type Engager = import("@whytide/providers").Engager;
+type Engager = import("@whytide/providers").FakeEngager;
 type WorkerHost = import("../src/start.ts").WorkerHost;
 
 withTestDb();
@@ -49,7 +50,7 @@ tenancy.useTenancyClient(db());
 linkedin.useSecretKeys(loadMasterKeys({ APP_MASTER_KEY: newMasterKey() }));
 const log = createLogger({ destination: collectLogs().destination });
 const fake = (await getAdapter(linkedinPort, "fake")) as unknown as LinkedinFake;
-const WEDNESDAY = new Date("2026-10-07T10:00:00.000Z");
+const SATURDAY = new Date("2026-10-10T10:00:00.000Z");
 const cancelled = { message: "Workflow execution cancelled" };
 let host: WorkerHost;
 
@@ -58,7 +59,7 @@ before(async () => {
   const modules = moduleLoaders.filter(({ name }) => names.has(name));
   const taskQueue = `test-${randomUUID()}`;
   host = await start({ modules, taskQueue, healthPort: 0, client: db(), log, schedules: "off" });
-  linkedin.useClock(() => WEDNESDAY);
+  linkedin.useClock(() => SATURDAY);
 });
 after(async () => {
   linkedin.useClock(undefined);
@@ -90,8 +91,8 @@ const engagers = (count: number): Engager[] =>
   }));
 
 /**
- * A workspace with credits, a connected account the fake knows that reads one page a day, and a
- * source on a post of 30 engagers it seeds: a run reads the first page, then waits for the cap.
+ * A workspace with credits, a connected account the fake knows, and a source on a post of 30 engagers
+ * it seeds: on the Saturday, a run waits for the account's window before its first read.
  */
 async function sourceOf() {
   const price = (action: string, unit: string) => ({
@@ -108,7 +109,6 @@ async function sourceOf() {
   const providerAccountRef = `fake-account-${randomUUID()}`;
   fake.emitWebhook("account.connected", providerAccountRef);
   const account = await linkedin.createConnectedAccount(workspaceId, { providerAccountRef });
-  await db().senderAccount.update({ where: { id: account.id }, data: { dailyReadCap: 1 } });
   const postUrl = `https://www.linkedin.com/feed/update/urn:li:activity:${Date.now()}`;
   fake.seedPost(postUrl, engagers(30));
   const source = await db().signalSource.create({
@@ -126,9 +126,9 @@ async function sourceOf() {
 }
 type Source = Awaited<ReturnType<typeof sourceOf>>;
 
-/** The source's run started as its schedule starts one, under a known id, waiting for the cap. */
+/** The source's run started as its schedule starts one, under a known id, waiting for the window. */
 async function waitingRun(source: Source) {
-  const workflowId = `signals-${source.sourceId}-2026-10-07T10:00:00Z`;
+  const workflowId = `signals-${source.sourceId}-2026-10-10T10:00:00Z`;
   const handle = await env.client.workflow.start("signals_run", {
     args: [{ workspaceId: source.workspaceId, sourceId: source.sourceId }],
     taskQueue: host.taskQueue,
@@ -158,7 +158,7 @@ async function stateOf(source: Source, runId: string) {
   };
 }
 
-test("a run started under a known id records it; asleep on the cap, a stop asked as the route asks it cancels that workflow and the run ends cancelled, its page read free and nothing left reserved", async () => {
+test("a run started under a known id records it; asleep outside the working hours, a stop asked as the route asks it cancels that workflow and the run ends cancelled, nothing read and nothing left reserved", async () => {
   const source = await sourceOf();
   const { workflowId, handle, row } = await waitingRun(source);
   assert.equal(row.workflowId, workflowId);
@@ -173,7 +173,7 @@ test("a run started under a known id records it; asleep on the cap, a stop asked
   );
   assert.deepEqual(state.row?.stopRequestedAt, stopped.stopRequestedAt);
   assert.equal(state.staged, 0);
-  assert.deepEqual(state.reads, [[1, 1, "committed"]]);
+  assert.deepEqual(state.reads, []);
   assert.deepEqual(state.credits, []);
 });
 
@@ -204,13 +204,13 @@ test("a run stopped while still scheduled ends cancelled when its workflow start
   assert.deepEqual([state.reads, state.credits], [[], []]);
 });
 
-test("deleting a source whose run waits for the cap cancels that run's workflow", async () => {
+test("deleting a source whose run waits for the window cancels that run's workflow", async () => {
   const source = await sourceOf();
   const { handle, row } = await waitingRun(source);
   await inRun(source.workspaceId, () => sources.deleteSource(source.sourceId));
   await assert.rejects(handle.result(), cancelled);
   const state = await stateOf(source, row.id);
   assert.equal(state.row, null);
-  assert.deepEqual(state.reads, [[1, 1, "committed"]]);
+  assert.deepEqual(state.reads, []);
   assert.deepEqual(state.credits, []);
 });

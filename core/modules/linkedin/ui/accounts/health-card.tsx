@@ -146,7 +146,8 @@ export function HealthCard({ workspaceId, account, onChange }: Props) {
   };
   const when = (iso: string) =>
     format.dateTime(new Date(iso), { ...WHEN, timeZone: account.timeZone });
-  const owner = account.mine && account.canManage;
+  // The buttons are the account's owner's, whatever their role (gamma-p6-070).
+  const owner = account.mine;
   const checking = check !== undefined;
 
   function body(h: HealthResponse) {

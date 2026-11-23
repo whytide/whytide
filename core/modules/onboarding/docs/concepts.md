@@ -9,6 +9,6 @@
 - **Draft from website**: the press that reads the website and, from alpha-p4-030, drafts the record from it; each Draft is a run (`draftRunId`), and the latest one wins.
 - **Website page**: a page a run read, with its address, time, title and text, `truncated` when cut at a bound.
 - **Document**: a PDF, text or Markdown file of the company's own that an engineer gives the script `pnpm knowledge:draft` with a Draft; the drafter reads its text after the pages, and a value from it cites `document:<name>`, shown as the name.
-- **Stuck run**: a run still `fetching` or `fetched` with the record unchanged for more than ten minutes; the screen stops asking for the record and offers Draft again (docs/runbook.md).
+- **Stuck run**: a run still `fetching` or `fetched` with the record unchanged for more than twenty minutes, longer than a fetch and a drafter's attempt; the screen stops asking for the record and offers Draft again (docs/runbook.md).
 - **Last change**: the field source written last, its time and its kind, which the screen shows as "Last changed … by …".
 - **Version**: 1 when the record is created, one more with every save that changes it; `onboarding.company_knowledge_updated` carries it.

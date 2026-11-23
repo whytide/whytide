@@ -1,32 +1,48 @@
-// "Up next" in the browser (page.tsx gives it the first read): the header with the counters of the
-// last read; the rows (item.tsx) grouped as "Overdue", the stale ones, then by the local day and hour
-// they are due in their sender's zone, in the api's order; the empty state; a read that failed, its
-// code in words with Try again. The queue is read again (GET …/approvals/items, the last read
-// winning) after each decision, and every POLL_MS while a row's draft is being written, until it has
-// been drafting POLL_MAX_MS since its step opened: then a note says so, with Check again, which reads
-// it once more. A failed read shows its code in words, its module's (src/api/errors.ts errorOwner),
-// with Try again. A toast says what a decision did.
+// "Up next" in the browser (page.tsx gives it the first read): the header with the member's totals
+// of the last read; their own rows (item.tsx) grouped as "Overdue", the stale ones, then by the local
+// day and hour they are due in their sender's zone, in the api's order; with two senders or more,
+// one section per sender first, titled with its label and zone and its two counters (gamma-p6-050);
+// the empty state, which says to connect a LinkedIn account to a member with no sender; a read that
+// failed, its code in words with Try again. The queue is read again (GET …/approvals/items, the last
+// read winning) after each decision, and every POLL_MS while a row's draft is being written, until it
+// has been drafting POLL_MAX_MS since its step opened: then a note says so, with Check again, which
+// reads it once more. A failed read shows its code in words, its module's (src/api/errors.ts
+// errorOwner), with Try again. A toast says what a decision did. The channels' AI disclosure lines,
+// which the page rendered, go to the rows the campaign's mode will approve (gamma-p4-090).
 "use client";
 
-import { Button, EmptyState, ErrorState, Toast } from "@whytide/ui";
-import { Hourglass, RefreshCw } from "@whytide/ui/icons";
+import { Badge, Button, ButtonLink, EmptyState, ErrorState, Toast } from "@whytide/ui";
+import {
+  BriefcaseBusiness,
+  CircleCheck,
+  Hourglass,
+  ListChecks,
+  RefreshCw,
+} from "@whytide/ui/icons";
 import { ApiError, browserApi, data, errorOwner } from "@whytide/web/api/browser";
 import { useFormatter, useMessages, useTranslations } from "next-intl";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ItemResponse, ItemsResponse } from "../../schemas/items.ts";
 import { GROUP_FORMAT, MS_PER_MINUTE, POLL_MAX_MS, POLL_MS, TOAST_MS } from "./constants.ts";
 import { Header } from "./header.tsx";
-import { Item, isDrafting, zoneOf } from "./item.tsx";
+import { Item, isDrafting, type Lines, zoneOf } from "./item.tsx";
 
 /** The first read's answer, or the digest of its refusal (`api:<code>`, src/api/errors.ts). */
-type Props = { workspace: string } & ({ first: ItemsResponse } | { failed: string });
+type Props = { workspace: string; lines: Lines } & ({ first: ItemsResponse } | { failed: string });
 type Group = { readonly key: string; readonly heading: string; readonly items: ItemResponse[] };
+type Sender = ItemsResponse["senders"][number];
+
+/** The id a sender goes by, the answer's or a row's: its mailbox's, else its account's. */
+const senderOf = ({ accountId, mailboxId }: Pick<Sender, "accountId" | "mailboxId">) =>
+  mailboxId ?? accountId ?? "";
+const rowSender = (item: ItemResponse) =>
+  senderOf({ accountId: item.sender?.accountId ?? null, mailboxId: item.mailboxId });
 
 const digestOf = (error: unknown) =>
   error instanceof ApiError ? error.digest : new ApiError(500, undefined).digest;
 
 export function Queue(props: Props) {
-  const { workspace } = props;
+  const { workspace, lines } = props;
   const t = useTranslations("approvals.up_next");
   const format = useFormatter();
   const messages = useMessages();
@@ -103,19 +119,79 @@ export function Queue(props: Props) {
 
   const heading = (item: ItemResponse) =>
     format.dateTime(new Date(item.scheduledFor), { ...GROUP_FORMAT, timeZone: zoneOf(item) });
-  const groups = new Map<string, Group>();
-  const overdue: Group = { key: "overdue", heading: t("group.overdue"), items: [] };
-  for (const item of queue.items) {
-    if (item.stale) {
-      overdue.items.push(item);
-      continue;
+  /** The rows as "Overdue" first, then by the local day and hour they are due, in the api's order. */
+  const groupsOf = (items: readonly ItemResponse[], prefix: string): Group[] => {
+    const groups = new Map<string, Group>();
+    const overdue: Group = { key: `${prefix}overdue`, heading: t("group.overdue"), items: [] };
+    for (const item of items) {
+      if (item.stale) {
+        overdue.items.push(item);
+        continue;
+      }
+      const at = heading(item);
+      const group = groups.get(at) ?? { key: `${prefix}at-${groups.size}`, heading: at, items: [] };
+      group.items.push(item);
+      groups.set(at, group);
     }
-    const at = heading(item);
-    const group = groups.get(at) ?? { key: `at-${groups.size}`, heading: at, items: [] };
-    group.items.push(item);
-    groups.set(at, group);
-  }
-  const shown = [...(overdue.items.length > 0 ? [overdue] : []), ...groups.values()];
+    return [...(overdue.items.length > 0 ? [overdue] : []), ...groups.values()];
+  };
+  // One sender's rows show as the page always showed them; two or more get a section each.
+  const nested = queue.senders.length > 1;
+  const rows = (group: Group) => {
+    const Heading = nested ? "h3" : "h2";
+    return (
+      <section
+        key={group.key}
+        aria-labelledby={`${id}-${group.key}`}
+        className="grid min-w-0 gap-3"
+      >
+        <Heading id={`${id}-${group.key}`} className="text-sm font-semibold text-ink-muted">
+          {group.heading}
+        </Heading>
+        <ul className="grid min-w-0 gap-3">
+          {group.items.map((item) => (
+            <Item
+              key={item.id}
+              workspace={workspace}
+              item={item}
+              lines={lines}
+              nested={nested}
+              onDecided={decided}
+            />
+          ))}
+        </ul>
+      </section>
+    );
+  };
+  const section = (sender: Sender, index: number) => {
+    const key = `sender-${index}`;
+    const own = queue.items.filter((item) => rowSender(item) === senderOf(sender));
+    const title = t("sender.title", { label: sender.label, zone: sender.timeZone });
+    return (
+      <section key={key} aria-labelledby={`${id}-${key}`} className="grid min-w-0 gap-6">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <h2 id={`${id}-${key}`} className="font-semibold wrap-break-word text-ink">
+            {title}
+          </h2>
+          <Badge tone="accent">
+            <ListChecks aria-hidden="true" />
+            {t("sender.to_approve", { count: sender.toApprove })}
+          </Badge>
+          <Badge tone="success">
+            <CircleCheck aria-hidden="true" />
+            {t("sender.decided_today", { count: sender.decidedToday })}
+          </Badge>
+        </div>
+        {groupsOf(own, `${key}-`).map(rows)}
+      </section>
+    );
+  };
+  const connect = (
+    <ButtonLink href={`/w/${workspace}/linkedin`}>
+      <BriefcaseBusiness aria-hidden="true" />
+      {t("empty.connect")}
+    </ButtonLink>
+  );
 
   return (
     <>
@@ -140,29 +216,16 @@ export function Queue(props: Props) {
           </Button>
         </div>
       )}
-      {queue.items.length === 0 ? (
-        <EmptyState message={t("empty")} />
+      {queue.senders.length === 0 ? (
+        <EmptyState message={t("empty.no_sender")} action={connect} />
+      ) : queue.items.length === 0 ? (
+        <EmptyState message={t("empty.no_steps")} />
       ) : (
         <div
           aria-busy={busy || undefined}
           className="grid gap-8 transition-opacity duration-150 aria-busy:opacity-60"
         >
-          {shown.map((group) => (
-            <section
-              key={group.key}
-              aria-labelledby={`${id}-${group.key}`}
-              className="grid min-w-0 gap-3"
-            >
-              <h2 id={`${id}-${group.key}`} className="text-sm font-semibold text-ink-muted">
-                {group.heading}
-              </h2>
-              <ul className="grid min-w-0 gap-3">
-                {group.items.map((item) => (
-                  <Item key={item.id} workspace={workspace} item={item} onDecided={decided} />
-                ))}
-              </ul>
-            </section>
-          ))}
+          {nested ? queue.senders.map(section) : groupsOf(queue.items, "").map(rows)}
         </div>
       )}
       <Toast message={toast} />

@@ -4,7 +4,9 @@
 // upserts it; the tick, whose starts reach a starter bound here; each workspace's reduction; and
 // `pnpm evidence:reduce`. The harness has no time skipping (README "Testing"), so the evidence is
 // captured 31 and 29 days before the reduction runs. The reduced rows are those alpha-p8-050's
-// panel spec seeds: URL, author, reaction and captured_at kept, excerpt and comment null, reduced_at.
+// panel spec seeds: URL, author, reaction and captured_at kept, excerpt and comment null, reduced_at;
+// the post's excerpt, someone else's words (gamma-p5-020), null too, and the event's rating's
+// rationale, its relevance and class kept (gamma-p5-030).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { asRole, withTestDb } from "@whytide/db/testing";
@@ -44,16 +46,19 @@ const activities = Object.fromEntries(
 );
 const DAY_MS = 86_400_000;
 const WORDS = "Exactly our problem.";
+const POST_WORDS = "The post this comment answers.";
 /** The post and the author signals' factory writes. */
 const POST = "https://www.linkedin.com/feed/update/urn:li:activity:7250000000000000009";
 const AUTHOR = "Test Engager";
+const RATING = { relevance: 0.7, intentClass: "pain_or_complaint", rationale: "Names the pain." };
 
 /** `count` comments in the workspace, each with its event and evidence, captured `days` ago. */
 async function captured(workspaceId: string, count: number, days: number): Promise<Date> {
   const occurredAt = new Date(Date.now() - days * DAY_MS);
   for (let n = 0; n < count; n += 1) {
     const personId = `per_${days}_${n}`;
-    await createSignalEvent({ workspaceId, personId, occurredAt, commentText: WORDS });
+    const words = { commentText: WORDS, postExcerpt: POST_WORDS, rating: RATING };
+    await createSignalEvent({ workspaceId, personId, occurredAt, ...words });
   }
   return occurredAt;
 }
@@ -67,6 +72,7 @@ async function evidenceOf(workspaceId: string) {
     capturedAt: row.capturedAt.toISOString(),
     excerpt: row.excerpt,
     commentText: row.commentText,
+    postExcerpt: row.postExcerpt,
     reduced: row.reducedAt !== null,
   }));
 }
@@ -74,17 +80,19 @@ const reduced = (at: Date) => ({
   capturedAt: at.toISOString(),
   excerpt: null,
   commentText: null,
+  postExcerpt: null,
   reduced: true,
 });
 const kept = (at: Date) => ({
   capturedAt: at.toISOString(),
   excerpt: WORDS,
   commentText: WORDS,
+  postExcerpt: POST_WORDS,
   reduced: false,
 });
 const reduce = (start: WorkflowStart) => runWorkflow(start.workflow, start.input, { activities });
 
-test("the daily tick starts every workspace's signals_evidence_reduction, one at a time by signals.evidence_reduction:<workspace>:current; each reduces its own evidence captured 31 days ago, a batch of 500 at a time, keeping URL, author, reaction and captured_at, dropping excerpt and comment, setting reduced_at, and leaves the evidence of 29 days ago untouched", async () => {
+test("the daily tick starts every workspace's signals_evidence_reduction, one at a time by signals.evidence_reduction:<workspace>:current; each reduces its own evidence captured 31 days ago, a batch of 500 at a time, keeping URL, author, reaction and captured_at, dropping excerpt, comment and the post's excerpt, setting reduced_at, and leaves the evidence of 29 days ago untouched", async () => {
   const schedule = loaded.schedules.find(({ id }) => id === "signals.evidence_reduction");
   assert.deepEqual(schedule, {
     id: "signals.evidence_reduction",
@@ -115,6 +123,15 @@ test("the daily tick starts every workspace's signals_evidence_reduction, one at
 
   assert.deepEqual(await reduce(reductionStart(one)), { reduced: 501 });
   assert.deepEqual(await evidenceOf(one), [...Array(501).fill(reduced(old)), kept(recent)]);
+  const events = await db().signalEvent.findMany({
+    where: { workspaceId: one },
+    orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+  });
+  const rating = (rationale: string | null) => [0.7, "pain_or_complaint", rationale];
+  assert.deepEqual(
+    events.map((event) => [event.relevance, event.intentClass, event.relevanceRationale]),
+    [...Array(501).fill(rating(null)), rating(RATING.rationale)],
+  );
   assert.deepEqual(await evidenceOf(two), [kept(other)]);
   assert.deepEqual(await reduce(reductionStart(two)), { reduced: 1 });
   assert.deepEqual(await evidenceOf(two), [reduced(other)]);

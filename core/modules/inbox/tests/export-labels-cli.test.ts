@@ -2,7 +2,8 @@
 // function against the worktree's database, in a schema of its own (withTestDb), the files port on its
 // fake, at a fixed instant, a Wednesday. Two workspaces, their leads made by contacts' commands, their
 // threads, messages and labels as the store and the label leave them (testing/): a line per workspace
-// and the totals across both, a tester counted once; one workspace by slug or id; --week; the
+// and the totals across both, a tester counted once, each file every member's threads, where the
+// route's holds the caller's own only (gamma-p6-060); one workspace by slug or id; --week; the
 // refusals, which write nothing; the usage. Made-up names only.
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
@@ -163,7 +164,7 @@ async function listed(tenant: TestTenant): Promise<string[]> {
   return listing.map(({ key }) => key);
 }
 
-test("every workspace: a line each with its file, its lines and its positives, then the totals, a tester counted once across workspaces; each file holds its workspace's replies only", async () => {
+test("every workspace: a line each with its file, its lines and its positives, then the totals, a tester counted once across workspaces; each file holds its workspace's replies only, both members' threads", async () => {
   const { a, b, ours, theirs } = await seeded();
   const { code, lines } = await run();
   assert.equal(code, 0);
@@ -178,6 +179,7 @@ test("every workspace: a line each with its file, its lines and its positives, t
   const hashed = (persons: Map<string, string>, first: string) => sha256(persons.get(first) ?? "");
   const linesOf = async (tenant: TestTenant) =>
     (await stored(tenant, keyOf(tenant, TODAY))).map((line) => [line.person_sha256, line.label]);
+  // T2's Bramwell and T1's Ottoline: the operator's file holds both members' threads.
   assert.deepEqual(await linesOf(a), [
     [hashed(ours, "Bramwell"), "positive"],
     [hashed(ours, "Ottoline"), "positive"],

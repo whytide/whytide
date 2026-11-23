@@ -1,0 +1,41 @@
+# icp's draft routes (core/modules/icp/README.md "Routes", "The draft"): the ICP drafted by the worker
+# from Company Knowledge and a brief, then used or discarded on the ICP screen. The draft, the accept
+# and the discard are idempotent: each Idempotency-Key is an example UUID; another one makes a new
+# request, the same one answers the first answer again for a day. Without a drafted proposal, the
+# accept and the discard answer 409 icp_draft_none. The accept sends the proposal's run, GET's
+# pending.runId, as {{draftRunId}} from the private file: another run's is icp_draft_none too. A write
+# sends the cookie, so it sends Origin: {{appOrigin}} too (the api's origin check). Each route acts on
+# the default audience; `?icpId=<id>` after its path names another of the workspace's (gamma-p3-020),
+# and an id the workspace does not hold is 404 icp_not_found.
+
+### GET /v1/workspaces/{workspaceId}/icp/draft: the latest draft, its proposal and whether Company Knowledge has a field
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/draft
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/icp/draft: drafts from Company Knowledge and the brief; 202, drafting
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/draft
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000401
+
+{ "brief": "Small logistics firms in France that ship parcels every day." }
+
+### POST /v1/workspaces/{workspaceId}/icp/draft/accept: saves the drafted name and targeting; replace also over targeting
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/draft/accept
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000402
+
+{ "replace": false, "runId": "{{draftRunId}}" }
+
+### POST /v1/workspaces/{workspaceId}/icp/draft/discard: discards the drafted proposal; the ICP keeps every field
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/draft/discard
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000403

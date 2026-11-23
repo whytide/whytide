@@ -1,25 +1,34 @@
 // The LinkedIn port's contract (README.md "The contract suite"): what every adapter does, run by
 // each adapter's tests/contract.test.ts with a LinkedinWorld, the adapter's side of the cases: how
-// a user connects through a hosted link, a post and a profile the account can read, the vendor's
+// a user connects through a hosted link, a post and a profile the account can read (a 1st-degree
+// connection's too, connect-already-connected), the vendor's
 // signed webhooks and, when the vendor can be made to send one, its rate limit; for the send cases,
 // a member to invite or a relation to message, and a disconnected account; for the event cases, a
-// signed event of each kind (README.md "Events"). The fake's world seeds all of it; a vendor's world
-// points at its sandbox, and a case skips where it gives no recipient, no events or none of a kind
-// the vendor never sends. A run sends at most one invitation, withdrawn at once, and one message.
+// signed event of each kind (README.md "Events"); for the post cases, the account's sources of posts
+// (README.md "Posts"); for the company case, a company page and what getCompany answers for it
+// (README.md "Company pages"); for the contact case, a 1st-degree connection's member ref and the
+// addresses getContactEmails answers for it (README.md "What the port will never have", the owner's
+// exception of 2026-11-13). The fake's world seeds all of it; a vendor's world points at its sandbox, and
+// a case skips where it gives no recipient, no events, none of a kind the vendor never sends or no
+// posts. A run sends at most one invitation, withdrawn at once, and one message.
 import assert from "node:assert/strict";
 import type { TestContext } from "node:test";
 import { isAppError } from "@whytide/platform";
 import type { PortInstance } from "../_pattern/index.ts";
 import type { ContractCases } from "../testing/index.ts";
+import { CONTACT_EMAILS_MAX, POST_EXCERPT_MAX_CHARS } from "./constants.ts";
 import {
   type HostedAuthLink,
   LINKEDIN_DISCONNECT_REASONS,
   LINKEDIN_WEBHOOK_KINDS,
+  type LinkedinCompany,
   type LinkedinWebhook,
   type LinkedinWebhookEvent,
   type linkedinPort,
   type PendingInvite,
+  type PostsPage,
   type Profile,
+  postExcerpt,
 } from "./port.ts";
 
 type Linkedin = PortInstance<typeof linkedinPort>;
@@ -48,8 +57,51 @@ export const RETURN_URLS = {
 const SKEW_MS = 60_000;
 /** A post no account can see. */
 const UNKNOWN_POST = "https://www.linkedin.com/feed/update/urn:li:activity:1000000000000000000/";
-/** Pages of pending invitations read at most: a cursor that loops stops here. */
+/** Pages of pending invitations or of posts read at most: a cursor that loops stops here. */
 const PAGES_AT_MOST = 50;
+/** Authors no account can see: a member's page and a company's. */
+/** An address's form, as a case checks it: a local part, an at sign, a dotted domain. */
+const EMAIL_FORM = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const UNKNOWN_AUTHORS = [
+  "https://www.linkedin.com/in/whytide-contract-no-such-member-0000",
+  "https://www.linkedin.com/company/whytide-contract-no-such-company-0000",
+] as const;
+/** A company page's keys, sorted: these at most, `companyUrl`, `name` and `fetchedAt` always. */
+const COMPANY_KEYS = [
+  "companyUrl",
+  "description",
+  "employeeCount",
+  "employeeRange",
+  "fetchedAt",
+  "foundedYear",
+  "headquartersCountry",
+  "industry",
+  "name",
+  "website",
+];
+/** A post's keys, and its author's by kind, sorted: exactly these. */
+const POST_KEYS = ["author", "excerpt", "postUrl", "postedAt"];
+const AUTHOR_KEYS = {
+  member: ["headline", "kind", "name", "profileUrl", "providerMemberRef"],
+  company: ["companyUrl", "kind", "name"],
+};
+
+/** A source of posts: its read's own input, and how many posts it gives at or after postedSince. */
+type PostSource<I> = I & { readonly count: number };
+/**
+ * The account's sources of posts, for the post cases. Each holds at least five posts at or after
+ * `postedSince`, so that a page of a third of them makes three pages, and may hold older ones; an
+ * absent source, and its case skips.
+ */
+export type LinkedinWorldPosts = {
+  readonly postedSince: Date;
+  readonly search?: PostSource<{ readonly phrase: string }>;
+  readonly member?: PostSource<{ readonly authorUrl: string }>;
+  readonly company?: PostSource<{ readonly authorUrl: string }>;
+  readonly own?: PostSource<object>;
+  /** An author whose newest post is longer than an excerpt, and that post's whole text. */
+  readonly long?: { readonly authorUrl: string; readonly text: string };
+};
 
 export type LinkedinWorld = {
   /** The user connects their own account through the link: the vendor's account.connected webhook. */
@@ -61,6 +113,11 @@ export type LinkedinWorld = {
     readonly profileUrl: string;
     readonly expected?: Omit<Profile, "fetchedAt">;
   }>;
+  /**
+   * The profile of a 1st-degree connection of the account; absent, or undefined for what the world
+   * cannot give, and the case skips.
+   */
+  connection?(providerAccountRef: string): Promise<{ readonly profileUrl: string } | undefined>;
   /** The vendor's webhook for the event, signed as the vendor signs it, or forged: signed otherwise. */
   webhook(event: AccountEvent, options?: { forged?: boolean }): Promise<LinkedinWebhook>;
   /**
@@ -82,6 +139,26 @@ export type LinkedinWorld = {
   ): Promise<string | undefined>;
   /** A disconnected account's ref; absent, and the disconnected-account case skips. */
   disconnected?(): Promise<string>;
+  /** The connected account's sources of posts; absent or undefined, and the post cases skip. */
+  posts?(providerAccountRef: string): Promise<LinkedinWorldPosts | undefined>;
+  /**
+   * A company page the account can read and, when the world knows it, what getCompany answers for
+   * it; absent, and the company cases skip.
+   */
+  company?(): Promise<{
+    readonly companyUrl: string;
+    readonly expected?: Omit<LinkedinCompany, "fetchedAt">;
+  }>;
+  /**
+   * A 1st-degree connection of the account who shows email addresses in "Contact info", a member
+   * who shows none, and, when the world knows them, the addresses getContactEmails answers for the
+   * first; absent, and the contact case skips (gamma-en-087).
+   */
+  contactEmails?(providerAccountRef: string): Promise<{
+    readonly memberRef: string;
+    readonly withoutRef: string;
+    readonly expected?: readonly string[];
+  }>;
 };
 
 /** The port code, and nothing of `absent` (a body's content) in its message or details. */
@@ -156,8 +233,209 @@ async function pendingInvites(linkedin: Linkedin, providerAccountRef: string) {
   return invites;
 }
 
+/** A post read, its query aside. */
+type PostRead = (query: {
+  readonly postedSince: Date;
+  readonly limit: number;
+  readonly cursor?: string;
+}) => Promise<PostsPage>;
+/** The post cases' reads, one case each. */
+const POST_READS = [
+  "searchPosts",
+  "listAuthorPosts, a member's",
+  "listAuthorPosts, a company page's",
+  "listOwnPosts",
+] as const;
+type PostReads = {
+  readonly [N in (typeof POST_READS)[number]]?:
+    | { readonly count: number; readonly read: PostRead }
+    | undefined;
+};
+
+/** The reads of the world's sources of posts; none where the world gives no source. */
+function postReads(
+  linkedin: Linkedin,
+  providerAccountRef: string,
+  { search, member, company, own }: LinkedinWorldPosts,
+): PostReads {
+  const by =
+    (authorUrl: string): PostRead =>
+    (query) =>
+      linkedin.listAuthorPosts({ providerAccountRef, authorUrl, ...query });
+  return {
+    searchPosts: search && {
+      count: search.count,
+      read: (query) =>
+        linkedin.searchPosts({ providerAccountRef, phrase: search.phrase, ...query }),
+    },
+    "listAuthorPosts, a member's": member && { count: member.count, read: by(member.authorUrl) },
+    "listAuthorPosts, a company page's": company && {
+      count: company.count,
+      read: by(company.authorUrl),
+    },
+    listOwnPosts: own && {
+      count: own.count,
+      read: (query) => linkedin.listOwnPosts({ providerAccountRef, ...query }),
+    },
+  };
+}
+
+/** Every page of a post read, from the first: each page's cursor reads the next. */
+async function pagesOf(read: (cursor?: string) => Promise<PostsPage>) {
+  const pages = [await read()];
+  for (let page = pages[0]; page?.nextCursor && pages.length < PAGES_AT_MOST; ) {
+    page = await read(page.nextCursor);
+    pages.push(page);
+  }
+  return pages;
+}
+
+/** The connected account and its sources of posts, or the case skips. */
+async function withPosts(linkedin: Linkedin, world: LinkedinWorld, t: TestContext) {
+  if (!world.posts) return undefined;
+  const { providerAccountRef } = (await connected(linkedin, world, t)).event;
+  const posts = await world.posts(providerAccountRef);
+  return posts && { providerAccountRef, posts };
+}
+
+/** One case per read: three pages newest first, a stable cursor, nothing before postedSince. */
+const postCases = (world: LinkedinWorld): ContractCases<typeof linkedinPort> =>
+  Object.fromEntries(
+    POST_READS.map((name) => [
+      `${name} posts page newest first over three pages with a stable cursor, none before postedSince`,
+      async (linkedin: Linkedin, t: TestContext) => {
+        const found = await withPosts(linkedin, world, t);
+        const source = found && postReads(linkedin, found.providerAccountRef, found.posts)[name];
+        if (!found || !source) return t.skip(`no posts for ${name} in this world`);
+        const { postedSince } = found.posts;
+        const limit = Math.ceil(source.count / 3);
+        const read = (cursor?: string) =>
+          source.read({ postedSince, limit, ...(cursor ? { cursor } : {}) });
+        const pages = await pagesOf(read);
+        assert.equal(pages.length, 3, "three pages");
+        assert.equal(pages.at(-1)?.nextCursor, null, "the page that reaches postedSince ends");
+        const all = pages.flatMap((page) => page.posts);
+        assert.equal(all.length, source.count);
+        assert.equal(new Set(all.map(({ postUrl }) => postUrl)).size, all.length, "each once");
+        const times = all.map(({ postedAt }) => postedAt.getTime());
+        assert.deepEqual(
+          times,
+          times.toSorted((a, b) => b - a),
+          "newest first",
+        );
+        assert.ok(
+          times.every((time) => time >= postedSince.getTime()),
+          "none before postedSince",
+        );
+        assert.deepEqual(await read(pages[0]?.nextCursor ?? undefined), pages[1], "read again");
+      },
+    ]),
+  );
+
 export const linkedinCases = (world: LinkedinWorld): ContractCases<typeof linkedinPort> => ({
   ...eventCases(world),
+  ...postCases(world),
+  "listAuthorPosts gives a member's posts by the member and a company page's by the company, each author with exactly its kind's fields":
+    async (linkedin, t) => {
+      const found = await withPosts(linkedin, world, t);
+      const { member, company, postedSince } = found?.posts ?? {};
+      if (!found || !member || !company || !postedSince) return t.skip("no authors in this world");
+      for (const [kind, { authorUrl }] of [
+        ["member", member],
+        ["company", company],
+      ] as const) {
+        const { posts } = await linkedin.listAuthorPosts({
+          providerAccountRef: found.providerAccountRef,
+          authorUrl,
+          postedSince,
+          limit: 10,
+        });
+        assert.ok(posts.length > 0, `${kind}: posts`);
+        for (const post of posts) {
+          assert.deepEqual(Object.keys(post).toSorted(), POST_KEYS);
+          assert.equal(post.author.kind, kind);
+          assert.deepEqual(Object.keys(post.author).toSorted(), AUTHOR_KEYS[kind]);
+        }
+      }
+    },
+  "an excerpt is the post's first 500 characters, an emoji at the edge whole or left out": async (
+    linkedin,
+    t,
+  ) => {
+    const found = await withPosts(linkedin, world, t);
+    const long = found?.posts.long;
+    if (!found || !long) return t.skip("no long post in this world");
+    const { posts } = await linkedin.listAuthorPosts({
+      providerAccountRef: found.providerAccountRef,
+      authorUrl: long.authorUrl,
+      postedSince: new Date(0),
+      limit: 1,
+    });
+    assert.ok(Array.from(long.text).length > POST_EXCERPT_MAX_CHARS, "a post longer than that");
+    const excerpt = posts[0]?.excerpt;
+    assert.ok(excerpt !== undefined, "the long post");
+    assert.ok(Array.from(excerpt).length <= POST_EXCERPT_MAX_CHARS && excerpt.isWellFormed());
+    assert.equal(excerpt, postExcerpt(long.text));
+  },
+  "an unknown author is linkedin_not_found, a member's page or a company's": async (
+    linkedin,
+    t,
+  ) => {
+    const found = await withPosts(linkedin, world, t);
+    if (!found) return t.skip("no posts in this world");
+    for (const authorUrl of UNKNOWN_AUTHORS) {
+      await assert.rejects(
+        linkedin.listAuthorPosts({
+          providerAccountRef: found.providerAccountRef,
+          authorUrl,
+          postedSince: found.posts.postedSince,
+          limit: 10,
+        }),
+        failsWith("linkedin_not_found"),
+      );
+    }
+  },
+  "getCompany returns a company page's business fields and no other": async (linkedin, t) => {
+    if (!world.company) return t.skip("no company page in this world");
+    const { providerAccountRef } = (await connected(linkedin, world, t)).event;
+    const { companyUrl, expected } = await world.company();
+    const before = Date.now();
+    const { fetchedAt, ...company } = await linkedin.getCompany({ providerAccountRef, companyUrl });
+    assert.ok(fetchedAt.getTime() >= before - 1000 && fetchedAt.getTime() <= Date.now());
+    const keys = Object.keys(company).toSorted();
+    assert.ok(
+      keys.every((key) => COMPANY_KEYS.includes(key)),
+      keys.join(),
+    );
+    assert.ok(company.name !== undefined && company.companyUrl !== undefined);
+    if (expected) assert.deepEqual(company, expected);
+  },
+  "an unknown company page is linkedin_not_found": async (linkedin, t) => {
+    if (!world.company) return t.skip("no company page in this world");
+    const { providerAccountRef } = (await connected(linkedin, world, t)).event;
+    await assert.rejects(
+      linkedin.getCompany({ providerAccountRef, companyUrl: UNKNOWN_AUTHORS[1] }),
+      failsWith("linkedin_not_found"),
+    );
+  },
+  "getContactEmails answers email addresses only, lower case, each once, three at most; a member who shows none, none":
+    async (linkedin, t) => {
+      if (!world.contactEmails) return t.skip("no contact info in this world");
+      const { providerAccountRef } = (await connected(linkedin, world, t)).event;
+      const { memberRef, withoutRef, expected } = await world.contactEmails(providerAccountRef);
+      const answer = await linkedin.getContactEmails({ providerAccountRef, memberRef });
+      assert.deepEqual(Object.keys(answer), ["emails"]);
+      const { emails } = answer;
+      assert.ok(emails.length <= CONTACT_EMAILS_MAX, emails.join());
+      assert.equal(new Set(emails).size, emails.length);
+      for (const address of emails) {
+        assert.equal(address, address.toLowerCase());
+        assert.ok(EMAIL_FORM.test(address), "an address");
+      }
+      if (expected) assert.deepEqual(emails, expected);
+      const none = await linkedin.getContactEmails({ providerAccountRef, memberRef: withoutRef });
+      assert.deepEqual(none, { emails: [] });
+    },
   "an event delivered twice gives the same eventKey; two messages give two keys": async (
     linkedin,
     t,
@@ -262,6 +540,14 @@ export const linkedinCases = (world: LinkedinWorld): ContractCases<typeof linked
     assert.ok(fetchedAt.getTime() >= before - 1000 && fetchedAt.getTime() <= Date.now());
     if (expected) assert.deepEqual(profile, expected);
   },
+  "getProfile says a 1st-degree connection is one: connected true": async (linkedin, t) => {
+    if (!world.connection) return t.skip("no connection's profile in this world");
+    const { providerAccountRef } = (await connected(linkedin, world, t)).event;
+    const found = await world.connection(providerAccountRef);
+    if (!found) return t.skip("no connection's profile in this world");
+    const profile = await linkedin.getProfile({ providerAccountRef, profileUrl: found.profileUrl });
+    assert.equal(profile.connected, true);
+  },
   "a signed webhook parses; a forged or unsigned one is linkedin_webhook_invalid": async (
     linkedin,
   ) => {
@@ -365,12 +651,20 @@ export const linkedinCases = (world: LinkedinWorld): ContractCases<typeof linked
     const providerAccountRef = await world.disconnected();
     const member = { providerAccountRef, memberRef: "contract-member" };
     const idempotencyKey = "contract-disconnected";
+    const since = { postedSince: new Date(0), limit: 10 };
     const calls = {
       listPostEngagers: () =>
         linkedin.listPostEngagers({ providerAccountRef, postUrl: UNKNOWN_POST, limit: 10 }),
       getRelation: () => linkedin.getRelation(member),
       listPendingInvites: () => linkedin.listPendingInvites({ providerAccountRef }),
       listRecentMessages: () => linkedin.listRecentMessages({ ...member, since: new Date() }),
+      searchPosts: () =>
+        linkedin.searchPosts({ providerAccountRef, phrase: "a contract phrase", ...since }),
+      listAuthorPosts: () =>
+        linkedin.listAuthorPosts({ providerAccountRef, authorUrl: UNKNOWN_AUTHORS[0], ...since }),
+      listOwnPosts: () => linkedin.listOwnPosts({ providerAccountRef, ...since }),
+      getCompany: () => linkedin.getCompany({ providerAccountRef, companyUrl: UNKNOWN_AUTHORS[1] }),
+      getContactEmails: () => linkedin.getContactEmails(member),
       sendInvite: () => linkedin.sendInvite({ ...member, idempotencyKey }),
       sendMessage: () => linkedin.sendMessage({ ...member, text: "Hello", idempotencyKey }),
       withdrawInvite: () =>

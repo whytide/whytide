@@ -7,13 +7,16 @@
 // `workspaceId`, or none with `scope: "global"`, a schedule names a workflow of its module and an
 // input its schema reads; anything else stops the start. The declarations only: which activities a
 // workflow calls is its code's. An `onWorkerStart` export of workflows/index.ts is awaited before
-// the worker polls (credits binds its client there).
+// the worker polls (credits binds its client there). An `alerts` export names the module's own events
+// that alert the team channel (README "Alerts"): each one registered and the module's, else the start
+// stops.
 import { relative, resolve } from "node:path";
 import {
   type ActivityDefinition,
   AppError,
   DEFAULT_TASK_QUEUE,
   type Logger,
+  registeredEvents,
   type ScheduleDefinition,
   type WorkflowRegistration,
 } from "@whytide/platform";
@@ -34,6 +37,8 @@ export type HostModules = {
   readonly activities: ReadonlyMap<string, ActivityDefinition>;
   readonly schedules: readonly HostSchedule[];
   readonly starts: readonly { readonly name: string; readonly onWorkerStart: WorkerStartHook }[];
+  /** The events the modules' `alerts` name, each its module's own. */
+  readonly alerts: readonly string[];
 };
 
 const NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
@@ -64,6 +69,7 @@ export async function loadModules(loaders: readonly ModuleLoader[]): Promise<Hos
   const activities = new Map<string, ActivityDefinition>();
   const schedules: HostSchedule[] = [];
   const starts: { name: string; onWorkerStart: WorkerStartHook }[] = [];
+  const alerts: string[] = [];
   const owners = new Map([["worker_smoke", "worker"]]);
   for (const { name, events, workflows: load } of loaders) {
     const invalid = (field: string, cause?: unknown) =>
@@ -112,13 +118,23 @@ export async function loadModules(loaders: readonly ModuleLoader[]): Promise<Hos
         throw invalid(`schedules.${String(schedule.id)}`);
       schedules.push({ ...schedule, id });
     }
+    const ownAlerts = (declared as Record<string, unknown>).alerts ?? [];
+    if (!Array.isArray(ownAlerts)) throw invalid("alerts");
+    for (const event of ownAlerts as unknown[]) {
+      const own = typeof event === "string" && event.startsWith(`${name}.`);
+      if (!own || !registeredEvents().has(event as string)) {
+        const details = { module: name, field: "alerts", event: String(event) };
+        throw new AppError(workerErrors.worker_module_invalid, { details });
+      }
+      alerts.push(event);
+    }
     const { onWorkerStart } = declared as Record<string, unknown>;
     if (onWorkerStart !== undefined) {
       if (typeof onWorkerStart !== "function") throw invalid("onWorkerStart");
       starts.push({ name, onWorkerStart: onWorkerStart as WorkerStartHook });
     }
   }
-  return { workflows, activities, schedules, starts };
+  return { workflows, activities, schedules, starts, alerts };
 }
 
 /** Each module's onWorkerStart, in the modules' order; a throw is worker_module_invalid. */

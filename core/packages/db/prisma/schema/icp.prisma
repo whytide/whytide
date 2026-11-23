@@ -1,10 +1,14 @@
 // The tables of core/modules/icp (its docs/data.md), alpha-p4-040; migration
-// 20261022151000_icp_initial; the draft's columns, icp-draft, migration 20261029021500_icp_draft.
-// Both are tenant tables: one ICP per workspace and its six criteria.
+// 20261022151000_icp_initial; the draft's columns, icp-draft, migration 20261029021500_icp_draft;
+// the audiences, gamma-p3-020, migration 20261102110054_icp_audiences; the automatic draft's flag,
+// icp-auto-draft, migration 20261106062311_icp_draft_automatic.
+// Both are tenant tables: a workspace's audiences, its default among them, and their six criteria.
 // criteria.icp_id is declared through the relation for its foreign key and queried model by model
 // (the tenant client refuses a relation in any argument). No foreign key to workspaces: Prisma would
 // need the opposite relation field in tenancy.prisma. The closed lists and the limits are the
-// module's (domain/lists.ts), checked by its commands, the only writer.
+// module's (domain/lists.ts), checked by its commands, the only writer. One default per workspace
+// is the partial unique index icps_default (workspace_id) WHERE is_default, hand-written in
+// 20261102110054_icp_audiences: Prisma's schema cannot say a partial key.
 
 /// tenant
 model Icp {
@@ -23,6 +27,12 @@ model Icp {
   disqualifiers String      @default("")
   /// Moves by one when a targeting field changes, never for the name alone.
   version       Int         @default(1)
+  /// The workspace's default audience, which every caller without an icp id reads; true by default,
+  /// so a row the release before gamma-p3-020 inserts is a default and meets icps_default.
+  isDefault     Boolean     @default(true) @map("is_default")
+  /// The member whose request created the row, or `system` for a first read in the worker; null on
+  /// rows made before gamma-p3-020.
+  createdBy     String?     @map("created_by")
   /// none, drafting, drafted or failed: the latest draft's run; it never moves the version.
   draftStatus   String      @default("none") @map("draft_status")
   /// The machine code of the last failed draft: ai_failed, draft_failed or icp_draft_no_source.
@@ -31,12 +41,14 @@ model Icp {
   draftRunId    String?     @map("draft_run_id")
   /// The admin's brief the latest draft reads, trimmed, at most 2,000 characters.
   draftBrief    String      @default("") @map("draft_brief")
+  /// Whether the latest draft's run is the automatic one, from Company Knowledge: it saves itself.
+  draftAutomatic Boolean    @default(false) @map("draft_automatic")
   /// The drafter's proposal: { model, promptVersion, decisionRecordId, fields }.
   pendingDraft  Json?       @map("pending_draft")
   updatedAt     DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
   criteria      Criterion[]
 
-  @@unique([workspaceId])
+  @@index([workspaceId, updatedAt])
   @@map("icps")
 }
 

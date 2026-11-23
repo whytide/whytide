@@ -1,9 +1,10 @@
 // `pnpm web:routes` (README "Routes"): the generated part of the app, from every module's ui/nav.ts,
 // never committed: a page under app/w/[workspace]/(modules)/<segment>/ that re-exports the module's
-// screen, one under (modules)/<path>/ for each of its `pages` outside the navigation, which hands the
+// screen, or hands it its panels when it has slots, as "Up next" has (gamma-p4-090), one under
+// (modules)/<path>/ for each of its `pages` outside the navigation, which hands the
 // page the `panels` other modules put in its slots, a public page under app/(public)/<path>/ for
-// each of its `publicPages`, the components of its `slots` in the shell's header
-// (src/shell/slots.generated.tsx), the navigation
+// each of its `publicPages`, the components of its `slots` in the shell's header or on the
+// workspace's home (src/shell/slots.generated.tsx), the navigation
 // (src/shell/nav.generated.ts), the bundle of every messages/<locale>.json
 // (src/i18n/messages.generated.json) and, for development, the /dev/ui gallery. --fixtures adds the
 // test modules of tests/fixtures/modules/; --production, which `build` passes, leaves the gallery out and
@@ -41,8 +42,8 @@ const pageSchema = z.strictObject({
     .refine((path) => !/^(?:w|api|dev)(?:\/|$)/.test(path), "under /w, /api or /dev"),
   screen: name,
 });
-/** A component of the shell's header, ui/<screen>/slot.tsx, given SlotProps. */
-const slotSchema = z.strictObject({ slot: z.enum(["balance", "sign-out"]), screen: name });
+/** A component of the shell's header or the workspace home, ui/<screen>/slot.tsx, given SlotProps. */
+const slotSchema = z.strictObject({ slot: z.enum(["balance", "home", "sign-out"]), screen: name });
 /** A page of the workspace outside the navigation, at /w/<workspace>/<path>; `[name]` is a param. */
 const workspacePageSchema = z.strictObject({
   path: z
@@ -125,14 +126,25 @@ export async function collect(root: string, fixtures: boolean): Promise<NavEntry
   return entries;
 }
 
+/** The names a screen's ui/<screen>/slots.ts lists, or undefined when it has none. */
+async function slotsOf(dir: string, file: string, screen: string): Promise<string[] | undefined> {
+  const names = join(dir, "ui", screen, "slots.ts");
+  if (!existsSync(names)) return undefined;
+  const read = z.array(name).safeParse((await import(pathToFileURL(names).href)).slots);
+  if (!read.success) throw new Error(`${file}: ui/${screen}/slots.ts: \`slots\``);
+  return read.data;
+}
+
 /**
- * The modules' `publicPages`, `slots`, `pages` and `panels`, checked: a path or a slot declared twice
- * fails, and so does a panel whose page has no such slot.
+ * The modules' `publicPages`, `slots`, `pages` and `panels`, and the navigation's screens that list
+ * slots (`navPages`), checked: a path or a slot declared twice fails, and so does a panel whose page
+ * has no such slot.
  */
 export async function collectMounts(root: string, fixtures: boolean) {
   const pages: PublicPage[] = [];
   const slots: Slot[] = [];
   const workspacePages: WorkspacePage[] = [];
+  const navPages: WorkspacePage[] = [];
   const panels: Panel[] = [];
   const declared = new Map<string, string>();
   for (const dir of moduleDirs(root, fixtures)) {
@@ -182,18 +194,21 @@ export async function collectMounts(root: string, fixtures: boolean) {
     pages.push(...publicPages.map((page) => ({ ...page, dir, file })));
     slots.push(...own.map((slot) => ({ ...slot, dir, file })));
     for (const page of inside) {
-      const names = join(dir, "ui", page.screen, "slots.ts");
-      const read = existsSync(names)
-        ? z.array(name).safeParse((await import(pathToFileURL(names).href)).slots)
-        : undefined;
-      if (read && !read.success) throw new Error(`${file}: ui/${page.screen}/slots.ts: \`slots\``);
+      const named = await slotsOf(dir, file, page.screen);
       const id = `${basename(dir)}.${page.screen}`;
-      workspacePages.push({ ...page, dir, file, id, ...(read && { slots: read.data }) });
+      workspacePages.push({ ...page, dir, file, id, ...(named && { slots: named }) });
+    }
+    // collect() checks the navigation's entries: here only their screens' slots are read.
+    const screens = z.array(z.looseObject({ segment: name, screen: name })).safeParse(loaded.nav);
+    for (const { segment, screen } of screens.success ? screens.data : []) {
+      const named = await slotsOf(dir, file, screen);
+      const id = `${basename(dir)}.${screen}`;
+      if (named) navPages.push({ path: segment, screen, dir, file, id, slots: named });
     }
     panels.push(...parts.map((panel) => ({ ...panel, dir, file })));
   }
   for (const { page, slot, file } of panels) {
-    const known = workspacePages.find(({ id }) => id === page)?.slots;
+    const known = [...workspacePages, ...navPages].find(({ id }) => id === page)?.slots;
     if (!known) throw new Error(`${file}: a panel names the page ${page}, which has no slots`);
     if (!known.includes(slot)) {
       throw new Error(
@@ -201,7 +216,7 @@ export async function collectMounts(root: string, fixtures: boolean) {
       );
     }
   }
-  return { pages, slots, workspacePages, panels };
+  return { pages, slots, workspacePages, navPages, panels };
 }
 
 /** A page of the workspace's route: the page with the panels of its slots, or the page alone. */
@@ -255,16 +270,20 @@ export async function writeRoutes(root: string, mode: { fixtures: boolean; produ
   for (const entry of readdirSync(pages, { withFileTypes: true })) {
     if (entry.isDirectory()) rmSync(join(pages, entry.name), { recursive: true });
   }
+  const mounts = await collectMounts(root, mode.fixtures);
   for (const entry of entries) {
     const page = join(pages, entry.segment, "page.tsx");
     const screen = relative(dirname(page), join(entry.dir, "ui", entry.screen, "page.tsx"));
-    const source = `export { default } from "${screen.split(sep).join("/")}";\n`;
+    const id = `${basename(entry.dir)}.${entry.screen}`;
+    const slotted = mounts.navPages.find((navPage) => navPage.id === id);
+    const source = slotted
+      ? workspaceRoute(page, slotted, mounts.panels)
+      : `export { default } from "${screen.split(sep).join("/")}";\n`;
     write(
       page,
       `// Generated by scripts/web-routes.ts from ${entry.file}; never committed.\n${source}`,
     );
   }
-  const mounts = await collectMounts(root, mode.fixtures);
   const { pages: publicPages, slots } = mounts;
   for (const page of mounts.workspacePages) {
     const target = join(pages, ...page.path.split("/"), "page.tsx");

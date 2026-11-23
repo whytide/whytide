@@ -8,16 +8,32 @@ import { ids } from "../ids.ts";
 import {
   addMemberInput,
   bootstrapInput,
+  changeRoleInput,
   createWorkspaceInput,
   findOrganizationBySlugInput,
   findUserByEmailInput,
   isSlug,
+  keepsAnOwner,
+  memberOrder,
   parseInput,
+  removeMemberInput,
   requireId,
   resolveMembershipInput,
   upsertUserInput,
 } from "./rules.ts";
-import { inGlobal, inWorkspace, membershipsOfUser } from "./store.ts";
+import {
+  activeMembershipOf,
+  activeMemberships,
+  inGlobal,
+  inWorkspace,
+  lockMembershipAndOwners,
+  membershipsOfUser,
+  oldestOwner,
+  runOrganization,
+  runOutbox,
+  updateMembership,
+  usersOf,
+} from "./store.ts";
 
 export type User = {
   readonly id: string;
@@ -46,6 +62,19 @@ export type Membership = {
   readonly userId: string;
   readonly role: Role;
   readonly createdAt: Date;
+  /** Set once removed (removeMember), with the user who removed it; every read skips it then. */
+  readonly removedAt: Date | null;
+  readonly removedBy: string | null;
+};
+/** An active member as the member list shows them: the membership with its user's email and name. */
+export type Member = {
+  readonly membershipId: string;
+  readonly userId: string;
+  readonly email: string;
+  readonly displayName: string | null;
+  readonly role: Role;
+  /** The membership's created_at: a member added again keeps their first day. */
+  readonly joinedAt: Date;
 };
 /** A membership with its workspace and organization, as GET /v1/me lists them. */
 export type MembershipListing = {
@@ -228,8 +257,9 @@ export async function createWorkspace(input: {
 }
 
 /**
- * The user's membership of the workspace with the role, created when there is none; one there is is
- * kept as it is, its role included. Two calls at once make one membership.
+ * The user's membership of the workspace with the role, created when there is none; a removed one
+ * is made active again with the role, removed_at and removed_by cleared; an active one is kept as it
+ * is, its role included. Two calls at once make one membership.
  */
 export async function addMember(input: {
   userId: string;
@@ -245,6 +275,10 @@ export async function addMember(input: {
       if ((await tx.user.findUnique({ where: { id: userId } })) === null) {
         throw new AppError(errors.user_not_found);
       }
+      await tx.membership.updateMany({
+        where: { workspaceId, userId, removedAt: { not: null } },
+        data: { role, removedAt: null, removedBy: null },
+      });
       return tx.membership.upsert({
         where: { workspaceId_userId: { workspaceId, userId } },
         create: { id: newId(ids.membership), workspaceId, userId, role },
@@ -259,7 +293,10 @@ export function addOwner(input: { userId: string; workspaceId: string }): Promis
   return addMember({ ...input, role: "Owner" });
 }
 
-/** The user's memberships in every workspace, oldest first, each with its workspace and organization. */
+/**
+ * The user's active memberships in every workspace, oldest first, each with its workspace and
+ * organization; a removed one is not listed.
+ */
 export async function listMemberships(userId: string): Promise<MembershipListing[]> {
   const memberships = await membershipsOfUser(userId);
   if (memberships.length === 0) return [];
@@ -282,9 +319,9 @@ export async function listMemberships(userId: string): Promise<MembershipListing
 }
 
 /**
- * The user's membership of the workspace a URL names, by its id or its slug, or null. Read from the
- * user's own memberships, so no other user's row; a slug two of them share, in two organizations,
- * names none.
+ * The user's active membership of the workspace a URL names, by its id or its slug, or null. Read
+ * from the user's own memberships, so no other user's row; a slug two of them share, in two
+ * organizations, names none; a removed membership names none either.
  */
 export async function resolveMembership(input: {
   userId: string;
@@ -322,4 +359,117 @@ export async function listWorkspaceIds(): Promise<string[]> {
     db.workspace.findMany({ select: { id: true }, orderBy: { id: "asc" } }),
   );
   return rows.map((row) => row.id);
+}
+
+/**
+ * The user of the workspace's oldest active Owner membership, or null for a workspace without one:
+ * who owns what the workspace has before a member makes it (campaigns' seeded campaign,
+ * gamma-p3-030). Read in the caller's tenant run for the workspace, so it opens no run of its own;
+ * an Admin or a Member never answers, nor a removed Owner, nor another workspace's Owner.
+ */
+export async function workspaceOwner(workspaceId: string): Promise<string | null> {
+  const owner = await oldestOwner(requireId("workspaceId", workspaceId));
+  return owner?.userId ?? null;
+}
+
+/**
+ * The sharing group of the run's workspace, or null for a workspace tenancy does not have: the group
+ * whose workspaces share what contacts' company index learns (gamma-rf-010), the workspace's
+ * organization today. Read in the caller's tenant run, from the run's own workspace, so no caller
+ * names the workspace or the group, and it opens no run of its own.
+ */
+export function sharingGroupOf(): Promise<string | null> {
+  return runOrganization();
+}
+
+/**
+ * The run's workspace's active members with their users' emails and names, Owners first, then by
+ * name. Read in the caller's tenant run, whose client scopes the memberships to its workspace.
+ */
+export async function listMembers(): Promise<Member[]> {
+  return (await withUsers(await activeMemberships())).sort(memberOrder);
+}
+
+/**
+ * The member with the role, Owner or Member, in the caller's tenant run. Under the lock of the
+ * membership and the workspace's active Owners, in this order: membership_not_found for an id the
+ * workspace does not hold or a removed one, member_is_self for the caller's own (`changedBy`), the
+ * same role answered unchanged, last_owner when the workspace would be left with no active Owner.
+ */
+export async function changeRole(input: {
+  membershipId: string;
+  role: Role;
+  changedBy: string;
+}): Promise<Member> {
+  const { membershipId, role, changedBy } = parseInput(changeRoleInput, input);
+  const { target, owners } = await lockForChange(membershipId);
+  if (target === undefined || target.removedAt !== null) {
+    throw new AppError(errors.membership_not_found);
+  }
+  if (target.userId === changedBy) throw new AppError(errors.member_is_self);
+  if (target.role === role) return memberOf(target);
+  if (!keepsAnOwner({ owners, membershipId, role })) throw new AppError(errors.last_owner);
+  return memberOf(await updateMembership(membershipId, { role }));
+}
+
+/**
+ * The membership removed by `removedBy`, in the caller's tenant run, which also writes
+ * tenancy.member_removed, ids only, to the outbox: both commit together or not at all. Under the
+ * same lock as changeRole, in this order: membership_not_found for an id the workspace does not
+ * hold, a removed one answered unchanged with no second event, member_is_self for the caller's own,
+ * last_owner for the workspace's last active Owner. The row stays, so the ids other tables hold do.
+ */
+export async function removeMember(input: {
+  membershipId: string;
+  removedBy: string;
+}): Promise<Membership> {
+  const { membershipId, removedBy } = parseInput(removeMemberInput, input);
+  const { target, owners } = await lockForChange(membershipId);
+  if (target === undefined) throw new AppError(errors.membership_not_found);
+  if (target.removedAt !== null) return target;
+  if (target.userId === removedBy) throw new AppError(errors.member_is_self);
+  if (!keepsAnOwner({ owners, membershipId, role: null })) throw new AppError(errors.last_owner);
+  const removed = await updateMembership(membershipId, { removedAt: new Date(), removedBy });
+  const { workspaceId, userId } = removed;
+  await publish(runOutbox(), events["tenancy.member_removed"], {
+    workspaceId,
+    membershipId,
+    userId,
+  });
+  return removed;
+}
+
+/**
+ * The user's active membership of the run's workspace, or null: read in the caller's tenant run, so
+ * another workspace's membership never answers, nor a removed one (campaigns' gate, gamma-p6-040).
+ */
+export async function findActiveMembership(userId: string): Promise<Membership | null> {
+  return activeMembershipOf(requireId("userId", userId));
+}
+
+/** The membership and the run's workspace's active Owners, locked until the run ends. */
+async function lockForChange(membershipId: string) {
+  const rows = await lockMembershipAndOwners(membershipId);
+  const target = rows.find((row) => row.id === membershipId);
+  const active = rows.filter((row) => row.role === "Owner" && row.removedAt === null);
+  return { target, owners: active.map((row) => row.id) };
+}
+
+/** The memberships with their users, read through the caller's run, in the order given. */
+async function withUsers(memberships: readonly Membership[]): Promise<Member[]> {
+  if (memberships.length === 0) return [];
+  const users = await usersOf([...new Set(memberships.map((membership) => membership.userId))]);
+  const userOf = new Map(users.map((user) => [user.id, user]));
+  return memberships.flatMap(({ id, userId, role, createdAt }) => {
+    const user = userOf.get(userId);
+    if (user === undefined) return []; // the foreign key forbids it
+    const { email, displayName } = user;
+    return [{ membershipId: id, userId, email, displayName, role, joinedAt: createdAt }];
+  });
+}
+
+async function memberOf(membership: Membership): Promise<Member> {
+  const [member] = await withUsers([membership]);
+  if (member === undefined) throw new AppError(errors.user_not_found); // the foreign key forbids it
+  return member;
 }

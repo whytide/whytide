@@ -237,7 +237,9 @@ test("readProfile reads the profile its request file names and writes it under r
   const stored = profileFile.parse(
     await json((await files.get({ workspaceId, key: "raw/p/1.json" })).body),
   );
-  assert.deepEqual({ ...stored, fetchedAt: undefined }, { ...seeded, fetchedAt: undefined });
+  // The fake's answer says the member is no relation of the account's (connect-already-connected).
+  const read = { ...seeded, connected: false, fetchedAt: undefined };
+  assert.deepEqual({ ...stored, fetchedAt: undefined }, read);
   const unseen = { ...input, requestKey: "raw/p/2.request.json", rawKey: "raw/p/2.json" };
   assert.deepEqual(await readProfile(context, unseen), { refused: "linkedin_not_found" });
   fake.emitWebhook("account.disconnected", ref);

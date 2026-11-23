@@ -1,10 +1,11 @@
 // The sources screen (README.md "Screen"), a server component: the title and the header; sources.tsx
 // reads the workspace's sources and linkedin's sender accounts in the browser, with the screen's
-// states, and opens the runs panel of the source `?runs=<id>` names. The accounts come through the
-// web's API client: signals never imports the linkedin module.
+// states, and opens the runs panel of the source `?runs=<id>` names; imported-files.tsx, below them,
+// reads discovery's imports and signals' imports of sources. The accounts and the imports come
+// through the web's API client: signals never imports the linkedin or discovery module.
 import { PageHeader } from "@whytide/ui";
 import { getTranslations } from "next-intl/server";
-import { SourcesScreen } from "./sources.tsx";
+import { SourcesAndFiles } from "./sources.tsx";
 
 type Props = {
   params: Promise<{ workspace: string }>;
@@ -21,7 +22,10 @@ export default async function Sources({ params, searchParams }: Props) {
     <>
       <title>{t("sources.title")}</title>
       <PageHeader title={t("sources.title")} description={t("sources.description")} />
-      <SourcesScreen workspaceId={workspace} runsOf={typeof runs === "string" ? runs : undefined} />
+      <SourcesAndFiles
+        workspaceId={workspace}
+        runsOf={typeof runs === "string" ? runs : undefined}
+      />
     </>
   );
 }

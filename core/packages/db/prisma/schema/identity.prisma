@@ -4,7 +4,10 @@
 // serves. No foreign key to workspaces or users: Prisma would need the opposite relation fields in
 // tenancy.prisma; createInvite checks the workspace, and addMember checks it again at the first
 // sign-in. Hand-written SQL in the migration: invites_email_lowercase, a CHECK that keeps every
-// email lowercased, so that the unique (workspace_id, email) holds whatever the case it was typed in.
+// email lowercased, so that the unique (workspace_id, email) holds whatever the case it was typed in;
+// and in 20261112103823_identity_invite_expiry (gamma-p6-020), the expiry of the rows made before it,
+// invites_revoked_together (revoked_at and revoked_by set together or neither) and
+// invites_accepted_or_revoked (never both).
 
 /// tenant
 model Invite {
@@ -13,13 +16,20 @@ model Invite {
   /// Lowercased: createInvite normalizes it, the CHECK refuses anything else.
   /// pii
   email       String
-  /// The membership's role at the first sign-in; Owner in alpha.
+  /// The membership's role at its acceptance: Owner or Member (INVITE_ROLES).
   role        MembershipRole @default(Owner)
-  /// The user who invited; null for the invite command.
+  /// The user who invited, or renewed it last; null for the invite command.
   invitedBy   String?        @map("invited_by")
   createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz()
-  /// Set by the first sign-in that accepts it.
+  /// Open until then; set again when it is renewed. The default serves a previous release only.
+  expiresAt   DateTime       @default(dbgenerated("(now() + '7 days'::interval)")) @map("expires_at") @db.Timestamptz()
+  /// Set by the sign-in or the accept that makes its membership.
   acceptedAt  DateTime?      @map("accepted_at") @db.Timestamptz()
+  /// Set with revokedBy by revokeInvite; cleared when it is renewed.
+  revokedAt   DateTime?      @map("revoked_at") @db.Timestamptz()
+  revokedBy   String?        @map("revoked_by")
+  /// When its last invite mail went; null until one did since it was made or renewed.
+  mailedAt    DateTime?      @map("mailed_at") @db.Timestamptz()
 
   @@unique([workspaceId, email])
   @@index([email])

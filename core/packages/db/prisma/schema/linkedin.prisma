@@ -211,6 +211,10 @@ enum SenderActionKind {
   send_check
   pending_invites
   relation_check
+  /// A page of a source's posts (gamma-p5-015), migration linkedin_read_posts.
+  read_posts
+  /// A company page's facts for enrichment (gamma-en-060), migration linkedin_read_company_kind.
+  read_company
 
   @@map("sender_action_kind")
 }
@@ -311,9 +315,12 @@ model LinkedinWorkspaceControl {
   @@map("linkedin_workspace_controls")
 }
 
+/// Who holds a stop: the tester (the screen), the operator (the command), or a member's removal,
+/// an account's only (gamma-p6-070): its owner lifts it, after a new invite.
 enum LinkedinSwitchSource {
   tester
   operator
+  member_removed
 
   @@map("linkedin_switch_source")
 }
@@ -327,7 +334,8 @@ model LinkedinControlEvent {
   senderAccountId   String?                  @map("sender_account_id")
   control           LinkedinControl
   /// `closed` or `open` for sending; `off` or `on` for the platform's stop and the invites' pause;
-  /// `off`, `tester` or `operator`, who holds it, for a workspace's or an account's stop.
+  /// `off`, `tester` or `operator`, who holds it, for a workspace's or an account's stop, and
+  /// `member_removed` for an account's.
   fromState         String                   @map("from_state")
   toState           String                   @map("to_state")
   actorType         LinkedinControlActorType @map("actor_type")

@@ -1,6 +1,6 @@
 // The costs page (README.md "Screens"), /w/{ws}/credits, a server component: the title and the
-// header; costs.tsx reads the balance, the week's costs and its usage in the browser, with the
-// screen's states and the week picker.
+// header; costs.tsx reads the balance, the prices, the week's costs and its usage in the browser,
+// with the screen's states and the week picker.
 import { PageHeader } from "@whytide/ui";
 import { getTranslations } from "next-intl/server";
 import { CostsScreen } from "./costs.tsx";

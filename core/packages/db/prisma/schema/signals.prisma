@@ -1,9 +1,15 @@
 // The tables of core/modules/signals (its docs/data.md), alpha-p8-010, alpha-p8-020 and alpha-p8-030;
 // migrations 20261022150800_signals_sources_and_runs, 20261022193000_signals_candidates,
 // 20261022196000_signals_run_cancelled (the status `cancelled`),
-// 20261022212000_signals_events_and_evidence and 20261028130900_signals_run_stop (a run's workflow
-// id and its stop, fix-run-stop). All are tenant tables. A source's kind is a string the
-// module checks against its registry of kinds on every write, not an enum: a kind is a folder of the
+// 20261022212000_signals_events_and_evidence, 20261028130900_signals_run_stop (a run's workflow
+// id and its stop, fix-run-stop), 20261031000307_signals_post_sources (a candidate's post and its
+// excerpt, the evidence's post excerpt, gamma-p5-020), 20261031021832_signals_event_ratings (an
+// event's rating, gamma-p5-030), 20261031022621_signals_run_budget (a run's quota day and read
+// budget, gamma-p5-040), 20261102204946_signals_source_imports (a CSV file of sources, and the
+// import a source came from, sources-csv-import), 20261118212536_signals_research_plans (a research
+// run's plan and its queries, gamma-wr-040), 20261118224754_signals_research_candidates (gamma-wr-046)
+// 20261118233500_signals_found_companies (the companies a research run judged, gamma-wr-050) and 20261119020000_signals_found_company_mark (who marked one Not a fit, and when, gamma-wr-110) and 20261119043000_signals_plan_role_words (a plan's role words, gamma-wr-090). All are tenant tables. A source's kind is a string
+// the module checks against its registry of kinds on every write, not an enum: a kind is a folder of the
 // module (architecture §14.1). No foreign key to workspaces or to contacts' persons: Prisma would need
 // the opposite relation field in the other module's file. A run's source, a candidate's run and an
 // evidence's event are referenced by (workspace_id, id), so none can name a row of another workspace;
@@ -13,24 +19,30 @@
 
 /// tenant
 model SignalSource {
-  id              String      @id
-  workspaceId     String      @map("workspace_id")
+  id              String              @id
+  workspaceId     String              @map("workspace_id")
   kind            String
   /// The kind's config, as its schema reads it: `{ postUrl }` for post_engagers. A post URL names its
   /// author (docs/data.md).
   /// pii
   config          Json
   label           String
-  /// The sender account whose own LinkedIn account reads, one of the workspace's (linkedin's).
-  senderAccountId String      @map("sender_account_id")
-  enabled         Boolean     @default(true)
+  /// The sender account whose own LinkedIn account reads, one of the workspace's (linkedin's). Null for
+  /// a kind that reads through none, web_research (gamma-wr-030); signals' code requires it for the others.
+  senderAccountId String?             @map("sender_account_id")
+  enabled         Boolean             @default(true)
   /// The user who created it.
-  createdBy       String      @map("created_by")
-  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz()
-  lastRunAt       DateTime?   @map("last_run_at") @db.Timestamptz()
+  createdBy       String              @map("created_by")
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz()
+  lastRunAt       DateTime?           @map("last_run_at") @db.Timestamptz()
   /// Where the kind's reader stopped, in the kind's own shape; null before the first run.
   watermark       Json?
+  /// The CSV import that created it (sources-csv-import); null for one added from the form.
+  importId        String?             @map("import_id")
+  sourceImport    SignalSourceImport? @relation(fields: [importId], references: [id], onDelete: SetNull)
   runs            SignalRun[]
+  researchCandidates SignalResearchCandidate[]
+  foundCompanies SignalFoundCompany[]
   events          SignalEvent[]
 
   @@unique([workspaceId, id])
@@ -55,9 +67,15 @@ model SignalRun {
   workflowId      String?           @map("workflow_id")
   /// When a stop was asked; the run ends `cancelled`, at its start when it had not started.
   stopRequestedAt DateTime?         @map("stop_requested_at") @db.Timestamptz()
+  /// Its sender account's quota day at its start (linkedin's, `YYYY-MM-DD`); null for a run that did
+  /// not start reading, or started before gamma-p5-040.
+  quotaDay        String?           @map("quota_day")
+  /// The reads it may make: its share of the account's reads left that day, the send path's kept.
+  readBudget      Int?              @map("read_budget")
   source          SignalSource      @relation(fields: [workspaceId, sourceId], references: [workspaceId, id], onDelete: Cascade)
   candidates      SignalCandidate[]
   events          SignalEvent[]
+  researchPlan    SignalResearchPlan?
 
   @@unique([workspaceId, id])
   @@index([workspaceId, sourceId, startedAt(sort: Desc)])
@@ -65,8 +83,8 @@ model SignalRun {
 }
 
 /// A staging row: someone a run read, business fields only, until the run's processing resolves it
-/// and its end empties the rest. One per member and reaction in a run. `raw_ref` is the key of the
-/// raw page file it came from (files port, `raw/signals/<runId>/<page>.json`, 72 hours).
+/// and its end empties the rest. One per member, reaction and post in a run. `raw_ref` is the key of
+/// the raw page file it came from (files port, under `raw/signals/<runId>/`, 72 hours).
 /// tenant
 model SignalCandidate {
   id                String    @id
@@ -85,33 +103,58 @@ model SignalCandidate {
   commentText       String?   @map("comment_text")
   engagedAt         DateTime  @map("engaged_at") @db.Timestamptz()
   rawRef            String    @map("raw_ref")
+  /// The post engaged with, a posts kind's in its unnamed form, post engagers' as their config names
+  /// it, its author; null in a row staged before gamma-p5-020, whose post is its source's.
+  /// pii
+  objectUrl         String?   @map("object_url")
+  /// The excerpt of the post a commenter or reactor engaged with; null for an author and for post
+  /// engagers.
+  /// pii
+  postExcerpt       String?   @map("post_excerpt")
   run               SignalRun @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade)
 
-  @@unique([workspaceId, runId, providerMemberRef, reaction])
+  @@unique([workspaceId, runId, providerMemberRef, reaction, objectUrl])
   @@map("signal_candidates")
 }
 
 /// One engagement of a person the run kept (alpha-p8-030): the kind's event, its subject the person
 /// (contacts'), its object and the actor's role hashed into `dedupe_key`, so an engagement seen twice
-/// is one row.
+/// is one row. The AI's rating of it (gamma-p5-030) sits beside it, null until a call rates it.
 /// tenant
 model SignalEvent {
-  id          String        @id
-  workspaceId String        @map("workspace_id")
-  personId    String        @map("person_id")
-  sourceId    String?       @map("source_id")
-  runId       String?       @map("run_id")
-  kind        String
-  dedupeKey   String        @map("dedupe_key")
-  occurredAt  DateTime      @map("occurred_at") @db.Timestamptz()
-  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz()
-  source      SignalSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
-  run         SignalRun?    @relation(fields: [runId], references: [id], onDelete: SetNull)
-  evidence    Evidence[]
+  id                 String        @id
+  workspaceId        String        @map("workspace_id")
+  personId           String        @map("person_id")
+  sourceId           String?       @map("source_id")
+  runId              String?       @map("run_id")
+  kind               String
+  dedupeKey          String        @map("dedupe_key")
+  occurredAt         DateTime      @map("occurred_at") @db.Timestamptz()
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  /// The event's relevance to the offer, 0 to 1, as the model rated it.
+  relevance          Float?
+  /// The rating's one line, at most 200 characters; nulled with the excerpts after the lookback.
+  /// pii
+  relevanceRationale String?       @map("relevance_rationale")
+  /// One of qualification's INTENT_CLASSES; null for an event without the person's words.
+  intentClass        String?       @map("intent_class")
+  /// `unrated` until a rating call answers for it, then `rated`.
+  ratingStatus       String        @default("unrated") @map("rating_status")
+  /// ai's decision record of the call that rated it, which every event of its batch keeps.
+  decisionRecordId   String?       @map("decision_record_id")
+  /// The found company a research event's person was taken from (gamma-wr-060), a plain id with no key
+  /// as `run_id` of a candidate is; null for every LinkedIn kind's event, which the rating alone reads.
+  foundCompanyId     String?       @map("found_company_id")
+  source             SignalSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  run                SignalRun?    @relation(fields: [runId], references: [id], onDelete: SetNull)
+  evidence           Evidence[]
 
   @@unique([workspaceId, id])
   @@unique([workspaceId, dedupeKey])
   @@index([workspaceId, personId, occurredAt(sort: Desc)])
+  /// The rating's pick: a source's oldest unrated events first.
+  @@index([workspaceId, sourceId, ratingStatus, occurredAt])
+  @@index([workspaceId, foundCompanyId])
   @@map("signal_events")
 }
 
@@ -122,25 +165,238 @@ model Evidence {
   id          String      @id
   workspaceId String      @map("workspace_id")
   eventId     String      @map("event_id")
-  /// The post's URL, which names its author.
+  /// The post's URL, which names its author; for a research event (gamma-wr-060), the page the person
+  /// was found on.
   /// pii
   url         String
-  /// The first 500 characters of the person's own words: the comment, null for a reaction.
+  /// The first 500 characters of the person's own words: the comment, or an author's own post; null
+  /// for a reaction.
   /// pii
   excerpt     String?
+  /// The first 500 characters of the post a commenter or reactor engaged with (gamma-p5-020).
+  /// pii
+  postExcerpt String?     @map("post_excerpt")
   /// pii
   commentText String?     @map("comment_text")
-  reaction    String
-  /// Who engaged, as the post's engagers list names them.
+  /// What the person did; null for a research event (gamma-wr-060), whose person did nothing.
+  reaction    String?
+  /// Who engaged, as the post's engagers list names them; null for a research event, which keeps no
+  /// name here.
   /// pii
-  author      String
+  author      String?
+  /// How a research event's person was found, when not as the page printed them (gamma-wr-070):
+  /// `search`, a LinkedIn profile found by one web search; null otherwise.
+  foundBy     String?     @map("found_by")
   capturedAt  DateTime    @map("captured_at") @db.Timestamptz()
   reducedAt   DateTime?   @map("reduced_at") @db.Timestamptz()
   event       SignalEvent @relation(fields: [workspaceId, eventId], references: [workspaceId, id], onDelete: Cascade)
 
   @@unique([workspaceId, id])
   @@unique([workspaceId, eventId])
+  /// The erasure's match on a post's author (domain/evidence.ts erasePerson).
+  @@index([workspaceId, url])
   @@map("evidence")
+}
+
+/// A CSV file of sources imported (sources-csv-import): its name, who imported it and when, and what
+/// its rows became. Its sources name it by `signal_sources.import_id`, by id alone and set null if it
+/// goes, as an event names its source. No cell of the file is kept.
+/// tenant
+model SignalSourceImport {
+  id            String         @id
+  workspaceId   String         @map("workspace_id")
+  /// The file's name as uploaded, without its folders, 255 characters at most.
+  fileName      String         @map("file_name")
+  /// The user who imported it.
+  createdBy     String         @map("created_by")
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  /// The sources its rows created, those created disabled among them.
+  createdCount  Int            @default(0) @map("created_count")
+  /// Of those, the ones past SIGNALS_MAX_ENABLED_SOURCES or SIGNALS_MAX_TRACKED_PER_ACCOUNT.
+  disabledCount Int            @default(0) @map("disabled_count")
+  /// The rows not imported: a row error of the check, or a create refused.
+  refusedCount  Int            @default(0) @map("refused_count")
+  sources       SignalSource[]
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, createdAt])
+  @@map("signal_source_imports")
+}
+
+/// A research run's plan (gamma-wr-040): where it looks, written by the AI at the run's start from what
+/// the member gave in the app; one per run. The trade's words are the plan's own, never stored in
+/// advance. Its queries are referenced by (workspace_id, id); it goes with its run (ON DELETE CASCADE).
+/// tenant
+model SignalResearchPlan {
+  id          String                @id
+  workspaceId String                @map("workspace_id")
+  sourceId    String                @map("source_id")
+  runId       String                @map("run_id")
+  /// The trade's own words by language, `[{ language, words }]`, as the model wrote them for this run.
+  words       Json
+  /// The words of the audience's roles by language, `[{ language, words }]`, as the model wrote them for
+  /// this run (gamma-wr-090): the search of a company's managers asks them. They hold no person.
+  roleWords   Json                  @default("[]") @map("role_words")
+  /// The source types the plan uses, by id (signals' registry of places), in the plan's order.
+  placeIds    String[]              @map("place_ids")
+  /// What the gates refused, by gate name: counts only.
+  refused     Json                  @default("{}")
+  /// ai's decision record of the call that wrote it.
+  decisionRecordId String?          @map("decision_record_id")
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz()
+  run         SignalRun             @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade)
+  queries     SignalResearchQuery[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, runId])
+  @@index([workspaceId, sourceId, createdAt(sort: Desc)])
+  @@map("signal_research_plans")
+}
+
+/// A query of a research plan (gamma-wr-040), in the plan's order: its source type, the country and the
+/// language it searches in and its text; `asked_at` and `result_count` are null until it is asked. The
+/// source's earlier queries are the plan's memory: one asked within SIGNALS_RESEARCH_RECHECK_DAYS is
+/// not asked again. `source_id` repeats the plan's, so that the memory is one indexed read.
+/// tenant
+model SignalResearchQuery {
+  id          String             @id
+  workspaceId String             @map("workspace_id")
+  planId      String             @map("plan_id")
+  sourceId    String             @map("source_id")
+  /// From 1, the plan's order.
+  position    Int
+  /// The source type's id.
+  placeId     String             @map("place_id")
+  /// ISO 3166-1 alpha-2, upper case.
+  country     String
+  /// ISO 639-1, lower case.
+  language    String
+  text        String
+  askedAt     DateTime?          @map("asked_at") @db.Timestamptz()
+  resultCount Int?               @map("result_count")
+  plan        SignalResearchPlan @relation(fields: [workspaceId, planId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, planId, position])
+  @@index([workspaceId, sourceId, askedAt])
+  @@map("signal_research_queries")
+}
+
+/// Where a research candidate stands (gamma-wr-046): `pending` is found and not read yet, `read` is
+/// read by the next task, `dropped` is left out with `drop_code`.
+enum SignalResearchCandidateState {
+  pending
+  read
+  dropped
+
+  @@map("signal_research_candidate_state")
+}
+
+/// A company a research run found on a page (gamma-wr-046): its name, its site's domain and its place,
+/// the page that named it, the source type of the search that found the page and one line of what the
+/// page says of it, with the quote. One per source and domain; it outlives the run that found it, so
+/// that one not read is taken first by the next run. A company with no site is not kept. Business
+/// pages' words only: the gates refuse a quote or a line that holds an email address, a link or a
+/// phone number, and no field names a person. `run_id` is the run that found it, kept as an id with no
+/// key, since a candidate belongs to its source.
+/// tenant
+model SignalResearchCandidate {
+  id          String                       @id
+  workspaceId String                       @map("workspace_id")
+  sourceId    String                       @map("source_id")
+  runId       String                       @map("run_id")
+  name        String
+  /// The site's host, lower case, without `www.`.
+  domain      String
+  /// Where the page puts the company, as it writes it; null when it gives none.
+  place       String?
+  /// The page that named it, as the run read it (its address after redirects).
+  pageUrl     String                       @map("page_url")
+  /// The source type of the search that found the page, or of a start page the source's own: null.
+  placeId     String?                      @map("place_id")
+  /// The query whose results led to the page (a plain id, gamma-wr-051); null for a start page and for a candidate made before it.
+  queryId     String?                      @map("query_id")
+  /// One line of what the page says of the company, and the page's own words behind it.
+  line        String?
+  quote       String?
+  state       SignalResearchCandidateState @default(pending)
+  /// Why it was dropped: own_company, never_contact, customer or competitor; null unless dropped.
+  dropCode    String?                      @map("drop_code")
+  createdAt   DateTime                     @default(now()) @map("created_at") @db.Timestamptz()
+  /// When the state last changed, or the row was made; the re-check days count from it.
+  stateAt     DateTime                     @default(now()) @map("state_at") @db.Timestamptz()
+  source      SignalSource                 @relation(fields: [workspaceId, sourceId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, sourceId, domain])
+  @@index([workspaceId, sourceId, state, createdAt])
+  @@map("signal_research_candidates")
+}
+
+/// The verdict on a company a research run judged from its own site (gamma-wr-050): decided by code from
+/// the model's closed answers.
+enum SignalFoundCompanyVerdict {
+  fit
+  not_fit
+  unsure
+
+  @@map("signal_found_company_verdict")
+}
+
+/// A company a research run read the site of and judged (gamma-wr-050): its verdict and the reasons
+/// behind it (each a line, its quote, the page's address and the date read), where the site puts it, and
+/// how the site says it can be reached (never for a one-person business). One per source and domain; a
+/// company met again after SIGNALS_RESEARCH_RECHECK_DAYS is judged again and the row replaced. It holds
+/// no person: no id and no name of one. `source_id` is set null when its source is deleted, as an
+/// event's is, and `source_label` keeps the source's name, so that the company stays under it;
+/// `run_id` and `company_id` (contacts' workspace company) are plain ids with no key.
+/// tenant
+model SignalFoundCompany {
+  id            String                    @id
+  workspaceId   String                    @map("workspace_id")
+  sourceId      String?                   @map("source_id")
+  /// The source's label when the row was written, kept after the source is deleted.
+  sourceLabel   String                    @map("source_label")
+  runId         String                    @map("run_id")
+  /// The site's host, lower case, without `www.`.
+  domain        String
+  name          String
+  verdict       SignalFoundCompanyVerdict
+  /// `[{ kind, criterion, answer, line, quote, url, readAt }]`: the reasons, business words only.
+  reasons       Json
+  /// ISO 3166-1 alpha-2, upper case; null when the site gives none or contacts does not know it.
+  country       String?
+  town          String?
+  state         String?
+  /// A business of one person: it keeps no general address and no phone, and its facts sit on the workspace's row only.
+  onePerson     Boolean                   @default(false) @map("one_person")
+  /// How the site says the company can be reached, as it prints it: its general address, its phone numbers and its postal address.
+  /// pii
+  email         String?
+  /// pii
+  phones        String[]                  @default([])
+  /// pii
+  postalAddress String?                   @map("postal_address")
+  /// The page that led to the company, and its search's source type (null for a start page).
+  pageUrl       String                    @map("page_url")
+  placeId       String?                   @map("place_id")
+  /// Contacts' company of the workspace, made from its site; null when contacts took none.
+  companyId     String?                   @map("company_id")
+  /// A member's own mark (gamma-wr-110): `not_fit`, or null. A company marked is never read or judged again for its source,
+  /// and the run never replaces the mark or the verdict it gave; who marked it and when sit beside it.
+  memberMark    String?                   @map("member_mark")
+  /// When the company's people were taken, once the look ran to its end (gamma-wr-060); null until then.
+  /// A later read of the company adds no person.
+  peopleTakenAt DateTime?                 @map("people_taken_at") @db.Timestamptz()
+  memberMarkedBy String?                  @map("member_marked_by")
+  memberMarkedAt DateTime?                @map("member_marked_at") @db.Timestamptz()
+  judgedAt      DateTime                  @default(now()) @map("judged_at") @db.Timestamptz()
+  source        SignalSource?             @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, sourceId, domain])
+  @@index([workspaceId, sourceId, verdict, judgedAt(sort: Desc)])
+  @@map("signal_found_companies")
 }
 
 enum SignalRunStatus {

@@ -16,6 +16,8 @@ export const WITHDRAW_STEP_KEY = "withdraw";
 export const WITHDRAW_POSITION = 1;
 /** What follows the connection request's key to make the withdrawal's own (beta-p1-030). */
 export const WITHDRAW_KEY_SUFFIX = ":withdraw";
+/** A withdrawal's statuses once it took the invitation back: sent, or the invitation gone. */
+export const WITHDRAWN_STATUSES = ["succeeded", "failed"] as const;
 
 /**
  * linkedin's answers after a withdrawal's call that say the invitation is already gone (declined,

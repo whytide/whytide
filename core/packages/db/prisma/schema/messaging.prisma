@@ -7,6 +7,13 @@
 // `kind`, the step's columns and `approved`, with hand-written SQL Prisma cannot say: the CHECKs
 // that tie a step's columns to its kind and `approved_at` to the status, and the partial unique key
 // (workspace_id, step_execution_id) WHERE step_execution_id IS NOT NULL, one draft per step.
+// Email drafts (gamma-p3-070), migrations 20261101125854_messaging_email_channel (the channel `email`,
+// alone) and 20261101125855_messaging_email_drafts: the subject, its edit, the mailbox and the kind
+// a lead's draft is written as, with hand-written SQL: the CHECKs that keep a subject and a mailbox
+// to an email draft, a mailbox to a step's and `step_kind` to a lead's, and the partial index
+// (workspace_id, mailbox_id, created_at) WHERE mailbox_id IS NOT NULL.
+// The AI disclosure line (gamma-p4-080), migration 20261102113116_messaging_disclosure:
+// `disclosure_applied`, set by the campaign's mode's approval alone.
 
 /// tenant
 model MessageDraft {
@@ -49,6 +56,19 @@ model MessageDraft {
   editRatio        Decimal?           @map("edit_ratio") @db.Decimal(4, 3)
   /// When a step's draft was approved: set exactly when the status is `approved`.
   approvedAt       DateTime?          @map("approved_at") @db.Timestamptz()
+  /// An email draft's subject, the writer's: a first email's only.
+  /// pii: business_contact
+  subject          String?
+  /// The member's or the owner's subject, when it differs from the writer's.
+  /// pii: business_contact
+  editedSubject    String?            @map("edited_subject")
+  /// An email step's draft: the mailbox it is sent from, email's id, no foreign key.
+  mailboxId        String?            @map("mailbox_id")
+  /// A lead's draft: the kind it is written as (WRITTEN_STEP_KINDS); null, a first one.
+  stepKind         String?            @map("step_kind")
+  /// Approved by the campaign's mode, never a person: the frozen text ends with the channel's AI
+  /// disclosure line (gamma-p4-080). False for a person's approval and every other draft.
+  disclosureApplied Boolean           @default(false) @map("disclosure_applied")
   createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz()
 
@@ -59,6 +79,7 @@ model MessageDraft {
 enum MessageChannel {
   linkedin_note
   linkedin_message
+  email
 
   @@map("message_channel")
 }

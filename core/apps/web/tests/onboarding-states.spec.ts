@@ -3,7 +3,7 @@
 // Knowledge no other spec reads or writes, and this one neither: Playwright answers each call of the
 // screen as the api, or the worker after it, would, a failure among them. The record loading, failed
 // with a retry, then empty, and a failed Save retried; the pages read while the worker reads them, a
-// failed read with a retry, each page linked, then none; a run stuck for eleven minutes; a second
+// failed read with a retry, each page linked, then none; a run stuck for twenty-one minutes; a second
 // Draft that asks first, then fails and is retried with its key; the source badges' hints on hover
 // and on keyboard focus, and the last-changed line; the draft review with nothing in it, then an
 // Accept held, failed and retried with its key. Every text from its key; axe on each state.
@@ -72,6 +72,7 @@ function knowledge(change: Record<string, unknown> = {}) {
     updatedAt: new Date().toISOString(),
     pendingDraft: null,
     pages: [],
+    documentLimits: { files: 5, bytes: 10 * 1024 * 1024 },
     ...change,
   };
 }
@@ -196,12 +197,12 @@ test("the pages read: the progress while the worker reads, a failed read with a 
   await axe(page);
 });
 
-test("a run reading for more than ten minutes is stuck: the screen says so, stops asking, and Draft is enabled; axe passes", async ({
+test("a run reading for more than twenty minutes is stuck: the screen says so, stops asking, and Draft is enabled; axe passes", async ({
   page,
   signInAs,
 }) => {
   await signInAs();
-  const updatedAt = new Date(Date.now() - 11 * 60_000).toISOString();
+  const updatedAt = new Date(Date.now() - 21 * 60_000).toISOString();
   let reads = 0;
   await page.route(RECORD, (route) => {
     reads += 1;

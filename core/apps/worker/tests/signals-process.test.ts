@@ -8,13 +8,17 @@
 // within the hour linkedin's third error ends it first, the account paused (beta-p6-020); a stop
 // thrown after a profile read's reservation ends it at that read (beta-p6-040).
 // Each profile read costs a credit of signals.engager, committed when the profile came and released
-// otherwise; a candidate dropped before its read costs nothing (beta-p1-090).
+// otherwise; a candidate dropped before its read costs nothing (beta-p1-090). Competitors' staff are
+// dropped by the noise rules before the read and after it, recruiters and job seekers before it by
+// the rules a batch the triage could not answer takes (gamma-p5-030): here every triage step is the
+// rules', the agent's being tests/signals-triage.test.ts'. After the read, a recruiter's profile is
+// a pending lead (signals-triage-ai).
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { TenantClient } from "@whytide/db";
-import type { Engager, LinkedinFake, LlmFake } from "@whytide/providers";
+import type { FakeEngager as Engager, LinkedinFake, LlmFake } from "@whytide/providers";
 
 process.env.PROVIDER_LINKEDIN = "fake";
 process.env.PROVIDER_FILES = "fake";
@@ -34,7 +38,7 @@ const { start } = await import("../src/start.ts");
 const { runWorkflow, withTestWorkflowEnvironment } = await import("../testing/index.ts");
 const built = (path: string) => import(new URL(`../../../modules/${path}`, import.meta.url).href);
 const contacts = await built("contacts/dist/index.js");
-const { useHashSalt } = await built("contacts/dist/testing/index.js");
+const { useEnrichmentHold, useHashSalt } = await built("contacts/dist/testing/index.js");
 const { readIcpForScoring } = await built("icp/dist/index.js");
 const linkedin = await built("linkedin/dist/testing/index.js");
 const { useQualificationClient } = await built("qualification/dist/testing/index.js");
@@ -49,6 +53,8 @@ tenancy.useTenancyClient(db());
 useQualificationClient(db());
 linkedin.useSecretKeys(platform.loadMasterKeys({ APP_MASTER_KEY: platform.newMasterKey() }));
 useHashSalt("test-salt-".repeat(4));
+// A new lead is judged at once here; contacts' enrichment-hold.test.ts holds one (gamma-en-040).
+useEnrichmentHold(0);
 await loadAgentTasks();
 const log = platform.createLogger({ destination: platform.collectLogs().destination });
 const names = new Set(["credits", "linkedin", "signals"]);
@@ -168,11 +174,15 @@ async function topUp(source: Source, amount: number) {
 }
 type RunResult = { runId: string; status: string; code?: string };
 type Activity = (input: never) => Promise<unknown>;
+/** The triage's step decided by the rules: the model's answers here are qualification's. */
+const rules = {
+  signals_triage_candidates: async (input: never) => activities.signals_triage_fallback?.(input),
+};
 const run = (source: Source, replaced: Record<string, Activity> = {}) =>
   runWorkflow<RunResult>(
     "signals_run",
     { workspaceId: source.workspaceId, sourceId: source.sourceId },
-    { activities: { ...activities, ...replaced } },
+    { activities: { ...activities, ...rules, ...replaced } },
   );
 /** linkedin_read_profile, every attempt of the profile reads `failing` names (from 0) failing as an unreachable vendor does. */
 function failingReads(failing: readonly number[]): Record<string, Activity> {
@@ -233,18 +243,20 @@ async function until<T>(read: () => Promise<T | null | undefined>): Promise<T> {
   }
 }
 
-test("twenty staged: two own staff, three hashed, five filtered and ten kept; ten persons, leads, events and evidence, five hashes with their reasons, fifteen profile reads, nothing else left of the rejected anywhere; signals.person_found's ten ids reach qualification's batch, which scores them", async () => {
+test("twenty staged: two own staff, three hashed, five filtered by their country and ten kept, one of them with a title outside the ICP's (title-check-ai); ten persons, leads, events and evidence, five hashes with their reasons, fifteen profile reads, nothing else left of the rejected anywhere; signals.person_found's ten ids reach qualification's batch, which scores them", async () => {
   linkedin.useClock(() => WEDNESDAY);
   const own = [0, 1].map((n) =>
     engager(`own-${n}`, n, undefined, { headline: "Sales at ACME Labs" }),
   );
   const hashed = [2, 3, 4].map((n) => engager(`hashed-${n}`, n));
+  // A title outside the ICP's stops nobody (title-check-ai): the country does.
+  const abroad = (n: number) => (n < 8 ? "Madrid, Spain" : "Paris, France");
   const filtered = [5, 6, 7, 8, 9].map((n) =>
-    engager(`rejected-${n}`, n, n < 8 ? { title: "Barista" } : { locationText: "Paris, France" }),
+    engager(`rejected-${n}`, n, { title: "Barista", locationText: abroad(n) }),
   );
   const comment = { reaction: "comment", commentText: `Exactly our problem. ${"x".repeat(600)}` };
   const kept = [...Array(10).keys()].map((n) =>
-    engager(`kept-${n}`, 10 + n, {}, n === 0 ? comment : {}),
+    engager(`kept-${n}`, 10 + n, n === 1 ? { title: "Barista" } : {}, n === 0 ? comment : {}),
   );
   const source = await sourceOf([...own, ...hashed, ...filtered, ...kept]);
   await inRun(source.workspaceId, async () => {
@@ -294,9 +306,13 @@ test("twenty staged: two own staff, three hashed, five filtered and ten kept; te
   const hashes = await db().personHash.findMany({ where: { workspaceId: source.workspaceId } });
   const reasons = hashes.map((row) => JSON.stringify(row.dropReasons)).sort();
   assert.deepEqual(reasons, [
-    ...Array(2).fill('{"country_mismatch":1}'),
-    ...Array(6).fill('{"title_mismatch":1}'),
+    ...Array(5).fill('{"country_mismatch":1}'),
+    ...Array(3).fill('{"title_mismatch":1}'),
   ]);
+  const barista = state.persons.find((person) => person.title === "Barista");
+  assert.ok(barista, "the Barista is a person");
+  assert.equal(state.leads.filter((lead) => lead.personId === barista.id).length, 1);
+  assert.equal(state.events.filter((event) => event.personId === barista.id).length, 1);
   const reads = await db().senderQuotaReservation.findMany({
     where: { senderAccountId: source.accountId },
   });
@@ -424,28 +440,40 @@ test("a known person engaging again gets a second event, no second lead and a re
   linkedin.useClock(undefined);
 });
 
-test("the cap reached between profile reads: the profiles read are processed before the run waits, and it reads the rest once the quota day rolls", async () => {
+test("the day's reading ended between profile reads (gamma-p5-040): with 22 reads left the run's budget of two reads the page and one profile, which is processed, and the run ends done with budget_reached, no credit held, its watermark kept; the next day's run drops that one as known and reads the other two", async () => {
   linkedin.useClock(() => WEDNESDAY);
   const source = await sourceOf([0, 1, 2].map((n) => engager(`capped-${n}`, n, {})));
-  await db().senderAccount.update({ where: { id: source.accountId }, data: { dailyReadCap: 2 } });
-  const pending = run(source);
-  // The page and one profile read on Wednesday: that one's person exists before the day rolls.
+  const cap = (dailyReadCap: number) =>
+    db().senderAccount.update({ where: { id: source.accountId }, data: { dailyReadCap } });
+  await cap(22);
+  const ended = await run(source);
+  assert.equal(ended.status, "done");
+  const first = await stateOf(source, ended.runId);
+  assert.deepEqual(first.counts, {
+    ...{ pages: 1, read: 3, staged: 3, created: 1, profiles_read: 1, budget_reached: 1 },
+  });
+  assert.equal(first.persons.length, 1);
+  // The next candidate's credit comes after its slot: none is held at the end of the day's reads.
   const where = { workspaceId: source.workspaceId };
-  await until(async () => ((await db().person.count({ where })) === 1 ? true : undefined));
-  // The next candidate's credit comes after its slot: none is held through the wait.
   const held = await db().creditUsage.count({ where: { ...where, status: "reserved" } });
   assert.equal(held, 0);
+  assert.deepEqual(await creditsOf(ended.runId), [["1", "committed"]]);
+  const kept = await db().signalSource.findUniqueOrThrow({ where: { id: source.sourceId } });
+  assert.equal(kept.watermark, null);
+
   linkedin.useClock(() => THURSDAY);
-  const done = await pending;
+  await cap(100);
+  const done = await run(source);
   assert.equal(done.status, "done");
   const state = await stateOf(source, done.runId);
   assert.deepEqual(state.counts, {
-    ...{ pages: 1, read: 3, staged: 3, created: 3, profiles_read: 3 },
+    ...{ pages: 1, read: 3, staged: 3, dropped_known: 1, created: 2, profiles_read: 2 },
   });
+  assert.equal(state.persons.length, 3);
   const found = await state.outbox("signals.person_found");
   const sizes = found.map((entry) => (entry.payload as { personIds: string[] }).personIds.length);
   assert.deepEqual(sizes.sort(), [1, 2]);
-  assert.deepEqual(await creditsOf(done.runId), Array(3).fill(["1", "committed"]));
+  assert.deepEqual(await creditsOf(done.runId), Array(2).fill(["1", "committed"]));
   linkedin.useClock(undefined);
 });
 
@@ -455,7 +483,7 @@ test("a run refused a candidate's credit releases its read, processes the profil
   // the staff are dropped before any read. Four credits pay for the first four reads.
   const seeded = [...Array(130).keys()].map((n) => {
     if (n < 2 || n >= 128) return engager(`paid-${n}`, n, {});
-    if (n === 2) return engager(`filtered-${n}`, n, { title: "Barista" });
+    if (n === 2) return engager(`filtered-${n}`, n, { locationText: "Paris, France" });
     return engager(`staff-${n}`, n, undefined, { headline: "Acme Labs" });
   });
   const source = await sourceOf(seeded, 4);
@@ -486,7 +514,7 @@ test("a run refused a candidate's credit releases its read, processes the profil
   const hashes = await db().personHash.findMany({ where: { workspaceId: source.workspaceId } });
   assert.deepEqual(
     hashes.map((row) => row.dropReasons),
-    [{ title_mismatch: 1 }],
+    [{ country_mismatch: 1 }],
   );
   const profileReads = await db().senderActionLog.count({
     where: { workspaceId: source.workspaceId, kind: "read_profile", outcome: "ok" },
@@ -590,5 +618,67 @@ test("a stop thrown between the last candidate's reservation and its profile rea
   ]);
   const kept = await db().signalSource.findUniqueOrThrow({ where: { id: source.sourceId } });
   assert.equal(kept.watermark, null);
+  linkedin.useClock(undefined);
+});
+
+test("by the rules, recruiters, job seekers and a competitor's staff are dropped by their headline before any read slot, credit or profile read, and a competitor's staff by their profile after it, before the hard filters and with no hash; a talent acquisition lead's profile is a pending lead (signals-triage-ai); an ICP whose titles hold Recruiter keeps recruiters (gamma-p5-030)", async () => {
+  linkedin.useClock(() => WEDNESDAY);
+  const rival = {
+    companyName: "Rival Corp",
+    companyUrl: "https://www.linkedin.com/company/rival-corp",
+  };
+  const source = await sourceOf([
+    engager("noise-recruiter", 0, undefined, { headline: "Technical Recruiter | SaaS" }),
+    engager("noise-seeker", 1, undefined, { headline: "Open to work" }),
+    engager("noise-rival", 2, undefined, { headline: "AE at Rival Corp" }),
+    engager("noise-rival-staff", 3, rival),
+    engager("noise-talent", 4, { title: "Talent Acquisition Lead" }),
+    engager("noise-kept", 5, {}),
+  ]);
+  const { senderAccountId, createdBy } = await db().signalSource.findUniqueOrThrow({
+    where: { id: source.sourceId },
+  });
+  // gamma-p5-025's kind, its row written directly: a disabled source names a competitor too.
+  await db().signalSource.create({
+    data: {
+      id: platform.newId("src"),
+      ...{ workspaceId: source.workspaceId, kind: "competitor_engagement", config: rival },
+      ...{ label: "Rival", senderAccountId, createdBy, enabled: false },
+    },
+  });
+  const result = await run(source);
+  assert.equal(result.status, "done");
+  const state = await stateOf(source, result.runId);
+  assert.deepEqual(state.counts, {
+    ...{ pages: 1, read: 6, staged: 6, created: 2, profiles_read: 3 },
+    ...{ dropped_recruiter: 1, dropped_job_seeker: 1, dropped_competitor: 2 },
+  });
+  assert.deepEqual([state.persons.length, state.candidates, state.raw], [2, 0, 0]);
+  // The page and three profile reads, each with its credit: the headline's three reserved nothing.
+  const { reads, outcomes } = await readsOf(source);
+  assert.deepEqual(reads, Array(4).fill([1, 1, "committed"]));
+  assert.deepEqual(outcomes, Array(3).fill(["reserved", "ok"]).flat());
+  assert.deepEqual(await creditsOf(result.runId), Array(3).fill(["1", "committed"]));
+  // The talent lead's title holds a recruiter's term: no rule drops it after the read any more, and
+  // its country fits, so it is a pending lead, which the assessment judges; no hash.
+  const talent = state.persons.find((person) => person.title === "Talent Acquisition Lead");
+  assert.ok(talent, "the talent acquisition lead is a person");
+  const pending = state.leads.filter((lead) => lead.personId === talent.id);
+  assert.deepEqual(
+    pending.map((lead) => lead.qualificationStatus),
+    ["pending"],
+  );
+  assert.equal(await db().personHash.count({ where: { workspaceId: source.workspaceId } }), 0);
+
+  const wanted = await sourceOf([
+    engager("noise-wanted", 0, { title: "Recruiter" }, { headline: "Recruiter" }),
+  ]);
+  await inRun(wanted.workspaceId, async (tx) => {
+    const { id } = (await readIcpForScoring(wanted.workspaceId)).icp;
+    await tx.icp.update({ where: { id }, data: { titles: [TITLE, "Recruiter"] } });
+  });
+  const kept = await run(wanted);
+  const after = await stateOf(wanted, kept.runId);
+  assert.deepEqual(after.counts, { pages: 1, read: 1, staged: 1, created: 1, profiles_read: 1 });
   linkedin.useClock(undefined);
 });

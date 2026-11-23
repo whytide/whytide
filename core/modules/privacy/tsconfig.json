@@ -18,6 +18,7 @@
     { "path": "../approvals" },
     { "path": "../campaigns" },
     { "path": "../contacts" },
+    { "path": "../enrichment" },
     { "path": "../inbox" },
     { "path": "../linkedin" },
     { "path": "../messaging" },

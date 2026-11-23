@@ -1,0 +1,23 @@
+# A member's verdict (core/modules/qualification/README.md "A member's verdict", "Routes"): set or
+# clear the verdict of one criterion of a lead's current snapshot; the lead is decided again from the
+# verdicts that count, with no model call. A member's session and contacts' reviews.write. `personId`
+# is a person of your workspace with a scored lead: put it in http-client.private.env.json with your
+# workspaceId. A write sends the cookie, so it sends Origin: {{appOrigin}} too (the api's origin
+# check). Each answers the snapshot as GET …/snapshot does; 400 validation_failed for a criterion or a
+# verdict off the lists, or a note past 500 characters; 404 score_snapshot_not_found for a lead never
+# scored, lead_not_found for a person without a lead.
+
+### PUT /v1/workspaces/{workspaceId}/qualification/leads/{personId}/verdicts/{criterion}: a member's verdict on the criterion, with an optional note; it counts instead of the model's
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/qualification/leads/{{personId}}/verdicts/location
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "verdict": "met", "note": "Works from the Berlin office." }
+
+### DELETE /v1/workspaces/{workspaceId}/qualification/leads/{personId}/verdicts/{criterion}: clears the member's verdict; the model's counts again
+DELETE {{baseUrl}}/v1/workspaces/{{workspaceId}}/qualification/leads/{{personId}}/verdicts/location
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}

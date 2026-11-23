@@ -1,11 +1,12 @@
 "use client";
 // The costs page in the browser (README.md "Screens"): the organization's balance, large, and its
-// period's end, with a bar of the period's grant, spent then reserved; then the week the picker
-// names, one of the last twelve ISO weeks in UTC: the credits spent, the vendors' cost, the leads
-// qualified and the cost per 100 of them, by action and by vendor, each amount with a bar of its
-// share, and the week's usage a page at a time. Read through the web's API client, with the loading
-// state, the error state with the code in words and a retry, and the empty state of a week with
-// nothing spent.
+// period's end, with a bar of the period's grant, spent then reserved; every priced action's price
+// in a PriceTag, with a rise's coming price and its date (README "Showing a price"); then the week
+// the picker names, one of the last twelve ISO weeks in UTC: the credits spent, the vendors' cost,
+// the leads qualified and the cost per 100 of them, by action and by vendor, each amount with a bar
+// of its share, and the week's usage a page at a time. Read through the web's API client, with the
+// loading state, the error state with the code in words and a retry, and the empty state of a week
+// with nothing spent.
 import {
   Badge,
   type BadgeTone,
@@ -14,6 +15,7 @@ import {
   ErrorState,
   LoadingState,
   Meter,
+  PriceTag,
   Select,
   Skeleton,
 } from "@whytide/ui";
@@ -23,12 +25,13 @@ import { useFormatter, useTranslations } from "next-intl";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { recentWeeks, type Week } from "../../domain/costs/week.ts";
 import type { CostsResponse } from "../../schemas/costs.ts";
-import type { BalanceResponse, UsageResponse } from "../../schemas/credits.ts";
+import type { BalanceResponse, PricesResponse, UsageResponse } from "../../schemas/credits.ts";
 import { AMOUNT } from "../amount.ts";
 import { LOADING_TILES } from "./constants.ts";
 
 type Loaded = {
   readonly balance: BalanceResponse;
+  readonly prices: PricesResponse;
   readonly costs: CostsResponse;
   readonly usage: UsageResponse;
   /** The cursor of the usage page shown, and of the pages before it, the first page's undefined. */
@@ -36,6 +39,7 @@ type Loaded = {
   readonly before: readonly (string | undefined)[];
 };
 type Usage = UsageResponse["items"][number];
+type Price = PricesResponse["prices"][number];
 
 const WEEKS = 12;
 const PAGE = 20;
@@ -49,6 +53,10 @@ const STATUS_TONE: Record<Usage["status"], BadgeTone> = {
   expired: "neutral",
 };
 const codeOf = (error: unknown) => (error instanceof ApiError ? error.code : "internal_error");
+/** An action's code, as the page shows codes. */
+const code = (action: string) => (
+  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-ink">{action}</code>
+);
 
 export function CostsScreen({ workspaceId }: { workspaceId: string }) {
   const t = useTranslations("credits.screen");
@@ -77,12 +85,13 @@ export function CostsScreen({ workspaceId }: { workspaceId: string }) {
       const api = browserApi();
       const path = { workspaceId };
       const query = { week: week?.week };
-      const [balance, costs, usage] = await Promise.all([
+      const [balance, prices, costs, usage] = await Promise.all([
         data(api.GET("/v1/workspaces/{workspaceId}/credits/balance", { params: { path } })),
+        data(api.GET("/v1/workspaces/{workspaceId}/credits/prices", { params: { path } })),
         data(api.GET("/v1/workspaces/{workspaceId}/credits/costs", { params: { path, query } })),
         readUsage(undefined),
       ]);
-      setLoaded({ balance, costs, usage, before: [] });
+      setLoaded({ balance, prices, costs, usage, before: [] });
     } catch (error) {
       setFailure(codeOf(error));
     }
@@ -145,6 +154,7 @@ export function CostsScreen({ workspaceId }: { workspaceId: string }) {
           <Skeleton lines={3} />
         </div>
       ) : null}
+      {loaded ? <Prices prices={loaded.prices.prices} /> : null}
       <section aria-labelledby="credits-week" className="grid gap-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <h2 id="credits-week" className="text-lg font-semibold tracking-tight text-ink">
@@ -225,6 +235,47 @@ function Balance({ balance }: { balance: BalanceResponse }) {
   );
 }
 
+/** Every priced action in effect: its code and its price, and a rise's coming one. */
+function Prices({ prices }: { prices: Price[] }) {
+  const t = useTranslations("credits.costs.prices");
+  return (
+    <section aria-labelledby="credits-prices" className={`${CARD} grid gap-4 sm:p-6`}>
+      <h2 id="credits-prices" className="font-semibold text-ink">
+        {t("title")}
+      </h2>
+      <DataTable
+        caption={t("caption")}
+        columns={[
+          { id: "action", header: t("column_action"), cell: (row) => code(row.action) },
+          { id: "price", header: t("column_price"), cell: (row) => <PriceCell price={row} /> },
+        ]}
+        rows={prices.map((row) => ({ ...row, id: row.action }))}
+        empty={<EmptyState message={t("empty")} />}
+      />
+    </section>
+  );
+}
+
+/**
+ * The price in a PriceTag, with the coming one and its date; a rise to another unit, which the
+ * PriceTag cannot name, in the kit's own words beside it.
+ */
+function PriceCell({ price: { credits, unit, next } }: { price: Price }) {
+  const kit = useTranslations("ui.price");
+  if (next === null || next.unit === unit) {
+    return <PriceTag credits={credits} unit={unit} next={next ?? undefined} />;
+  }
+  const date = new Date(next.effectiveFrom);
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+      <PriceTag credits={credits} unit={unit} />
+      <span className="text-xs text-ink-muted tabular-nums">
+        {kit("next", { credits: Number(next.credits), unit: next.unit, date })}
+      </span>
+    </span>
+  );
+}
+
 /** The week's numbers, its two breakdowns and its usage page; the empty state when nothing moved. */
 function WeekCosts(props: {
   costs: CostsResponse;
@@ -257,9 +308,6 @@ function WeekCosts(props: {
     },
   ];
   const when = { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" } as const;
-  const code = (action: string) => (
-    <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-ink">{action}</code>
-  );
   /** An amount, then a bar of its share of the week's whole. */
   const share = (value: string, whole: string) => (
     <span className="flex items-center gap-3">

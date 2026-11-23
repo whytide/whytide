@@ -1,25 +1,31 @@
-// The Unipile adapter's constants. The post links listPostEngagers reads are the six forms signals
-// accepts: POST_PATHS of core/modules/signals/sources/post_engagers/post-url.ts, copied here with the
-// kind and the id captured, since providers never imports a module. A change to one is a change to
-// the other. Then the client's bounds and the vendor's error types it maps (README.md "Errors"),
-// read on 2026-10-29 in Unipile's API reference, the send calls' pages, and the webhooks' header,
-// pairing names, statuses and events (README.md "Webhooks", "Pairing"), read there the same day.
+// The Unipile adapter's constants. The post links listPostEngagers reads are the port's POST_PATHS
+// (../constants.ts). Then the client's bounds and the vendor's error types it maps (README.md
+// "Errors"), read on 2026-10-29 in Unipile's API reference, the send calls' pages, and the webhooks'
+// header, pairing names, statuses and events (README.md "Webhooks", "Pairing"), read there the same
+// day; and the post reads' routes and links (README.md "Covers"), read there on 2026-10-30.
 import type { LinkedinDisconnectReason } from "../port.ts";
 
-/** The kind of post a link names. */
-const KIND = "(activity|share|ugcPost)";
-/** A colon of the URN, plain or percent-encoded. */
-const COLON = "(?::|%3[Aa])";
+/** Vendor pages one read of engagers or of posts loads at most: a cursor that loops stops there. */
+export const MAX_LOADS = 10;
 
-/**
- * The path of a post's link, its kind and id captured: /posts/<slug>-<kind>-<id>-<code>, where the
- * greedy slug leaves the link its last -<kind>-<id>-, so that a slug word such as market-share-40
- * never counts; or /feed/update/urn:li:<kind>:<id>.
- */
-export const POST_PATHS: readonly RegExp[] = [
-  new RegExp(`^/posts/[\\w%.~-]+-${KIND}-(\\d{1,30})-[\\w-]+/?$`),
-  new RegExp(`^/feed/update/urn${COLON}li${COLON}${KIND}${COLON}(\\d{1,30})/?$`),
-];
+/** The LinkedIn search in its posts category, newest first, as the classic API takes it. */
+export const SEARCH_POSTS = { api: "classic", category: "posts", sort_by: "date" } as const;
+/** The posts a search page gives at most: "technically up to 49" in Unipile's reference. */
+export const SEARCH_POSTS_PAGE_MAX = 49;
+/** A search result that is a post; a list of an author's posts gives no type. */
+export const POST_TYPE = "POST";
+/** Around a phrase, LinkedIn's exact phrase in a search. */
+export const PHRASE_QUOTE = '"';
+/** An account's type at Unipile when it is a LinkedIn account. */
+export const LINKEDIN_ACCOUNT = "LINKEDIN";
+/** A post's social id, which a /feed/update/ link names: its kind and number captured. */
+export const SOCIAL_ID = /^urn:li:(activity|share|ugcPost):(\d{1,30})$/;
+/** A company's id as the posts route takes it: its number; a slug is looked up first. */
+export const COMPANY_ID = /^\d{1,30}$/;
+/** The links the adapter makes: a post's from its social id, a member's and a company's pages. */
+export const POST_LINK = "https://www.linkedin.com/feed/update/";
+export const MEMBER_LINK = "https://www.linkedin.com/in/";
+export const COMPANY_LINK = "https://www.linkedin.com/company/";
 
 /**
  * The kind Unipile is asked for by its number, as before share and ugcPost links were read, so that
@@ -144,3 +150,9 @@ export const RELATION_EVENT = "new_relation";
 
 /** Between the parts of an acceptance's eventKey, `new_relation:<account_id>:<user_provider_id>`. */
 export const EVENT_KEY_SEPARATOR = ":";
+
+/** getCompany (company.ts): a company profile's foundation_date starts with its year. */
+export const FOUNDATION_YEAR = /^(\d{4})(?:\D|$)/;
+/** A website given with its scheme; a bare host (`example.com`) is read as WEB_SCHEME's. */
+export const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+export const WEB_SCHEME = "https://";

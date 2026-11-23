@@ -1,14 +1,14 @@
-// What tests/assess.test.ts and tests/tenancy.test.ts share: the agent task loaded from the sources
-// as a host loads it, the LLM fake, the fixture person with a company and an ICP seeded through
-// contacts' and icp's commands, a valid answer of the model, and assessPerson's context: tenant runs
-// and callAgent's options as the app role.
+// What the database tests share: the agent task loaded from the sources as a host loads it, the LLM
+// fake, the fixture person with a company and an ICP seeded through contacts' and icp's commands,
+// more persons of that profile and more audiences (gamma-p5-050), a valid answer of the model, and
+// assessPerson's context: tenant runs and callAgent's options as the app role.
 import { loadAgentTasks } from "@whytide/ai";
 import { linkPersonToCompany, upsertCompany, upsertPersonFromSource } from "@whytide/contacts";
 import { useHashSalt } from "@whytide/contacts/testing";
 import { type TenantClient, withTenant } from "@whytide/db";
 import { asRole } from "@whytide/db/testing";
 import { readIcpForScoring } from "@whytide/icp";
-import { servicePrincipal } from "@whytide/platform";
+import { newId, servicePrincipal } from "@whytide/platform";
 import { getAdapter, type LlmFake, llmPort } from "@whytide/providers";
 import type { AssessContext } from "../../domain/assess/assess-person.ts";
 import type { AssessFitOutput } from "../../schemas/assess-fit.ts";
@@ -73,6 +73,50 @@ export async function seed(workspaceId: string, icp: Partial<typeof ICP> = {}): 
     const { id } = (await readIcpForScoring(workspaceId)).icp;
     await tx.icp.update({ where: { id }, data: { ...ICP, ...icp } });
     return person.id;
+  });
+}
+
+/**
+ * Another person of the fixture's profile in the workspace, at its own LinkedIn URL, linked to the
+ * fixture company; `profile` changes its fields. Its id.
+ */
+export async function seedPerson(
+  workspaceId: string,
+  slug: string,
+  profile: Partial<typeof PERSON> = {},
+): Promise<string> {
+  return run(workspaceId, async () => {
+    const linkedinUrl = `https://linkedin.com/in/${slug}`;
+    const fields = { ...PERSON, linkedinUrl, ...profile };
+    const imported = { source: "import", provider: "csv" } as const;
+    const { person } = await upsertPersonFromSource({ ...imported, profile: fields });
+    const { company } = await upsertCompany({ ...imported, company: COMPANY });
+    await linkPersonToCompany({ personId: person.id, companyId: company.id });
+    return person.id;
+  });
+}
+
+/**
+ * Another audience of the workspace (gamma-p5-050), not the default, at version 1, with the fixture
+ * ICP's fields changed by `icp` and the default's criteria, their weights changed by `weights`. Its
+ * id. The default is made first, as icp's first read makes it.
+ */
+export async function addAudience(
+  workspaceId: string,
+  name: string,
+  icp: Partial<typeof ICP> = {},
+  weights: Readonly<Record<string, number>> = {},
+): Promise<string> {
+  return run(workspaceId, async (tx) => {
+    const { criteria } = await readIcpForScoring(workspaceId);
+    const id = newId("icp");
+    await tx.icp.create({ data: { id, workspaceId, name, isDefault: false, ...ICP, ...icp } });
+    const rows = criteria.map(({ key, weight, isMust, enabled }) => ({
+      ...{ id: newId("crit"), workspaceId, icpId: id, key },
+      ...{ weight: weights[key] ?? weight, isMust, enabled },
+    }));
+    await tx.criterion.createMany({ data: rows });
+    return id;
   });
 }
 

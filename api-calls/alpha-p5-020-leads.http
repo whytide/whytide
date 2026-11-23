@@ -6,7 +6,7 @@ GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads?sort=fit&status=qua
 Accept: application/json
 Cookie: {{sessionCookie}}
 
-### GET /v1/workspaces/{workspaceId}/contacts/leads/{personId}: one lead, its person's business fields and the provenance of each, and suppression, null while the person may be contacted, else { reason } (opted_out, never_contact_person or never_contact_company); 404 lead_not_found
+### GET /v1/workspaces/{workspaceId}/contacts/leads/{personId}: one lead, its person's business fields and the provenance of each (linkedinUrl null for a person known by an email address alone, gamma-rf-050), and suppression, null while the person may be contacted, else { reason } (opted_out, never_contact_person or never_contact_company); 404 lead_not_found
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/contacts/leads/{{personId}}
 Accept: application/json
 Cookie: {{sessionCookie}}

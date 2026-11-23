@@ -6,7 +6,9 @@
 // its own (core/apps/api/README.md "Request protection"). A module cannot import the host, so each
 // route sets the host's metadata itself: its permission and its @ApiRoute ("Permissions", "OpenAPI
 // and the client"). The controls routes are api/controls.controller.ts; the webhook is
-// api/webhooks.ts, mounted by the host.
+// api/webhooks.ts, mounted by the host. Who may do what with an account is domain/access.ts's
+// (gamma-p6-070): a member's own account is theirs to change, a holder of linkedin.manage sees and
+// pauses every one; each answer carries the owner's name, one read of the members per request.
 import type { IncomingMessage } from "node:http";
 import {
   Body,
@@ -22,11 +24,17 @@ import {
   Req,
   SetMetadata,
 } from "@nestjs/common";
-import { currentTenant, can as decide, type TenantContext } from "@whytide/platform";
+import { currentTenant, type TenantContext } from "@whytide/platform";
 import { linkedinPort } from "@whytide/providers";
 import {
+  accessOf,
+  ownAccount,
+  ownerNames,
+  seenAccount,
+  visibleAccounts,
+} from "../domain/access.ts";
+import {
   disconnect,
-  listAccounts,
   requestRefresh,
   type SenderAccount,
   startConnect,
@@ -39,7 +47,6 @@ import { type HealthView, readHealth, resumeAccount } from "../domain/health/res
 import { readUsage } from "../domain/quota/reservations.ts";
 import { disconnectClient } from "../domain/store.ts";
 import { errors } from "../errors.ts";
-import { permissions } from "../permissions.ts";
 import {
   type AccountResponse,
   accountListResponse,
@@ -89,11 +96,14 @@ export class AccountsController {
   @Get()
   @can("linkedin.read")
   @route({
-    summary: "The workspace's sender accounts, oldest first, with their status and working hours",
+    summary:
+      "The sender accounts the caller sees, oldest first, with their status, working hours, owner's name and what the caller may do: a Member's own, every member's for a holder of linkedin.manage",
     response: accountListResponse,
   })
   async list(): Promise<{ accounts: AccountResponse[] }> {
-    return { accounts: (await listAccounts()).map(toResponse) };
+    const accounts = await visibleAccounts(currentTenant().principal);
+    const names = await ownerNames();
+    return { accounts: accounts.map((account) => toResponse(account, names)) };
   }
 
   @Get(":id/usage")
@@ -103,9 +113,10 @@ export class AccountsController {
       "An account's day in its time zone: its reads, connection requests, messages and withdrawals, reserved and made, against their limits, the week's connection requests, the 200 actions, and whether its working hours are open now",
     params: accountParams,
     response: usageResponse,
-    errors: [errors.sender_account_not_found],
+    errors: [errors.sender_account_not_found, errors.not_account_owner],
   })
   async usage(@Param("id") id: string): Promise<UsageResponse> {
+    await seenAccount(currentTenant().principal, id);
     const usage = await readUsage(id);
     return { ...usage, nextWindowAt: usage.nextWindowAt.toISOString() };
   }
@@ -117,77 +128,83 @@ export class AccountsController {
       "An account's health: its state, what moved it there and since when, the cool-down's end, its status and when the worker checked it, whether the caller may resume it and else why not, the fleet breaker, its pending invitations, its acceptance rate and its latest health events",
     params: accountParams,
     response: healthResponse,
-    errors: [errors.sender_account_not_found],
+    errors: [errors.sender_account_not_found, errors.not_account_owner],
   })
   async health(@Param("id") id: string): Promise<HealthResponse> {
-    return toHealth(await readHealth(currentTenant().principal.userId, id, now()));
+    const { principal } = currentTenant();
+    await seenAccount(principal, id);
+    return toHealth(await readHealth(principal.userId, id, now()));
   }
 
   @Patch(":id")
-  @can("linkedin.manage")
+  @can("linkedin.connect")
   @route({
-    summary: "Relabels an account or changes its time zone, working hours or daily read cap",
+    summary:
+      "Its owner relabels an account or changes its time zone, working hours or daily read cap",
     params: accountParams,
     body: updateAccountBody,
     response: accountResponse,
     errors: [
       errors.sender_account_not_found,
+      errors.not_account_owner,
       errors.working_hours_invalid,
       errors.read_cap_invalid,
     ],
   })
   async update(@Param("id") id: string, @Body() body: UpdateAccountBody): Promise<AccountResponse> {
-    return toResponse(await updateSettings(id, body));
+    await ownAccount(currentTenant().principal, id);
+    return answer(await updateSettings(id, body));
   }
 
   @Post(":id/refresh")
   @HttpCode(202)
-  @can("linkedin.manage")
+  @can("linkedin.connect")
   @idempotent
   @route({
     summary:
-      "Asks the worker for the account's status at the provider now; the account as it stands, its status changing once the worker has it",
+      "Its owner asks the worker for the account's status at the provider now; the account as it stands, its status changing once the worker has it",
     params: accountParams,
     response: accountResponse,
-    errors: [errors.sender_account_not_found],
+    errors: [errors.sender_account_not_found, errors.not_account_owner],
   })
   async refresh(@Param("id") id: string): Promise<AccountResponse> {
-    return toResponse(await requestRefresh(id));
+    await ownAccount(currentTenant().principal, id);
+    return answer(await requestRefresh(id));
   }
 
   @Post(":id/pause")
   @HttpCode(200)
-  @can("linkedin.manage")
+  @can("linkedin.connect")
   @idempotent
   @route({
     summary:
-      "Pauses the account: no LinkedIn action through it from the next reservation, reads included; a paused account, the operator's pause too, stays as it is; the account",
+      "Its owner or a holder of linkedin.manage pauses the account: no LinkedIn action through it from the next reservation, reads included; a paused account, the operator's pause too, stays as it is; the account",
     params: accountParams,
     response: accountResponse,
-    errors: [errors.sender_account_not_found],
+    errors: [errors.sender_account_not_found, errors.not_account_owner],
   })
   async pause(@Param("id") id: string): Promise<AccountResponse> {
-    return toResponse(await pauseAccount(id, currentTenant().principal.userId));
+    return answer(await pauseAccount(id, currentTenant().principal));
   }
 
   @Post(":id/unpause")
   @HttpCode(200)
-  @can("linkedin.manage")
+  @can("linkedin.connect")
   @idempotent
   @route({
     summary:
-      "Resumes the account, by its owner only; the operator's pause only the operator lifts; an account not paused stays as it is; the account",
+      "Lifts the account's pause: a tester's, by its owner or a holder of linkedin.manage; a removed member's, by its owner only; the operator's, only the operator; an account not paused stays as it is; the account",
     params: accountParams,
     response: accountResponse,
     errors: [errors.sender_account_not_found, errors.not_account_owner, errors.stopped_by_operator],
   })
   async unpause(@Param("id") id: string): Promise<AccountResponse> {
-    return toResponse(await unpauseAccount(id, currentTenant().principal.userId));
+    return answer(await unpauseAccount(id, currentTenant().principal));
   }
 
   @Post(":id/resume")
   @HttpCode(200)
-  @can("linkedin.manage")
+  @can("linkedin.connect")
   @idempotent
   @route({
     summary:
@@ -233,19 +250,20 @@ export class AccountsController {
     @Param("id") id: string,
     @Body() body: DisclosureBody,
   ): Promise<AccountResponse> {
-    return toResponse(await acceptDisclosure(id, currentTenant().principal.userId, body));
+    return answer(await acceptDisclosure(id, currentTenant().principal.userId, body));
   }
 
   @Delete(":id")
   @HttpCode(204)
-  @can("linkedin.manage")
+  @can("linkedin.connect")
   @route({
     summary:
-      "Disconnects an account: deletes its reference, keeps it as disconnected; publishes linkedin.sender_account_disconnected",
+      "Its owner disconnects an account: deletes its reference, keeps it as disconnected; publishes linkedin.sender_account_disconnected",
     params: accountParams,
-    errors: [errors.sender_account_not_found],
+    errors: [errors.sender_account_not_found, errors.not_account_owner],
   })
   async remove(@Param("id") id: string): Promise<void> {
+    await ownAccount(currentTenant().principal, id);
     await disconnect(id);
   }
 }
@@ -282,13 +300,15 @@ function toHealth(view: HealthView): HealthResponse {
   };
 }
 
-function toResponse(account: SenderAccount): AccountResponse {
+/** The account's answer, with its owner's name from one read of the members. */
+async function answer(account: SenderAccount): Promise<AccountResponse> {
+  return toResponse(account, await ownerNames());
+}
+
+/** The account as the caller sees it: the flags by domain/access.ts, its owner's name by `names`. */
+function toResponse(account: SenderAccount, names: ReadonlyMap<string, string>): AccountResponse {
   const { id, label, status, timeZone, workingHours, dailyReadCap, ownerUserId } = account;
   const { killSwitch, killSwitchSource } = account;
-  const { principal, workspaceId } = currentTenant();
-  const mine = ownerUserId === principal.userId;
-  // The one permission function (platform README "Principal and permissions"), as the guard asks it.
-  const manage = decide(principal, permissions["linkedin.manage"], { workspaceId });
   return {
     id,
     label,
@@ -296,8 +316,8 @@ function toResponse(account: SenderAccount): AccountResponse {
     timeZone,
     workingHours: { ...workingHours, days: [...workingHours.days] },
     dailyReadCap,
-    mine,
-    canManage: manage === "allow",
+    ...accessOf(currentTenant().principal, account),
+    ownerName: names.get(ownerUserId) ?? null,
     paused: killSwitch,
     pausedBy: killSwitchSource,
     disclosureVersion: account.disclosureVersion,

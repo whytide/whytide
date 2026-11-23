@@ -1,9 +1,10 @@
 "use client";
-// The account's pause (README.md "Screen"), on its card: a Switch, on while the account is paused,
-// that asks for confirmation both ways. Paused, the account takes no LinkedIn action from the next
-// one, reads included, until it is resumed. The operator's pause shows locked, saying so; for a
-// member who may not change it (no linkedin.manage, or another member's account to resume) the
-// Switch is disabled with a hint. A failed press shows its code in words, with a retry.
+// The account's pause (README.md "Screen"), on its card and on a teammate's: a Switch, on while the
+// account is paused, that asks for confirmation both ways. Paused, the account takes no LinkedIn
+// action from the next one, reads included, until it is resumed. The route's flags say who may press
+// it (canPause, canUnpause; gamma-p6-070). The operator's pause shows locked, saying so; a removed
+// member's reads as such, locked for everyone but its owner; for a member who may not change it
+// otherwise the Switch is disabled with a hint. A failed press shows its code in words, with a retry.
 import { Button, Dialog, ErrorState, Switch } from "@whytide/ui";
 import { CirclePause, Lock } from "@whytide/ui/icons";
 import { ApiError, browserApi, data } from "@whytide/web/api/browser";
@@ -27,16 +28,22 @@ export function PauseSwitch({ workspaceId, account, onChange }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
-  const { paused, pausedBy, canManage, mine } = account;
+  const { paused, pausedBy, canPause, canUnpause } = account;
   const locked = pausedBy === "operator";
-  // Any member with linkedin.manage pauses; only the owner resumes.
+  const removed = pausedBy === "member_removed";
+  // The route's rules: its owner or an Owner pauses and lifts a tester's pause; only its owner a
+  // removed member's; only the operator the operator's.
   const hint = locked
     ? t("locked.account")
-    : !canManage
-      ? t("hint.manage_only")
-      : paused && !mine
-        ? t("hint.owner_only")
-        : undefined;
+    : removed && !canUnpause
+      ? t("locked.member_removed")
+      : paused
+        ? canUnpause
+          ? undefined
+          : t("hint.owner_only")
+        : canPause
+          ? undefined
+          : t("hint.manage_only");
 
   async function press() {
     setConfirming(false);
@@ -89,7 +96,7 @@ export function PauseSwitch({ workspaceId, account, onChange }: Props) {
       {paused && !locked ? (
         <p className={`${NOTE} border border-warm-dot/30 bg-warm-soft text-warm-ink`}>
           <CirclePause aria-hidden="true" className={ICON} />
-          {t("pause.on")}
+          {removed ? t("pause.member_removed") : t("pause.on")}
         </p>
       ) : null}
       {hint === undefined ? null : (

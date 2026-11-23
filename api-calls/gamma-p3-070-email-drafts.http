@@ -1,0 +1,29 @@
+# messaging's email drafts (core/modules/messaging/README.md "Routes", gamma-p3-070): a member's
+# session, drafts.read for the read, drafts.write for the rest. `personId`, a person of your
+# workspace with a lead, and `draftId`, the id the first request answers, go in
+# http-client.private.env.json. The POST is @Idempotent(): its Idempotency-Key is an example UUID.
+# A write sends the cookie, so it sends Origin too.
+
+### POST /v1/workspaces/{workspaceId}/messaging/leads/{personId}/drafts: asks for a lead's email draft as a kind of step, email_first or email_follow_up (none: a first email); 202 with the draft, drafting, its stepKind and maxCharacters; 400 messaging_input_invalid for a kind off the channel
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/leads/{{personId}}/drafts
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000003070
+
+{ "channel": "email", "stepKind": "email_first" }
+
+### GET /v1/workspaces/{workspaceId}/messaging/drafts/{id}: the draft with an email's subject and editedSubject, null for a follow-up, and stepKind, the kind it is written as; 404 draft_not_found
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/drafts/{{draftId}}
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PATCH /v1/workspaces/{workspaceId}/messaging/drafts/{id}: a first email's own body and subject, each passing the gates (a subject of 1 to 6 words and 60 characters, no Re:, no link in either); 200 with the draft, edited; 400 draft_subject_not_allowed for a subject on a follow-up or a LinkedIn draft, 400 draft_text_refused with details.issues
+PATCH {{baseUrl}}/v1/workspaces/{{workspaceId}}/messaging/drafts/{{draftId}}
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "editedText": "Hi, a short question about how your team follows up on warm leads before they go cold.", "editedSubject": "Warm leads, sooner" }

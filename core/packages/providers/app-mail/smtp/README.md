@@ -16,7 +16,7 @@
 
 **Resend.** To reach real inboxes, point the adapter at Resend's SMTP relay ([resend.com/docs/send-with-smtp](https://resend.com/docs/send-with-smtp)): `SMTP_HOST=smtp.resend.com`, `SMTP_PORT=465` (TLS from the start), `SMTP_USER=resend`, `SMTP_PASSWORD` the Resend API key (a secret: in `.env.local` or `deploy/.env`, never in a commit), and `MAIL_FROM` an address on a domain verified in Resend. Without a verified domain, Resend sends only from `onboarding@resend.dev`, and only to the Resend account's own address: every other recipient is refused.
 
-`requires` names none: the contract suite runs against the shared stack and fails, never skips, when the stack or `.env.local` is missing. No sandbox key exists or is needed.
+`requires` names `SMTP_HOST`, `SMTP_PORT` and `MAIL_FROM`, so that deploy:check refuses a server without one (gamma-en-105); the login stays out, a pair or neither. The contract suite passes the adapter with no `requires`: it runs against the shared stack and fails, never skips, when the stack or `.env.local` is missing. No sandbox key exists or is needed.
 
 **Provider refs.** None: the adapter stores nothing.
 

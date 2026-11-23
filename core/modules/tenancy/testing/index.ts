@@ -39,8 +39,10 @@ function newOrganization(workspaceId: string = newId(ids.workspace)) {
   return { organization, workspace };
 }
 
+/** An active membership: removed_at and removed_by null, as a removed one's are not (gamma-p6-030). */
 function newMembership(userId: string, workspaceId: string, role: Role = "Owner"): Membership {
-  return { id: newId(ids.membership), workspaceId, userId, role, createdAt: new Date() };
+  const id = newId(ids.membership);
+  return { id, workspaceId, userId, role, createdAt: new Date(), removedAt: null, removedBy: null };
 }
 
 export function createUser(): Promise<User> {

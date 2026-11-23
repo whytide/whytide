@@ -1,7 +1,7 @@
-// The template, its hashes and its keys (README.md "The template"), pure: the four steps; a step's
-// hash, the SHA-256 of its canonical definition; and the idempotency key, the same for the same
-// workspace, person, template and step, different when any of them differs, and new when a step's
-// delay or action changes. Then the writers' check of a reason code.
+// The template, its hashes and its keys (README.md "Campaigns and versions"), pure: the four
+// steps; a step's hash, the SHA-256 of its canonical definition; and the idempotency key, the same
+// for the same workspace, person, template and step, different when any of them differs, and new
+// when a step's delay or action changes. Then the writers' check of a reason code.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";

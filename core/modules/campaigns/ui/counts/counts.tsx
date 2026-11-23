@@ -3,9 +3,10 @@
 // of four rows, the connection requests sent, the messages sent, the invitations accepted and the
 // people who replied, by three columns, today, the last 7 days and since the start, their headers
 // short so that the table fits a phone's width, each number formatted for the reader's locale. An
-// account linkedin no longer holds is titled as removed, its days UTC's. The states: empty, nothing
-// sent yet; a failed read in words, its module's (src/api/errors.ts errorOwner), with Try again,
-// which reads again, the loading state while it does.
+// account linkedin no longer holds is titled as removed, its days UTC's. A line above them says
+// whose accounts they are (gamma-p6-070): the member's own, or every member's for an Owner. The
+// states: empty, nothing sent yet; a failed read in words, its module's (src/api/errors.ts
+// errorOwner), with Try again, which reads again, the loading state while it does.
 "use client";
 
 import { Card, type Column, DataTable, EmptyState, ErrorState, LoadingState } from "@whytide/ui";
@@ -62,7 +63,19 @@ export function Counts(props: Props) {
       </section>
     );
   }
-  if (counts.senders.length === 0) return <EmptyState message={t("empty")} />;
+  const scope = (
+    <p className="text-sm text-ink-muted">
+      {counts.scope === "all" ? t("scope_all") : t("scope_own")}
+    </p>
+  );
+  if (counts.senders.length === 0) {
+    return (
+      <div className="grid gap-4">
+        {scope}
+        <EmptyState message={t("empty")} />
+      </div>
+    );
+  }
 
   const measures: { id: Measure; label: string }[] = [
     { id: "invitesSent", label: t("rows.invites_sent") },
@@ -92,6 +105,7 @@ export function Counts(props: Props) {
 
   return (
     <div className="grid gap-4">
+      {scope}
       {counts.senders.map((sender) => {
         const account = sender.label ?? t("account_removed");
         const zone = sender.timeZone ?? COUNTS_FALLBACK_ZONE;

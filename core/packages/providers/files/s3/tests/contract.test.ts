@@ -38,7 +38,11 @@ const xml = (value: unknown): string =>
         .map(([name, inner]) => `<${name}>${xml(inner)}</${name}>`)
         .join("");
 
-contractSuite(filesPort, s3Adapter, {
+// `requires` names a server's variables, for deploy:check; on the stack the suite fails without
+// them, never skips.
+const onTheStack = { ...s3Adapter, requires: [] };
+
+contractSuite(filesPort, onTheStack, {
   ...filesCases,
   "presignDownload: the URL works for ttl seconds against MinIO, and not after": async (
     files,

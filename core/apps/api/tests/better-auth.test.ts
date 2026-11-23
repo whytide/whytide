@@ -53,7 +53,7 @@ after(() => api?.close());
 async function invited(): Promise<string> {
   const [a] = await createTwoWorkspaces();
   const email = `ada-${randomUUID()}@example.com`;
-  await createInvite({ workspaceId: a.workspace.id, email });
+  await createInvite({ workspaceId: a.workspace.id, email, role: "Owner", invitedBy: null });
   return email;
 }
 

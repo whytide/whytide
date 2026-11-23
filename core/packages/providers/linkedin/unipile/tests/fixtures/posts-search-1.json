@@ -1,0 +1,79 @@
+{
+  "object": "LinkedinSearch",
+  "items": [
+    {
+      "object": "SearchResult",
+      "type": "POST",
+      "provider": "LINKEDIN",
+      "id": "7000000000000000101",
+      "share_url": "https://www.linkedin.com/posts/fixture_post-activity-7000000000000000101-AbCd?rcm=fixture-tracking-id",
+      "date": "1d",
+      "social_id": "urn:li:activity:7000000000000000101",
+      "text": "fixture-body-marker: our take on sales automation this week",
+      "parsed_datetime": "2026-10-02T08:00:00.000Z",
+      "is_repost": false,
+      "author": {
+        "public_identifier": "ada-example",
+        "id": "fixture-member-ada",
+        "name": "Ada Example",
+        "is_company": false,
+        "headline": "Head of Growth at Example Ltd"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000110",
+      "text": "fixture-body-marker: sales tools and the automation of reports",
+      "parsed_datetime": "2026-10-02T06:00:00.000Z",
+      "author": {
+        "public_identifier": "ada-example",
+        "id": "fixture-member-ada",
+        "name": "Ada Example",
+        "is_company": false,
+        "headline": "Head of Growth at Example Ltd"
+      }
+    },
+    {
+      "social_id": "urn:li:ugcPost:7000000000000000102",
+      "text": "fixture-body-marker: SALES\n  Automation, the guide",
+      "parsed_datetime": "2026-10-01T09:00:00.000Z",
+      "author": {
+        "public_identifier": "example-ltd",
+        "id": "1000001",
+        "name": "Example Ltd",
+        "is_company": true,
+        "headline": null
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000111",
+      "text": "fixture-body-marker: reposting this on sales automation",
+      "parsed_datetime": "2026-09-30T12:00:00.000Z",
+      "is_repost": true,
+      "author": {
+        "public_identifier": "dana-specimen",
+        "id": "fixture-member-dana",
+        "name": "Dana Specimen",
+        "is_company": false,
+        "headline": "Founder at Blue Harbor Labs"
+      }
+    },
+    {
+      "social_id": "urn:li:activity:7000000000000000103",
+      "text": "fixture-body-marker: sales automation for small teams",
+      "parsed_datetime": "2026-09-30T09:00:00.000Z",
+      "author": {
+        "public_identifier": null,
+        "id": "fixture-member-bao",
+        "name": "Bao Sample",
+        "is_company": false,
+        "headline": "Founder at Blue Harbor Labs"
+      }
+    }
+  ],
+  "paging": {
+    "start": 0,
+    "page_count": 5,
+    "total_count": null
+  },
+  "cursor": "search-page-2"
+}

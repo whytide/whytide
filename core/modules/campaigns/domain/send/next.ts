@@ -8,8 +8,9 @@
 // read before it finds (beta-p4-030).
 import { tenantClient } from "@whytide/db";
 import { quotaDay } from "@whytide/platform";
-import type { ActionType } from "../constants.ts";
+import type { LinkedInAction } from "../constants.ts";
 import { MIN_ACTION_GAP_MS } from "../plan/constants.ts";
+import { linkedinActionType, linkedinOnly } from "../steps/actions.ts";
 import { timeZoneOf } from "../steps/skip.ts";
 import { needsProfileRead } from "./profile.ts";
 import { lastActionOf } from "./recover.ts";
@@ -17,7 +18,7 @@ import { lastActionOf } from "./recover.ts";
 export type NextStep = {
   readonly stepExecutionId: string;
   readonly personId: string;
-  readonly actionType: ActionType;
+  readonly actionType: LinkedInAction;
   /** The time the plan placed, which the claim is conditional on. */
   readonly scheduledFor: string;
   /** 0 when it may be claimed now. */
@@ -42,6 +43,7 @@ export async function nextStep(accountId: string, at: Date): Promise<NextAnswer>
     where: {
       senderAccountId: accountId,
       status: "scheduled",
+      ...linkedinOnly(),
       quotaDay: quotaDay(at, timeZone),
       scheduledFor: { gte: new Date(at.getTime() - MIN_ACTION_GAP_MS) },
     },
@@ -49,7 +51,8 @@ export async function nextStep(accountId: string, at: Date): Promise<NextAnswer>
     select: { id: true, personId: true, actionType: true, scheduledFor: true },
   });
   if (row?.scheduledFor == null) return { step: null, lastActionAt };
-  const { id, personId, actionType, scheduledFor } = row;
+  const { id, personId, scheduledFor } = row;
+  const actionType = linkedinActionType(row);
   const gapAfter = last === null ? 0 : last.getTime() + MIN_ACTION_GAP_MS;
   const waitMs = Math.max(0, Math.max(scheduledFor.getTime(), gapAfter) - at.getTime());
   const memberRefUnknown = actionType === "invite" && (await needsProfileRead(personId));

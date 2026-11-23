@@ -2,7 +2,8 @@
 // queue"; docs/runbook.md "A first message with no due time"): the acceptance found the sender
 // account gone, or no weekday in its days, so message_1 stayed `planned` with `due_at` null. Each
 // queue run, in the workspace's tenant run before it lists the due steps, gives such a step of an
-// active enrollment whose connection request was accepted its due time once linkedin holds the
+// active enrollment whose connection request was accepted, or skipped as already connected (the
+// same write, ../send/connected.ts, connect-already-connected), its due time once linkedin holds the
 // account again and its days have a weekday: drawn as for an acceptance detected now
 // (../acceptance.ts firstMessageDueAt), so no backlog falls due at once. Conditional on the step
 // still `planned` without one, as the acceptance's own write is.
@@ -10,6 +11,7 @@ import { tenantClient } from "@whytide/db";
 import { currentTenant } from "@whytide/platform";
 import { type AccountHours, accountOf, firstMessageDueAt } from "../acceptance.ts";
 import { random } from "../clock.ts";
+import { ALREADY_CONNECTED } from "../send/constants.ts";
 import { TEMPLATE_STEPS } from "../template/constants.ts";
 
 const [INVITE, FIRST_MESSAGE] = TEMPLATE_STEPS;
@@ -23,7 +25,8 @@ export async function recoverFirstMessages(at: Date): Promise<number> {
     JOIN enrollments e ON e.workspace_id = m.workspace_id AND e.id = m.enrollment_id
     WHERE m.workspace_id = ${workspaceId} AND m.step_key = ${FIRST_MESSAGE.stepKey}
       AND m.status = 'planned' AND m.due_at IS NULL AND e.status = 'active'
-      AND c.step_key = ${INVITE.stepKey} AND c.accepted_at IS NOT NULL
+      AND c.step_key = ${INVITE.stepKey}
+      AND (c.accepted_at IS NOT NULL OR (c.status = 'skipped' AND c.skip_reason = ${ALREADY_CONNECTED}))
     ORDER BY m.id`;
   const accounts = new Map<string, AccountHours | null>();
   let recovered = 0;

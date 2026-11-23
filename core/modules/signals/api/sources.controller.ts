@@ -19,7 +19,11 @@ import {
   SetMetadata,
 } from "@nestjs/common";
 import type { TenantContext } from "@whytide/platform";
+import { agentsBySource, type SourceAgent } from "../domain/agents.ts";
 import { fireTimes } from "../domain/fire-times.ts";
+import { importFilesOf } from "../domain/import/imports.ts";
+import { lastPlanOf } from "../domain/research/last.ts";
+import { cadenceOf, lastRunsAtBudget } from "../domain/schedule/daily.ts";
 import {
   addSource,
   deleteSource,
@@ -36,7 +40,9 @@ import { permissions } from "../permissions.ts";
 import {
   type CreateSourceBody,
   createSourceBody,
+  type ResearchPlanResponse,
   type RunResponse,
+  researchPlanResponse,
   runListResponse,
   runParams,
   runResponse,
@@ -47,7 +53,10 @@ import {
   type UpdateSourceBody,
   updateSourceBody,
 } from "../schemas/sources.ts";
+import { settings } from "../settings.ts";
 import { EvidenceController } from "./evidence.controller.ts";
+import { FoundCompaniesController } from "./found-companies.controller.ts";
+import { SourceImportsController } from "./source-imports.controller.ts";
 
 const read = SetMetadata("whytide:permission", permissions["signals.read"]);
 const write = SetMetadata("whytide:permission", permissions["signals.write"]);
@@ -64,15 +73,18 @@ export class SourcesController {
   @write
   @ownRuns
   @route({
-    summary: "Creates a source of a registered kind, enabled; publishes signals.source_created",
+    summary:
+      "Creates a source of a registered kind, enabled; publishes signals.source_created; a kind that reads through a LinkedIn account needs senderAccountId, web_research takes none",
     body: createSourceBody,
     response: sourceResponse,
     errors: [
       errors.signal_kind_unknown,
       errors.signal_config_invalid,
+      errors.signal_topic_blocked,
       errors.signal_post_link_unreachable,
       errors.signal_sender_account_invalid,
       errors.signal_sources_limit,
+      errors.signal_tracked_limit,
     ],
   })
   async create(
@@ -81,43 +93,55 @@ export class SourcesController {
   ): Promise<SourceResponse> {
     // The host sets it on an own-runs route: a missing one is a host bug, 500.
     if (req.tenant === undefined) throw new Error("no tenant on an own-runs route");
-    return toSource(await addSource(req.tenant, body));
+    // A new source has no run yet, no agent, and the form's comes from no import.
+    return toSource(await addSource(req.tenant, body), false, new Map(), new Map());
   }
 
   @Get()
   @read
   @route({
     summary:
-      "The workspace's sources, newest first, each with its next fire times and its open run, running or waiting, or null",
+      "The workspace's sources, newest first, each with its next fire times, its open run, running or waiting, or null, its cadence, whether its last run ended at its read budget, and its agent or null",
     response: sourceListResponse,
   })
   async list(): Promise<{ sources: SourceResponse[] }> {
-    return { sources: (await listSources()).map(toSource) };
+    const sources = await listSources();
+    const atBudget = await lastRunsAtBudget(sources);
+    const files = await importFilesOf(sources);
+    const agents = await agentsBySource();
+    const listed = sources.map((source) =>
+      toSource(source, atBudget.has(source.id), files, agents),
+    );
+    return { sources: listed };
   }
 
   @Patch(":id")
   @write
   @route({
     summary:
-      "Enables, disables or relabels a source; enabling one counts against the limit; a change of enabled publishes signals.source_updated",
+      "Enables, disables or relabels a source, or changes the config of a kind that allows it (web_research; any other kind's is signal_config_invalid); enabling one counts against its group's limit, its agent's or that of the sources in no agent, and reads its config again; a change of enabled publishes signals.source_updated",
     params: sourceParams,
     body: updateSourceBody,
     response: sourceResponse,
     errors: [
       errors.signal_source_not_found,
       errors.signal_kind_unknown,
+      errors.signal_config_invalid,
       errors.signal_sources_limit,
+      errors.signal_tracked_limit,
     ],
   })
   async update(@Param("id") id: string, @Body() body: UpdateSourceBody): Promise<SourceResponse> {
-    return toSource(await updateSource(id, body));
+    const source = await updateSource(id, body);
+    const atBudget = (await lastRunsAtBudget([source])).has(source.id);
+    return toSource(source, atBudget, await importFilesOf([source]), await agentsBySource());
   }
 
   @Delete(":id")
   @HttpCode(204)
   @write
   @route({
-    summary: "Deletes a source and its runs; publishes signals.source_deleted",
+    summary: "Deletes a source, its runs and its agent's link; publishes signals.source_deleted",
     params: sourceParams,
     errors: [errors.signal_source_not_found],
   })
@@ -131,10 +155,15 @@ export class SourcesController {
   @idempotent
   @route({
     summary:
-      "Runs a source now: 202 with its run, scheduled; publishes signals.run_requested; 409 while one of its runs is running or waiting",
+      "Runs a source now: 202 with its run, scheduled; publishes signals.run_requested; 409 while one of its runs is running or waiting, while its agent is paused, or once a post engagers source's lookback after its save has passed",
     params: sourceParams,
     response: runResponse,
-    errors: [errors.signal_source_not_found, errors.signal_run_open],
+    errors: [
+      errors.signal_source_not_found,
+      errors.signal_run_open,
+      errors.signal_source_expired,
+      errors.signal_agent_paused,
+    ],
   })
   async run(@Param("id") id: string): Promise<RunResponse> {
     return toRun(await requestRun(id));
@@ -166,16 +195,49 @@ export class SourcesController {
   async runs(@Param("id") id: string): Promise<{ runs: RunResponse[] }> {
     return { runs: (await listRuns(id)).map(toRun) };
   }
+
+  @Get(":id/research-plan")
+  @read
+  @route({
+    summary:
+      "The last plan of a Web research source (gamma-wr-041): its words by language, its source types' ids and when it was made; plan null before the first run's plan",
+    params: sourceParams,
+    response: researchPlanResponse,
+    errors: [errors.signal_source_not_found],
+  })
+  async researchPlan(@Param("id") id: string): Promise<ResearchPlanResponse> {
+    const plan = await lastPlanOf(id);
+    if (plan === null) return { plan };
+    const words = plan.words.map(({ language, words }) => ({ language, words: [...words] }));
+    return {
+      plan: { ...plan, words, placeIds: [...plan.placeIds], madeAt: plan.madeAt.toISOString() },
+    };
+  }
 }
 
-@Module({ controllers: [SourcesController, EvidenceController] })
+// The imports' first: their paths are under sources/, beside a source's own.
+@Module({
+  controllers: [
+    SourceImportsController,
+    SourcesController,
+    EvidenceController,
+    FoundCompaniesController,
+  ],
+})
 export class SignalsApi {}
 
 /**
  * A source as the API answers it: the row without the workspace and the reader's watermark, with its
- * next fire times (domain/fire-times.ts), whether a run of it is open, and that run.
+ * next fire times (domain/fire-times.ts), whether a run of it is open, and that run; its kind's
+ * cadence, whether its last run ended at its read budget (`atBudget`), the import it came from, its
+ * file named from `files` (sources-csv-import), and its agent from `agents` (gamma-p5-045).
  */
-function toSource(source: ListedSource): SourceResponse {
+function toSource(
+  source: ListedSource,
+  atBudget: boolean,
+  files: ReadonlyMap<string, string>,
+  agents: ReadonlyMap<string, SourceAgent>,
+): SourceResponse {
   const { id, kind, label, senderAccountId, enabled, createdBy, createdAt, lastRunAt } = source;
   const config = source.config as SourceResponse["config"];
   const times = { createdAt: createdAt.toISOString(), lastRunAt: lastRunAt?.toISOString() ?? null };
@@ -187,7 +249,25 @@ function toSource(source: ListedSource): SourceResponse {
     runOpen: open !== null,
     openRun: open && { ...open, stopRequestedAt: open.stopRequestedAt?.toISOString() ?? null },
   };
-  return { id, kind, config, label, senderAccountId, enabled, createdBy, ...times, ...schedule };
+  const cadence = cadenceOf(kind);
+  const everyDays = cadence === "research" ? settings.SIGNALS_RESEARCH_EVERY_DAYS : null;
+  const daily = { cadence, everyDays, lastRunBudgetReached: atBudget };
+  const fileName = source.importId === null ? undefined : files.get(source.importId);
+  const sourceImport = source.importId && fileName ? { id: source.importId, fileName } : null;
+  return {
+    id,
+    kind,
+    config,
+    label,
+    senderAccountId,
+    enabled,
+    createdBy,
+    ...times,
+    ...schedule,
+    ...daily,
+    sourceImport,
+    playbook: agents.get(id) ?? null,
+  };
 }
 
 function toRun(run: SignalRun): RunResponse {

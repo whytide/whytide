@@ -1,8 +1,12 @@
-# inbox's reply golden set (core/modules/inbox/README.md "The reply golden set"): a member's session
-# and inbox.read. The answer is a file, not JSON: a JSON line per labeled reply with the conversation
-# before it, the person's names masked and no id, also written under the workspace's exports/.
+# inbox's reply golden set (core/modules/inbox/README.md "The reply golden set"): an Owner's or an
+# Admin's session, inbox.export; the route is Owner only since gamma-p7-060 (exports are, F18 §4), and
+# a Member's session is refused 403 forbidden. The answer is a file, not JSON: a JSON line per labeled
+# reply with its channel, the owner's class, the classification and the conversation before it, the
+# person's names masked and no id, also written under the workspace's exports/. The file is the
+# caller's own (gamma-p6-060): the labeled replies of your own threads only; the operator's
+# `pnpm inbox:export-labels` holds every member's.
 
-### GET /v1/workspaces/{workspaceId}/inbox/exports/reply-labels.jsonl: every labeled reply, its latest label, with the thread's messages before it (the latest ten), also written to exports/reply-labels-<UTC date>.jsonl; 413 files_too_large past 25 MiB
+### GET /v1/workspaces/{workspaceId}/inbox/exports/reply-labels.jsonl: every labeled reply of your own threads, its latest label, with the thread's messages before it (the latest ten), also written to exports/reply-labels-<UTC date>.jsonl; 413 files_too_large past 25 MiB
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/inbox/exports/reply-labels.jsonl
 Accept: application/jsonl
 Cookie: {{sessionCookie}}

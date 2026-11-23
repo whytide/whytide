@@ -1,7 +1,7 @@
-// A step's hash and its idempotency key (README.md "The template"; RB-9.3.3, RB-1.2.4), pure: the
-// same parts always give the same hex, and a change to any part gives another.
+// A step's hash and its idempotency key (README.md "Campaigns and versions"; RB-9.3.3, RB-1.2.4),
+// pure: the same parts always give the same hex, and a change to any part gives another.
 import { createHash } from "node:crypto";
-import { KEY_SEPARATOR, type TemplateStep } from "./constants.ts";
+import { KEY_SEPARATOR, type StepDelay } from "./constants.ts";
 
 /** The parts of the key: the template's id stands where a campaign's will (RB-9.3.3). */
 export type KeyParts = {
@@ -13,11 +13,19 @@ export type KeyParts = {
 
 /**
  * The SHA-256, in hex, of the step's canonical definition: `step_key`, `action`, `delay` and
- * `channel` as JSON with sorted keys.
+ * `channel` as JSON with sorted keys; a campaign version's steps on either channel too. A step's
+ * `condition` enters it only when set (gamma-p3-060), so every hash of beta's template stays.
  */
-export function stepTemplateHash(step: Omit<TemplateStep, "position">): string {
+export function stepTemplateHash(step: {
+  readonly stepKey: string;
+  readonly action: string;
+  readonly delay: StepDelay;
+  readonly channel: string;
+  readonly condition?: string | null;
+}): string {
   const { stepKey, action, delay, channel } = step;
-  return sha256(canonicalJson({ step_key: stepKey, action, delay, channel }));
+  const condition = step.condition ?? undefined;
+  return sha256(canonicalJson({ step_key: stepKey, action, delay, channel, condition }));
 }
 
 /** The SHA-256, in hex, of the workspace, the person, the template and the step's hash, joined. */

@@ -1,6 +1,6 @@
 # campaigns: runbook
 
-One setting, `CAMPAIGNS_CREDITS_PER_LINKEDIN_SEND` (README.md "Settings"). The module runs in the worker, as the subscriber to `contacts.lead_approved`, `contacts.suppression_added`, `approvals.item_decided` and `linkedin.invite_accepted`, and as the daily plan, the queue and each account's sender. The subscribers log nothing of their own: a failed delivery is the outbox's log line and the event's row (`attempts`, `last_error`, and `dead_at` after its last attempt; the platform's README "Events and the outbox"). The plan logs one line per account and run, `campaigns: account planned`, with `sender_account_id`, `skipped`, `kept`, `released`, `placed` and `sender_started`. The sender logs one line of its own, `campaigns: send_uncharged` ("A send logged uncharged"); its runs, `campaigns.sender:<workspace>:<account>` in Temporal's UI, answer `{ sent, blocked, refused, end }`.
+One setting, `CAMPAIGNS_CREDITS_PER_LINKEDIN_SEND` (README.md "Settings"). The module runs in the worker, as the subscriber to `contacts.lead_approved`, `contacts.suppression_added`, `approvals.item_decided` and `linkedin.invite_accepted`, and as the daily plan, the queue and each account's sender. The subscribers log nothing of their own: a failed delivery is the outbox's log line and the event's row (`attempts`, `last_error`, and `dead_at` after its last attempt; the platform's README "Events and the outbox"). The plan logs one line per account and run, `campaigns: account planned`, with `sender_account_id`, `skipped`, `kept`, `released`, `placed` and `sender_started`, or `campaigns: account plan busy` for an account another run still plans ("`campaigns: account plan busy`"). The sender logs one line of its own, `campaigns: send_uncharged` ("A send logged uncharged"); its runs, `campaigns.sender:<workspace>:<account>` in Temporal's UI, answer `{ sent, blocked, refused, end }`.
 
 ## Finding a person's enrollment
 
@@ -14,7 +14,7 @@ FROM step_executions WHERE workspace_id = '<workspace>' AND person_id = '<person
 ```
 
 - No row after an Approve: the event is not delivered yet (is the worker running? `outbox` row of `contacts.lead_approved` with the person's id, its `delivered_at`), or the person was erased (`person_not_found`, nothing written).
-- `exited`, `no_sender`: the approver has no connected LinkedIn account in the workspace; they connect one and approve again (the lead stayed `approved`).
+- `exited`, `no_sender`: the campaign's owner (an agent's campaign: the agent's owner; the seeded one: the workspace's first Owner) has no connected LinkedIn account in the workspace; they connect one and the lead is approved again (it stayed `approved`). The account is the owner's, never the approver's (gamma-p6-040). With `exit_detail` `owner_removed`: the owner was removed from the workspace ("A removed member's campaigns").
 - `exited`, `suppressed`: `exit_detail` names the reason (`opted_out`, `never_contact_person`, `never_contact_company`, `recently_contacted`); contacts' never-contact list and the person's last touch say more.
 - Approve refused with `lead_in_outreach`: the lead is in a campaign already; its active enrollment is the first query's.
 
@@ -38,6 +38,7 @@ The second query's `status`, `skip_reason`, `error_code` and `jit_checks` (what 
 
 - A reason reads "For a reason this page does not know yet": the code has no key in `ui/enrollment-panel/words.ts`; add one there and in `messages/en.json`.
 - Times in UTC: the enrollment has no sender, or linkedin no longer holds its account (the route's `timeZone` is null).
+- Pause or Resume answers "Something went wrong": the member is no Owner or Admin (403 `forbidden`, the api log's `route` and `status`); a refusal by the state says so in words, and the panel shows the state read again.
 
 ## A step that gets no time
 
@@ -61,9 +62,9 @@ Never set `scheduled_for` by hand: the plan is its only writer (the sender only 
 
 A `planned` `invite` or `message` step with no `approval_item_id` after a tick. The workspace's run, `campaigns.queue:<workspace>:<slot>` in Temporal's UI, answers `{ opened, passedOver, noSender, failed }`:
 
-- Not due: `due_at` null (a message before its anchor) or more than 24 hours ahead (`QUEUE_WINDOW_HOURS`). A withdrawal never gets an item.
+- Not due: `due_at` null (a message before its anchor) or more than `APPROVALS_QUEUE_WINDOW_HOURS` (24 unset) hours ahead. A withdrawal never gets an item.
 - Passed over: the enrollment is no longer `active`, or the person is suppressed (contacts' `suppressionOf`); the suppression subscriber or the gate ends the step.
-- `noSender`: linkedin no longer holds the step's sender account.
+- `noSender`: linkedin no longer holds the step's sender account, or its owner was removed from the workspace ("A removed member's campaigns").
 - `failed`: the step's activity failed past its attempts (its error in Temporal's UI); it is tried again next tick.
 - No run: the schedule `campaigns.queue` is paused (`WORKER_SCHEDULES`), or the slot's run still holds the id.
 
@@ -74,6 +75,7 @@ A `planned` `invite` or `message` step with no `approval_item_id` after a tick. 
 - `accepted_at` null: the acceptance is not detected yet (linkedin's `sender_outreach.accepted_at` and `accepted_detected_at`) or not delivered (the `outbox` row of `linkedin.invite_accepted` with the person's id, its `delivered_at`); or the connection request never went out from the platform (`connect` neither `succeeded` nor `executing`: sent by hand, say), or the enrollment had ended.
 - `accepted_at` set: at the delivery, linkedin no longer held the account, or its working days held no weekday; nothing can go from it until it does, and then the queue's next run gives the step a due time drawn from that run (beta-p4-040; README.md "Decided here").
 - Due, but no item in "Up next": a due time more than 24 hours ahead, a Friday evening's acceptance due on Monday, gets its item when it enters the queue's window.
+- `connect` `skipped` with `already_connected`: the person was a connection already (connect-already-connected), and `message_1` is due from that settle's time as from an acceptance; none when linkedin no longer held the account or its days held no weekday, given at a later queue run as above.
 
 ## A step waiting with a code
 
@@ -88,6 +90,7 @@ A `scheduled` step with no time and an `error_code`: the sender put it back, and
 - `rate_limited`, `outside_working_hours` and the caps (`invite_cap_reached`, `message_cap_reached`, `weekly_invite_cap_reached`, `daily_actions_cap_reached`, `invite_note_budget`, `read_cap_reached`): linkedin refused the slot, the chat's read or the profile read until `retry_at`, the next window or the next quota day; `due_at` says when.
 - `pending_invites_unknown`, `pending_invites_over_limit`: an invite while linkedin's count of the account's pending invitations is unknown (none in 48 hours) or above 400 (linkedin's runbook); `due_at` moves to the day's check or the next quota day, the plan places no invite until the count allows one, and the account's messages still go.
 - `reservation_not_open`: linkedin released the slot before the call, as a pause does.
+- `enrollment_paused`, `campaign_not_active`: the enrollment is paused, or its campaign paused or a draft ("An enrollment stuck paused").
 - `linkedin_rate_limited`, `linkedin_limit_reached`, `linkedin_account_disconnected`: the provider's answer after the call (beta-p4-040, docs/flows.md "The error map"); the credits were released, `due_at` is the vendor's wait or the next quota day's start, and linkedin's account screen shows the health. "Up next" shows the code and the time on the step's approved item until the next claim.
 
 Never clear the code by hand to hurry a step: the next claim clears it, and the gate and the reservations decide again.
@@ -104,13 +107,21 @@ A sender run failing at the claim with `credits_input_invalid` (`fields: ["actio
 
 ## The report
 
-`pnpm campaigns:report` (README.md "Commands"; on the production machine, `docker compose exec api node ../../modules/campaigns/dist/cli/report.js`), weekly, and before beta's verdict without `--since`, so that every row counts. Exit 0 means the three zeros hold; read the rest against the targets on their lines. Each `violation:` line names the workspace and the step: start from the step (`step_executions`, by id, in that workspace), its item (approvals' `approval_items` by `step_execution_id`) and linkedin's row (`sender_action_log`, `object_ref` the step's id).
+`pnpm campaigns:report` (README.md "Commands"; on the production machine, `docker compose exec api node ../../modules/campaigns/dist/cli/report.js`), weekly for the safety review, and before beta's or gamma's verdict without `--since`, so that every row counts. Exit 0 means the three zeros hold; read the rest against the targets on their lines. Each `violation:` line names the workspace and the step: start from the step (`step_executions`, by id, in that workspace), its item (approvals' `approval_items` by `step_execution_id`) and linkedin's row (`sender_action_log`, `object_ref` the step's id).
 
-- `sends_without_approval`, `no_approval`: the step has no approved item whose frozen text still hashes to the approval's hash. Check the item's `status` and `decided_at`, and whether the step went out through the sender at all (its `jit_checks` hold `approvalItemId` and `contentHash` only after the gate's pass). `item_mismatch`: the send carried another item or hash than the step's approval now answers; a newer item for the step, or a draft changed after the approval, comes first. `approved_after_send`: compare `decided_at` with the row's `at`; a clock problem, or a send that skipped the gate.
+- `sends_without_approval`, `no_approval`: the step has no approved item whose frozen text still hashes to the approval's hash. Check the item's `status` and `decided_at`, and whether the step went out through the sender at all (its `jit_checks` hold `approvalItemId` and `contentHash` only after the gate's pass). `item_mismatch`: the send carried another item or hash than the step's approval now answers; a newer item for the step, or a draft changed after the approval, comes first. `approved_after_send`: compare `decided_at` with the row's `at`; a clock problem, or a send that skipped the gate. `mode_not_allowed` (gamma-p4-070): the campaign's mode approved a first touch, or a step of a campaign in `review_everything`, the lock's 7 days included: check the item's `approval_by` and `decision_origin`, and the send's `jit_checks.approval` against the campaign's `review_locked_until`, which the report trusts over the row. Each violation ends with the mode it counts in, and `sends_without_approval_mode` counts them per mode; both are zeros.
 - `send_step_missing`: a row whose step is gone or that names none. An erased person's steps are deleted (privacy's erasure), so their sends land here: check privacy's log for the person's erasure around then. Any other row is a send that bypassed campaigns, a defect to explain.
 - `actions_against_suppressed`: contacts' list, rebuilt as it stood at the send (a removed entry keeps `removed_at`), had the person. Check the entry's `created_at` against the row's `at`: an entry made just before the send, while the step was already `executing`, is the narrow window the gate leaves; anything older is a gate that did not run. The company's entries are matched as the person's company is now. A person erased since the send answers `person_not_found` and is not counted.
 - `duplicate_sends`: a step with two `ok` rows, or a key two `succeeded` steps hold. It counts log rows, so it sees a second send only when linkedin wrote a row for it: the check after an unknown outcome writes none when one exists (beta-p1-050), and a send outside the log does not show. Check the step's `attempt` and the rows' `at`, then linkedin's runbook for the account.
 - `restrictions` and `checkpoints`: linkedin's runbook for the account; each checkpoint is explained in beta's notes. `decision_days` below 5 of 5 means a weekday without a decision in "Up next".
+- `sends_person_erased` (gamma-p7-050): a send to a person suppressed or not, whose person contacts no longer holds. Not a breach: find the person's erasure in privacy's log after the send's instant; a send after the erasure is a defect.
+- `restrictions_per_100` (target at most 2 a month): above it, read the month's `health_event` lines and linkedin's runbook for each account. linkedin has no permanent state: check each restricted account by hand ("0 permanent").
+- `review_approval` (target at least 0.6, the last 30 days): below it, the leads put in front of the team miss the ICP more than they should; read the Not a fit reasons of the period's reviews.
+- `unedited_approvals` (target at least 0.5): below it, the drafts are edited more often than not; `drafts_small_edits` says whether the edits are small.
+- `active_day` and `active_streak` (target 20 working days in a row with 2 campaigns and 3 sender accounts): a day short of either breaks the run; the day's line says which. An Inbox reply is not counted as a send.
+- `active_workspaces`: a week at 0, or lower than the weeks before it, is a workspace that stopped sending; ask its team why.
+
+A broken zero closes sending, as gamma's stop rules say (gamma-p7-070's runbook); the report itself changes nothing.
 
 The report writes nothing and calls no provider: run it as often as needed. A JSON line before the codes is the platform's info log of tenancy's read across workspaces; `LOG_LEVEL=warn pnpm campaigns:report`, or `docker compose exec -e LOG_LEVEL=warn api …`, prints the codes alone.
 
@@ -140,3 +151,56 @@ A connection request whose profile read (beta-p4-030) answered `linkedin_not_fou
 ## An account replaced
 
 linkedin found another LinkedIn account behind a sender account (its member id changed at a refresh) and published `linkedin.account_replaced`. campaigns' subscriber ended each `active` enrollment of the account `exited` (`no_sender`, `exit_detail` `account_replaced`), cancelled its pending steps (`skip_reason` `account_replaced`) and their items, and finished the lead. The `outbox` row of the event, its `delivered_at` and `last_error`, says whether it ran. A step `executing` then is left to the sender's check ("A step left `executing`"). The leads are `finished`, which Approve refuses in beta (README.md "Decided here", the task's open question). Never re-activate an enrollment by hand.
+
+## An enrollment stuck paused
+
+```sql
+SELECT id, status, paused_reason, paused_until, template_id FROM enrollments
+WHERE workspace_id = :ws AND person_id = :person;
+SELECT key_ref, status, paused_reason, paused_at FROM campaigns
+WHERE workspace_id = :ws AND key_ref = :template_id;
+```
+
+- `paused` with `paused_until` past: the queue run resumes it at its start; when it does not, the workspace's `campaigns_queue` runs are failing (the worker log). With `paused_until` null, only a member's resume brings it back: Resume on the lead page's panel, or `POST …/campaigns/enrollments/{enrollmentId}/resume` (`campaigns.write`, Owner or Admin; `api-calls/gamma-p3-060-warm-signal-fallback.http`). Never set the status by hand, as the resume also clears the steps' codes under the locks.
+- `active`, but its steps wait with `campaign_not_active`: the campaign is paused or a draft. An Owner or an Admin resumes a paused one with `POST …/campaigns/{campaignId}/resume`.
+
+## A warm-signal enrollment still live with emails planned
+
+Until gamma-p4-010, nothing sends an email step: an enrollment on the warm signal whose request was never accepted keeps its fallback emails `planned` after its withdrawal, and stays `active` until they end. It is expected; nothing goes to the person meanwhile.
+
+## A reply's label that did not act, or an enrollment that did not resume
+
+```sql
+SELECT id, status, paused_reason, paused_until, resumed_at, reply_label, reply_label_at,
+       remind_at, reminded_at, cool_down_until, exit_reason, exit_detail FROM enrollments
+WHERE workspace_id = :ws AND person_id = :person;
+SELECT step_key, status, skip_reason, due_at, approval_item_id FROM step_executions
+WHERE workspace_id = :ws AND person_id = :person ORDER BY enrollment_id, position;
+```
+
+- `replied` with no `reply_label`: no label acted: inbox's classification has not run (gamma-p4-040), or its label was only suggested (inbox's `actions_taken` empty), which a member confirms.
+- `replied`, `reply_label` `out_of_office`, its steps still `held`: the release kept the hold (README.md "Decided here"): another live enrollment of the person, no sender, a reply newer than this one (linkedin's outreach row, `last_inbound_at`), or a held step whose item was approved before the reply. A member answers the person from the inbox; never set a status by hand.
+- `exited`, `suppressed`: the person was suppressed before the label or during the pause; it never resumes.
+- `paused`, `out_of_office`, `paused_until` past: "An enrollment stuck paused". Once resumed, its first step waits for a new item and its approval in "Up next", then the plan and the gate.
+- `active` with `resumed_at`, a step `held` again: a reply after the resume (the gate's check 4); the new reply's label decides.
+- A reminder not mailed: `remind_at` past and `reminded_at` null, the queue runs are failing (the worker log); `reminded_at` set, the `campaigns.reply_notice_due` row of the outbox (`delivered_at`, `last_error`), then the run `campaigns.reply_notice:<workspace>:<event id>` in Temporal's UI. `{ sent: false, reason: "owner_unavailable" }`: the user is no user, disabled or no longer a member (the worker log has the ids); `gone`: the person was erased. The same for an `interested` notice.
+- An approval that enrolls nothing, the lead left as Approve made it: an enrollment of the person has `cool_down_until` ahead, a `not_interested` reply's `CAMPAIGNS_NOT_INTERESTED_COOL_DOWN_DAYS` (180 unset). Never clear it, or a label, by hand.
+
+## A removed member's campaigns
+
+A member removed from the workspace (tenancy's `removed_at`, gamma-p6-030) sends nothing more (gamma-p6-040; README.md "A removed member"). campaigns' subscriber to `tenancy.member_removed` ended each live enrollment of the member's campaigns, and each other one sending from their account, `exited` (`no_sender`, `exit_detail` `owner_removed`), cancelled its pending steps (`skip_reason` `owner_removed`) and their items, and finished the lead. The `outbox` row of the event, its `delivered_at` and `last_error`, says whether it ran. A step claimed before it ran is stopped at the gate: `cancelled`, `owner_removed`, with `jit_checks.owner.member` `removed`, and nothing reserved. Still live after the delivery: an enrollment whose delivery read the owner just before the removal committed; nothing goes from it (the queue leaves its steps `planned`, `noSender`, and the gate ends it on a claimed step).
+
+```sql
+SELECT e.id, e.status, e.exit_reason, e.exit_detail, e.sender_account_id, c.owner_user_id
+FROM enrollments e LEFT JOIN campaigns c
+  ON c.workspace_id = e.workspace_id AND c.key_ref = e.template_id
+WHERE e.workspace_id = :ws AND (c.owner_user_id = :user OR e.sender_account_id = :account)
+ORDER BY e.created_at DESC;
+```
+
+- The member's campaigns are not moved to another member, and their agents keep finding leads, each of whose approvals exits `no_sender` (`owner_removed`): the transfer is later (the task's open question). With the seeded campaign's owner removed, the leads routed to it exit the same way. Never re-activate an enrollment or change a campaign's owner by hand.
+- An email step `skipped`, `sender_mismatch`, `jit_checks.owner.mailbox` `other_owner`: its mailbox now belongs to another member (a reconnected address goes to the member who connected it last, gamma-p1-010), or email no longer holds it; the LinkedIn steps went on.
+
+## `campaigns: account plan busy`
+
+The info line `campaigns: account plan busy` with `sender_account_id`: another plan run still holds the account's plan lock (gamma-p6-040; README.md "Worker"), an attempt of `campaigns_plan_accounts` past `PLAN_TIMEOUT` that Temporal gave up on, still placing; this run skipped the account, placed nothing and started no sender for it. The other run places its steps and starts its sender; the next tick plans the account again. Expected now and then. Every tick for one account: a plan run stuck in the database, which `pg_stat_activity` shows (its `query`, `state` and `xact_start`); the lock goes with its transaction, never by hand.

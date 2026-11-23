@@ -37,15 +37,15 @@ test("a module twice, a dependency on a module without an eraser and a cycle are
   assert.throws(() => order(cycle), invalid("cycle", ["a", "b", "c"]));
 });
 
-test("the registered erasers: drafts and snapshots before ai's records, the outbox before campaigns', contacts last; none before the platform's", () => {
+test("the registered erasers: drafts, snapshots, rated events and reply classifications before ai's records, the outbox before campaigns', contacts last; none before the platform's", () => {
   const registered = registeredErasers().map((e) => e.module);
-  const free = ["approvals", "inbox", "linkedin", "messaging", "platform"];
-  assert.deepEqual(registered, [...free, "campaigns", "qualification", "ai", "signals"]);
+  const free = ["approvals", "enrichment", "inbox", "linkedin", "messaging", "platform"];
+  assert.deepEqual(registered, [...free, "campaigns", "qualification", "signals", "ai"]);
   assert.deepEqual(erasingModules(), [...registered, "contacts"]);
+  // The modules whose rows name a decision record (gamma-p4-040 adds inbox's classifications).
+  const naming = (module: string) =>
+    registeredErasers().flatMap((e) => (e.dependsOn.includes(module) ? [e.module] : []));
+  assert.deepEqual(naming("ai"), ["inbox", "messaging", "qualification", "signals"]);
   // The run puts the platform's step first: no module's rows may name the platform's.
-  const naming = registeredErasers().filter((e) => e.dependsOn.includes(FIRST));
-  assert.deepEqual(
-    naming.map((e) => e.module),
-    [],
-  );
+  assert.deepEqual(naming(FIRST), []);
 });

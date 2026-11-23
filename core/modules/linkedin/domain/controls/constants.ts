@@ -20,13 +20,27 @@ export const ACCOUNT_STOP = Object.freeze({
   off: { killSwitch: false, killSwitchSource: null },
   tester: { killSwitch: true, killSwitchSource: "tester" },
   operator: { killSwitch: true, killSwitchSource: "operator" },
+  member_removed: { killSwitch: true, killSwitchSource: "member_removed" },
 } as const);
 
-/** The workspace's columns in each state of its stop, as the account's. */
+/**
+ * The workspace's columns in each state of its stop, as the account's. A removal pauses accounts
+ * only: `member_removed` is never written here, and a row read in it would hold as a stop.
+ */
 export const WORKSPACE_STOP = Object.freeze({
   off: { stopped: false, stopSource: null },
   tester: { stopped: true, stopSource: "tester" },
   operator: { stopped: true, stopSource: "operator" },
+  member_removed: { stopped: true, stopSource: "member_removed" },
+} as const);
+
+/** linkedin.manage's roles (permissions.ts), which the screen compares with the member's role. */
+export const LINKEDIN_MANAGE_ROLES = ["Owner", "Admin"] as const;
+
+/** The removal's pause's actor in its control events (domain/removed.ts): the system, by the event. */
+export const REMOVAL_ACTOR = Object.freeze({
+  type: "system",
+  id: "tenancy.member_removed",
 } as const);
 
 /** The platform's switches' states as the events name them, off then on; `invites`, the breaker's pause. */

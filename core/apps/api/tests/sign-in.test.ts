@@ -1,16 +1,17 @@
 // The host's sign-in routes (src/sign-in.ts) on identity's hooks and the fake adapter, in a schema of
 // the worktree's database: asking for a link answers an invited and a refused email alike, in status,
 // body and time, and mails the invited one only, once the answer is sent; the link lands on `next`, or
-// on / when `next` is no page of the app; signing out ends the sessions and clears the cookie.
+// on / when `next` is no page of the app; signing out ends the sessions and clears the cookie; an
+// expired or a revoked invite is refused as no invite is (gamma-p6-020).
 import assert from "node:assert/strict";
 import { randomInt, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { databaseUrl } from "@whytide/db";
+import { databaseUrl, withTenant } from "@whytide/db";
 import { asRole, withTestDb } from "@whytide/db/testing";
-import { authHooks, createInvite } from "@whytide/identity";
-import { useIdentityClient } from "@whytide/identity/testing";
-import { collectLogs, createLogger } from "@whytide/platform";
+import { authHooks, createInvite, revokeInvite } from "@whytide/identity";
+import { useIdentityClient, useIdentityClock } from "@whytide/identity/testing";
+import { collectLogs, createLogger, servicePrincipal } from "@whytide/platform";
 import { type AuthMail, authPort, getAdapter } from "@whytide/providers";
 import { createTwoWorkspaces, useTenancyClient } from "@whytide/tenancy/testing";
 import type { ModuleLoader } from "../src/modules.ts";
@@ -67,7 +68,7 @@ async function ask(email: string, next?: string, from?: string) {
 async function invited(): Promise<string> {
   const [a] = await createTwoWorkspaces();
   const email = `ada-${randomUUID()}@example.com`;
-  await createInvite({ workspaceId: a.workspace.id, email });
+  await createInvite({ workspaceId: a.workspace.id, email, role: "Owner", invitedBy: null });
   return email;
 }
 
@@ -140,4 +141,35 @@ test("asking for a link counts 3 a minute per email and RATE_LIMIT_AUTH_PER_IP_P
   const limit = protectionConfig.RATE_LIMIT_AUTH_PER_IP_PER_MIN;
   for (let n = 0; n <= limit; n++) byAddress.push(await status(`${n}-${email}`, "198.51.100.7"));
   assert.deepEqual(byAddress, [...Array(limit).fill(202), 429]);
+});
+
+test("an expired or a revoked invite is refused: no mail, the link's sign-in 403 auth_invite_required, and no user", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const late = `late-${randomUUID()}@example.com`;
+  const gone = `gone-${randomUUID()}@example.com`;
+  const input = { workspaceId, role: "Member", invitedBy: a.user.id } as const;
+  // Made eight days ago: expired today.
+  useIdentityClock(() => new Date(Date.now() - 8 * 24 * 60 * 60 * 1000));
+  await createInvite({ ...input, email: late });
+  useIdentityClock(undefined);
+  const { id } = await createInvite({ ...input, email: gone });
+  const run = { workspaceId, principal: servicePrincipal("identity_test") };
+  await withTenant(run, () => revokeInvite(id, a.user.id), { client: asRole("app") });
+  for (const email of [late, gone]) {
+    assert.equal((await ask(email, undefined, "192.0.2.20")).status, 202);
+    const res = await fetch(new URL("/api/auth/fake/sign-in", api.url), {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": "192.0.2.20" },
+      body: JSON.stringify({ email }),
+    });
+    assert.deepEqual([res.status, await res.json()], [403, { code: "auth_invite_required" }]);
+  }
+  await delay(400); // a mail would have been sent by now
+  assert.deepEqual(
+    mailed.filter((mail) => mail.to === late || mail.to === gone),
+    [],
+  );
+  const users = await asRole("app").user.count({ where: { email: { in: [late, gone] } } });
+  assert.equal(users, 0);
 });

@@ -4,12 +4,14 @@
 // reference, in any workspace, and leaves one without; its schedule is hourly. A Refresh status
 // press, the route's event, reaches linkedin's subscriber through the outbox, which runs
 // linkedin_refresh_account for the account by the event's id: the status is stored, and a second
-// delivery starts no second run. It lives here: a module never imports a host.
+// delivery starts no second run. With pages of two workspaces (useStatusRefreshPageSize, under
+// APP_ENV=test only), the refresh continues as new after each page but the last, its cursor and
+// counts in the next run's input (gamma-p0-085). It lives here: a module never imports a host.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { Client, Connection } from "@temporalio/client";
+import { Client, Connection, type WorkflowHandle } from "@temporalio/client";
 import { withTenant } from "@whytide/db";
 import { asRole, withTestDb } from "@whytide/db/testing";
 import {
@@ -39,6 +41,9 @@ const linkedin: {
 const accounts: { requestRefresh(id: string): Promise<unknown> } = await built(
   "linkedin/dist/domain/accounts.js",
 );
+const pages: { useStatusRefreshPageSize(size: number | undefined): void } = await built(
+  "linkedin/dist/workflows/pages.js",
+);
 type Tenant = { workspace: { id: string } };
 const tenancy: {
   useTenancyClient(client: unknown): void;
@@ -58,7 +63,9 @@ const SCHEDULES = [SCHEDULE, "linkedin.daily"];
 /** `fn` with the host started, linkedin alone, on a queue of its own; closed after, the schedules deleted. */
 async function withHost(fn: (temporal: Client, taskQueue: string) => Promise<void>) {
   const connection = await Connection.connect({ address: workerConfig.TEMPORAL_ADDRESS });
-  const temporal = new Client({ connection, namespace: workerConfig.TEMPORAL_NAMESPACE });
+  // An identity of its own, so that no hostname enters a recorded history.
+  const namespace = workerConfig.TEMPORAL_NAMESPACE;
+  const temporal = new Client({ connection, namespace, identity: "whytide-test" });
   const deleteSchedules = () =>
     Promise.all(
       SCHEDULES.map((id) =>
@@ -97,6 +104,21 @@ async function account(workspaceId: string, status: "connected" | "credentials_r
 
 const statusOf = async (id: string) =>
   (await app.senderAccount.findUniqueOrThrow({ where: { id } })).status;
+
+type History = Awaited<ReturnType<WorkflowHandle["fetchHistory"]>>;
+
+/** The input of each run of `workflowId`, from its first through each continue-as-new. */
+async function runInputs(temporal: Client, workflowId: string, firstRunId: string) {
+  const inputs: unknown[] = [];
+  for (let runId: string | null | undefined = firstRunId; runId; ) {
+    const history: History = await temporal.workflow.getHandle(workflowId, runId).fetchHistory();
+    const events = history.events ?? [];
+    const [input] = events[0]?.workflowExecutionStartedEventAttributes?.input?.payloads ?? [];
+    inputs.push(JSON.parse(Buffer.from(input?.data ?? new Uint8Array()).toString("utf8")));
+    runId = events.at(-1)?.workflowExecutionContinuedAsNewEventAttributes?.newExecutionRunId;
+  }
+  return inputs;
+}
 
 /** The first truthy answer of `probe`, asked every 50 ms for 20 seconds at most. */
 async function until<T>(probe: () => Promise<T>): Promise<NonNullable<T>> {
@@ -155,4 +177,43 @@ test("a Refresh status press: the subscriber runs linkedin_refresh_account by th
     await app.outboxEntry.update({ where: { id: event.id }, data: { deliveredAt: null } });
     await until(delivered);
     assert.equal((await run.describe()).runId, runId);
+  }));
+
+test("over three pages of two workspaces, linkedin_status_refresh continues as new after the first two with the cursor and the counts so far: every account refreshed once, the last run answering the totals", (t) =>
+  withHost(async (temporal, taskQueue) => {
+    const tenants = [];
+    for (let n = 0; n < 3; n += 1) tenants.push(...(await tenancy.createTwoWorkspaces()));
+    const workspaceIds = tenants.map(({ workspace }) => workspace.id).sort();
+    const refs: string[] = [];
+    for (const workspaceId of workspaceIds) {
+      const providerAccountRef = `fake-account-${randomUUID()}`;
+      fake.emitWebhook("account.connected", providerAccountRef);
+      await linkedin.createConnectedAccount(workspaceId, { providerAccountRef });
+      refs.push(providerAccountRef);
+    }
+    const calls = fake.recordedCalls.length;
+    pages.useStatusRefreshPageSize(2);
+    try {
+      const workflowId = `linkedin_status_refresh-${randomUUID()}`;
+      const handle = await temporal.workflow.start("linkedin_status_refresh", {
+        args: [{}],
+        taskQueue,
+        workflowId,
+      });
+      assert.deepEqual(await handle.result(), { accounts: 6, failed: 0 });
+      // The run whose history is workflows/__histories__/linkedin_status_refresh_pages.json.
+      t.diagnostic(`first run: ${workflowId} ${handle.firstExecutionRunId}`);
+      assert.deepEqual(await runInputs(temporal, workflowId, handle.firstExecutionRunId), [
+        {},
+        { afterId: workspaceIds[1], counts: { accounts: 2, failed: 0 } },
+        { afterId: workspaceIds[3], counts: { accounts: 4, failed: 0 } },
+      ]);
+    } finally {
+      pages.useStatusRefreshPageSize(undefined);
+    }
+    const read = fake.recordedCalls
+      .slice(calls)
+      .filter(({ method }) => method === "getAccountStatus")
+      .map(({ input }) => input);
+    assert.deepEqual(read.sort(), refs.sort(), "each account's status read once");
   }));

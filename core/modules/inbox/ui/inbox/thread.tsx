@@ -1,21 +1,29 @@
 // A thread in the browser (thread-page.tsx gives it the first read): the way back to the inbox; the
 // lead's name, linked to their lead page, with their title and company; the messages, oldest first,
 // each with its time and its author in words: the person; the campaign, approved at a time; or the
-// account's owner, who typed it on LinkedIn; on each reply the label's two buttons
-// (label-buttons.tsx). No reply box: a line says to answer on LinkedIn, since nothing here sends.
-// The states: a thread without a message; a failed read in words, its module's (src/api/errors.ts
-// errorOwner), with Try again, which reads the thread again (GET …/inbox/threads/{id}).
+// account's owner, who typed it on LinkedIn or replied from here, the reply's state then
+// (reply-status.tsx); on each reply its label (label-buttons.tsx, gamma-p4-055): the owner's, else
+// the classifier's, "Suggested" beside it until the owner confirms or changes it, which only the
+// thread's owner does (the read's `reply.own`). Under them the reply box (reply-box.tsx), on the
+// caller's own thread whose channel sends now only (the read's `reply`: `own`, `channelAvailable`):
+// the caller's own thread without it, a line saying why; another member's, a line that only its
+// owner replies. While a reply is sending, the thread is read again every SENDING_POLL_MS,
+// SENDING_POLL_MAX times at most. The states: a thread without a message; a failed read in words,
+// its module's (src/api/errors.ts errorOwner), with Try again, which reads the thread again (GET
+// …/inbox/threads/{id}).
 "use client";
 
 import { ButtonLink, EmptyState, ErrorState, Link, PageHeader } from "@whytide/ui";
 import { ArrowLeft, Info } from "@whytide/ui/icons";
 import { ApiError, browserApi, data, errorOwner } from "@whytide/web/api/browser";
 import { useFormatter, useMessages, useTranslations } from "next-intl";
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { MessageResponse, ThreadResponse } from "../../schemas/threads.ts";
-import { TIME_FORMAT } from "./constants.ts";
-import { LabelButtons } from "./label-buttons.tsx";
+import { SENDING_POLL_MAX, SENDING_POLL_MS, TIME_FORMAT } from "./constants.ts";
+import { LabelControl } from "./label-buttons.tsx";
 import { usePersonWords } from "./person.ts";
+import { ReplyBox } from "./reply-box.tsx";
+import { ReplyStatus } from "./reply-status.tsx";
 
 /** The first read's answer, or the digest of its refusal (`api:<code>`, src/api/errors.ts). */
 type Props = { workspace: string; threadId: string } & (
@@ -48,13 +56,15 @@ export function BackLink({ workspace }: { workspace: string }) {
 export function Thread(props: Props) {
   const { workspace, threadId } = props;
   const t = useTranslations("inbox.thread");
+  const errors = useTranslations("inbox.errors");
   const messages = useMessages();
   const person = usePersonWords();
   const id = useId();
   const [thread, setThread] = useState("first" in props ? props.first : undefined);
   const [failure, setFailure] = useState("failed" in props ? props.failed : undefined);
+  const polls = useRef(0);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const params = { path: { workspaceId: workspace, id: threadId } };
       const read = browserApi().GET("/v1/workspaces/{workspaceId}/inbox/threads/{id}", { params });
@@ -63,6 +73,22 @@ export function Thread(props: Props) {
     } catch (error) {
       setFailure(digestOf(error));
     }
+  }, [workspace, threadId]);
+
+  // Each read sets a new thread, so the next wait starts while a reply is still sending.
+  useEffect(() => {
+    const sending = thread?.messages.some((message) => message.sendStatus === "sending");
+    if (!sending || polls.current >= SENDING_POLL_MAX) return;
+    const timer = setTimeout(() => {
+      polls.current += 1;
+      void load();
+    }, SENDING_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [thread, load]);
+
+  async function sent() {
+    polls.current = 0;
+    await load();
   }
 
   if (thread === undefined) {
@@ -102,27 +128,45 @@ export function Thread(props: Props) {
       ) : (
         <ol aria-label={t("messages")} className="grid max-w-3xl gap-3">
           {thread.messages.map((message) => (
-            <Message key={message.id} workspace={workspace} message={message} lead={name} />
+            <Message
+              key={message.id}
+              workspace={workspace}
+              message={message}
+              lead={name}
+              own={thread.reply.own}
+            />
           ))}
         </ol>
       )}
-      <p className="mt-6 flex max-w-3xl items-start gap-2 text-pretty text-ink-muted">
-        <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-        {t("answer_on_linkedin")}
-      </p>
+      {thread.reply.own && thread.reply.channelAvailable ? (
+        <ReplyBox workspace={workspace} threadId={threadId} reply={thread.reply} onSent={sent} />
+      ) : (
+        <p className="mt-6 flex max-w-3xl items-start gap-2 text-pretty text-ink-muted">
+          <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          {thread.reply.own ? errors("reply_channel_unavailable") : t("owner_only")}
+        </p>
+      )}
     </>
   );
 }
 
-/** One message: who wrote it, in words, and when; its text; a reply's label buttons. */
-function Message(props: { workspace: string; message: MessageResponse; lead: string }) {
-  const { workspace, message, lead } = props;
+/**
+ * One message: who wrote it, in words, and when; a reply from here, its state; its text; a reply's
+ * label, which the thread's owner (`own`) confirms or changes.
+ */
+function Message(props: {
+  workspace: string;
+  message: MessageResponse;
+  lead: string;
+  own: boolean;
+}) {
+  const { workspace, message, lead, own } = props;
   const t = useTranslations("inbox.thread");
   const format = useFormatter();
   const id = useId();
   const at = (time: string) => format.dateTime(new Date(time), TIME_FORMAT);
   const timed = (time: string) => (chunks: ReactNode) => <time dateTime={time}>{chunks}</time>;
-  const { direction, sentBy, approvedAt, sentAt } = message;
+  const { direction, sentBy, approvedAt, sentAt, sendStatus } = message;
   let author = lead;
   let how: ReactNode = null;
   if (direction === "out" && sentBy === "campaign") {
@@ -131,7 +175,7 @@ function Message(props: { workspace: string; message: MessageResponse; lead: str
       how = t.rich("approved", { at: at(approvedAt), time: timed(approvedAt) });
   } else if (direction === "out") {
     author = t("author.user");
-    how = t("typed");
+    if (sendStatus === null) how = t("typed");
   }
   return (
     <li className="min-w-0">
@@ -145,9 +189,16 @@ function Message(props: { workspace: string; message: MessageResponse; lead: str
           </time>
         </div>
         {how && <p className="text-xs text-ink-muted">{how}</p>}
+        {sendStatus !== null && <ReplyStatus status={sendStatus} code={message.errorCode} />}
         <p className="whitespace-pre-wrap text-pretty wrap-break-word text-ink">{message.body}</p>
         {direction === "in" && (
-          <LabelButtons workspace={workspace} messageId={message.id} label={message.label} />
+          <LabelControl
+            workspace={workspace}
+            messageId={message.id}
+            label={message.label}
+            classification={message.classification}
+            own={own}
+          />
         )}
       </article>
     </li>

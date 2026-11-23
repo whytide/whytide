@@ -15,6 +15,12 @@ export const EXPORT_FILE_SUFFIX = ".jsonl";
 /** The length of an ISO timestamp's date, `YYYY-MM-DD`: the day's file name. */
 export const UTC_DATE_LENGTH = 10;
 
+/**
+ * A line's channel, the thread's (gamma-p7-060): LinkedIn's only until the email phase gives a thread
+ * another channel.
+ */
+export type LineChannel = "linkedin" | "email";
+
 /** What the person's names become in every text of a line (not in the sources). */
 export const NAME_MASKS = { firstName: "[first_name]", lastName: "[last_name]" } as const;
 /**

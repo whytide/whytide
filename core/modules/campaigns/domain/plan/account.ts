@@ -2,7 +2,14 @@
 // its transaction: linkedin's account and what it may still send today, the account's `scheduled`
 // steps, contacts' touches; the rules of place.ts; then the writes, each conditional on the step as
 // it was read, so a step the sender claimed meanwhile, or that left `scheduled`, is left alone. The
-// plan reads and writes no other status: an `executing` step is its sender's alone.
+// plan reads and writes no other status: an `executing` step is its sender's alone. It reads
+// LinkedIn's steps only, by their actions: an email step is never placed (gamma-p3-030); and none
+// of a paused enrollment, or of a campaign that is not active (gamma-p3-060, ../pause/), whose
+// placed steps the gate puts back at their claim. gamma-p6-040: first, the account's plan lock for
+// the run's transaction (lock.ts); an account another run is planning is skipped (`busy`).
+// gamma-p5-070: then qualification's priorities of the due steps' persons, which order the
+// candidates inside messages and invites (place.ts byPriority), never the room, the hours or the
+// touches.
 import { errors as contacts, lastTouchAt } from "@whytide/contacts";
 import { tenantClient } from "@whytide/db";
 import {
@@ -18,12 +25,19 @@ import {
   MONDAY_TO_FRIDAY,
   quotaDay,
 } from "@whytide/platform";
+import { leadPriorities } from "@whytide/qualification";
 import { random } from "../clock.ts";
-import { MIN_ACTION_GAP_MS } from "./constants.ts";
-import { chooseSteps, type PlanStep, placeTimes, sortSteps } from "./place.ts";
+import { pausesOf } from "../pause/status.ts";
+import { linkedinActionType, linkedinOnly, linkedinSenderAccount } from "../steps/actions.ts";
+import { MIN_ACTION_GAP_MS, PRIORITY_READ_MAX } from "./constants.ts";
+import { lockPlan } from "./lock.ts";
+import { chooseSteps, isDue, type PlanStep, placeTimes, sortSteps } from "./place.ts";
 
-/** Why an account got nothing this run: not connected, its window closed, or none left today. */
-export type PlanSkip = "not_connected" | "window_closed" | "no_window";
+/**
+ * Why an account got nothing this run: another run is planning it (gamma-p6-040), not connected,
+ * its window closed, or none left today.
+ */
+export type PlanSkip = "busy" | "not_connected" | "window_closed" | "no_window";
 /** What one run did for the account, counted. */
 export type AccountPlan = {
   readonly skipped: PlanSkip | null;
@@ -42,23 +56,25 @@ const read = {
   quotaDay: true,
 } as const;
 
-/** The sender accounts of the workspace's `scheduled` steps, sorted. */
+/** The sender accounts of the workspace's `scheduled` LinkedIn steps, sorted. */
 export async function scheduledAccounts(): Promise<string[]> {
   const rows = await tenantClient.stepExecution.findMany({
-    where: { status: "scheduled" },
+    where: { status: "scheduled", ...linkedinOnly() },
     distinct: ["senderAccountId"],
-    select: { senderAccountId: true },
+    select: { id: true, senderAccountId: true },
     orderBy: { senderAccountId: "asc" },
   });
-  return rows.map((row) => row.senderAccountId);
+  return rows.map(linkedinSenderAccount);
 }
 
 /**
- * Plans the account's due steps at `at` (the file's header): nothing for an account that is not
- * connected, outside its window cut to Monday to Friday, or with no window left today, which is also
- * how an account that may not send is skipped (remainingToday answers windowEnd null).
+ * Plans the account's due steps at `at` (the file's header): nothing for an account another run is
+ * planning, or that is not connected, outside its window cut to Monday to Friday, or with no window
+ * left today, which is also how an account that may not send is skipped (remainingToday answers
+ * windowEnd null).
  */
 export async function planAccount(accountId: string, at: Date): Promise<AccountPlan> {
+  if (!(await lockPlan(accountId))) return skip("busy");
   const account = await connected(accountId);
   if (account === null) return skip("not_connected");
   const { timeZone } = account;
@@ -68,7 +84,8 @@ export async function planAccount(accountId: string, at: Date): Promise<AccountP
   if (left.windowEnd === null) return skip("no_window");
 
   const today = quotaDay(at, timeZone);
-  const sorted = sortSteps(await scheduledSteps(accountId), at, today);
+  const steps = await scheduledSteps(accountId);
+  const sorted = sortSteps(steps, at, today, await duePriorities(steps, at));
   const touched = await touchedOn(today, timeZone, sorted.candidates);
   const plan = chooseSteps({ ...sorted, capacity: left, touched });
   const released = await release([...sorted.stale, ...plan.dropped]);
@@ -109,8 +126,36 @@ const weekdaysOf = (account: SenderAccount): number[] =>
 const skip = (skipped: PlanSkip): AccountPlan => ({ skipped, kept: 0, released: 0, placed: 0 });
 
 async function scheduledSteps(accountId: string): Promise<PlanStep[]> {
-  const where = { senderAccountId: accountId, status: "scheduled" } as const;
-  return tenantClient.stepExecution.findMany({ where, select: read, orderBy: { id: "asc" } });
+  const where = { senderAccountId: accountId, status: "scheduled", ...linkedinOnly() } as const;
+  const rows = await tenantClient.stepExecution.findMany({
+    where,
+    select: { ...read, enrollmentId: true },
+    orderBy: { id: "asc" },
+  });
+  const waiting = await pausesOf(rows.map(({ enrollmentId }) => enrollmentId));
+  return rows.flatMap(({ enrollmentId, ...row }) =>
+    waiting.has(enrollmentId) ? [] : [{ ...row, actionType: linkedinActionType(row) }],
+  );
+}
+
+/**
+ * The priorities of the due steps' persons, qualification's leadPriorities in the caller's run: one
+ * call, or one per PRIORITY_READ_MAX persons past it. A person with no intent row has none.
+ */
+export async function duePriorities(
+  steps: readonly PlanStep[],
+  at: Date,
+): Promise<Map<string, number>> {
+  const due = steps.filter((step) => isDue(step, at));
+  const persons = [...new Set(due.map((step) => step.personId))];
+  const priorities = new Map<string, number>();
+  for (let start = 0; start < persons.length; start += PRIORITY_READ_MAX) {
+    const page = persons.slice(start, start + PRIORITY_READ_MAX);
+    for (const { personId, priority } of await leadPriorities(page)) {
+      priorities.set(personId, priority);
+    }
+  }
+  return priorities;
 }
 
 /**

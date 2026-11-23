@@ -1,9 +1,9 @@
 // The salted hash (docs/concepts.md "Hash"): a rejected candidate or an erased person is kept as the
 // HMAC-SHA-256 of its normalized LinkedIn URL or provider id, keyed by HASH_SALT, in hex. The input
 // names its kind, `url:<url>`, `pid:<id>` or, for a suppression entry's company domain (beta-p2-010),
-// `domain:<domain>`, so two kinds never share a hash, and erased hashes, kept for good, never need a
-// new format. One value always gives one hash, and without the salt no hash can be matched to a URL,
-// however guessable.
+// `domain:<domain>`, or for a person's email address (gamma-rf-040), `email:<address>`, so two
+// kinds never share a hash, and erased hashes, kept for good, never need a new format. One value
+// always gives one hash, and without the salt no hash can be matched to a URL, however guessable.
 import { createHmac } from "node:crypto";
 import { AppError } from "@whytide/platform";
 import { contactsConfig } from "../config.ts";
@@ -12,9 +12,9 @@ import { errors } from "../errors.ts";
 export type HashKind = "rejected_candidate" | "erased";
 /**
  * What a hash is of: a normalized LinkedIn URL (a profile, or a company page), a provider's member
- * id, or a company's normalized domain.
+ * id, a company's normalized domain, or an email address, trimmed and in lower case (emails.ts).
  */
-export type HashedValue = "url" | "pid" | "domain";
+export type HashedValue = "url" | "pid" | "domain" | "email";
 export type DropReasons = Readonly<Record<string, number>>;
 /** A rejected candidate's hash lives this long; an erased person's forever. */
 export const REJECTED_DAYS = 90;

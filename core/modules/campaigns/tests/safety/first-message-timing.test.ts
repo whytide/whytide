@@ -132,8 +132,10 @@ test("through the subscriber's body, seeded acceptances in three zones: message_
       const s = synthetic(`campaigns-first-message-db:${zone}:${seed}`);
       const tag = `${ZONES.indexOf(zone)}_${seed}`;
       const hours = hoursOf(s);
-      const { run, enrolledLead, moveStep, app } = fixture(`wsp_first_message_${tag}`);
+      const { run, enrolledLead, moveStep, app, owned } = fixture(`wsp_first_message_${tag}`);
       const workingHours = hours;
+      // The approver the workspace's Owner: the seeded campaign sends from the Owner's account.
+      await owned();
       const { id: senderAccountId } = await createConnectedAccount(`wsp_first_message_${tag}`, {
         ...{ ownerUserId: APPROVER, timeZone: zone, workingHours },
       });

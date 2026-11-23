@@ -1,0 +1,421 @@
+{
+  "scorer": "intent-v1",
+  "about": "Twenty cases of the signal reader's items, the fit and the time, with what scoreIntent and priorityTier give under intent-v1 (README.md, Intent and priority). Never edited: a change to a rule or a number is a new scorer version with a file of its own. An item is [eventId, kind, role, relevance, intentClass, occurredAt], null for unrated; a breakdown part is [eventId, kind, role, contribution]; the strength is S to four decimals.",
+  "cases": [
+    {
+      "name": "fit 80 and one competitor comment of relevance 1 and class other, on its day: intent 53, priority 78 with the boost, Hot",
+      "fit": 80,
+      "at": "2026-11-02T10:00Z",
+      "items": [["evt_c1", "competitor_engagement", "comment", 1.0, "other", "2026-11-02T10:00Z"]],
+      "expected": {
+        "intent": 53,
+        "strength": 6.0,
+        "priority": 78,
+        "tier": "hot",
+        "boostUntil": "2026-11-04T10:00Z",
+        "whyNow": { "kind": "competitor_engagement", "role": "comment", "days": 0 },
+        "whyNowEventId": "evt_c1",
+        "breakdown": [["evt_c1", "competitor_engagement", "comment", 6.0]]
+      }
+    },
+    {
+      "name": "the same, 16 days later: intent 29, priority 57, the boost long over, Warm",
+      "fit": 80,
+      "at": "2026-11-18T10:00Z",
+      "items": [["evt_c1", "competitor_engagement", "comment", 1.0, "other", "2026-11-02T10:00Z"]],
+      "expected": {
+        "intent": 29,
+        "strength": 2.7172,
+        "priority": 57,
+        "tier": "warm",
+        "boostUntil": null,
+        "whyNow": { "kind": "competitor_engagement", "role": "comment", "days": 16 },
+        "whyNowEventId": "evt_c1",
+        "breakdown": [["evt_c1", "competitor_engagement", "comment", 2.72]]
+      }
+    },
+    {
+      "name": "two distinct kinds in 30 days multiply S by 1.15",
+      "fit": 60,
+      "at": "2026-11-02T10:00Z",
+      "items": [
+        ["evt_t1", "topic_engagement", "comment", 1.0, "other", "2026-11-02T10:00Z"],
+        ["evt_r1", "creator_engagement", "reaction", 1.0, "other", "2026-10-30T10:00Z"]
+      ],
+      "expected": {
+        "intent": 62,
+        "strength": 7.7325,
+        "priority": 61,
+        "tier": "warm",
+        "boostUntil": null,
+        "whyNow": { "kind": "topic_engagement", "role": "comment", "days": 0 },
+        "whyNowEventId": "evt_t1",
+        "breakdown": [
+          ["evt_t1", "topic_engagement", "comment", 5.0],
+          ["evt_r1", "creator_engagement", "reaction", 1.72]
+        ]
+      }
+    },
+    {
+      "name": "five distinct kinds multiply S by 1.60, the most",
+      "fit": 50,
+      "at": "2026-11-02T10:00Z",
+      "items": [
+        ["evt_k1", "topic_engagement", "reaction", 1.0, "other", "2026-11-02T10:00Z"],
+        ["evt_k2", "competitor_engagement", "reaction", 1.0, "other", "2026-11-01T10:00Z"],
+        ["evt_k3", "creator_engagement", "reaction", 1.0, "other", "2026-10-31T10:00Z"],
+        ["evt_k4", "my_post_engagement", "reaction", 1.0, "other", "2026-10-28T10:00Z"],
+        ["evt_k5", "post_engagement", "reaction", 1.0, "other", "2026-10-25T10:00Z"]
+      ],
+      "expected": {
+        "intent": 94,
+        "strength": 22.0159,
+        "priority": 70,
+        "tier": "warm",
+        "boostUntil": null,
+        "whyNow": { "kind": "competitor_engagement", "role": "reaction", "days": 1 },
+        "whyNowEventId": "evt_k2",
+        "breakdown": [
+          ["evt_k2", "competitor_engagement", "reaction", 3.81],
+          ["evt_k4", "my_post_engagement", "reaction", 3.12],
+          ["evt_k1", "topic_engagement", "reaction", 3.0],
+          ["evt_k5", "post_engagement", "reaction", 2.02],
+          ["evt_k3", "creator_engagement", "reaction", 1.81]
+        ]
+      }
+    },
+    {
+      "name": "a kind seen only 40 days ago adds no stacking bonus",
+      "fit": 60,
+      "at": "2026-11-02T10:00Z",
+      "items": [
+        ["evt_t2", "topic_engagement", "comment", 1.0, "other", "2026-11-02T10:00Z"],
+        ["evt_o1", "creator_engagement", "comment", 1.0, "other", "2026-09-23T10:00Z"]
+      ],
+      "expected": {
+        "intent": 50,
+        "strength": 5.552,
+        "priority": 56,
+        "tier": "warm",
+        "boostUntil": null,
+        "whyNow": { "kind": "topic_engagement", "role": "comment", "days": 0 },
+        "whyNowEventId": "evt_t2",
+        "breakdown": [
+          ["evt_t2", "topic_engagement", "comment", 5.0],
+          ["evt_o1", "creator_engagement", "comment", 0.55]
+        ]
+      }
+    },
+    {
+      "name": "an unrated item counts at relevance 0.65 and a multiplier of 1",
+      "fit": 60,
+      "at": "2026-11-02T10:00Z",
+      "items": [["evt_u1", "topic_engagement", "comment", null, null, "2026-11-02T10:00Z"]],
+      "expected": {
+        "intent": 33,
+        "strength": 3.25,
+        "priority": 48,
+        "tier": "cool",
+        "boostUntil": null,
+        "whyNow": { "kind": "topic_engagement", "role": "comment", "days": 0 },
+        "whyNowEventId": "evt_u1",
+        "breakdown": [["evt_u1", "topic_engagement", "comment", 3.25]]
+      }
+    },
+    {
+      "name": "a rated relevance of 0.1 counts at 0.3, with seeking_recommendation's 1.5",
+      "fit": 60,
+      "at": "2026-11-02T10:00Z",
+      "items": [
+        [
+          "evt_l1",
+          "topic_engagement",
+          "comment",
+          0.1,
+          "seeking_recommendation",
+          "2026-11-02T10:00Z"
+        ]
+      ],
+      "expected": {
+        "intent": 25,
+        "strength": 2.25,
+        "priority": 44,
+        "tier": "cool",
+        "boostUntil": null,
+        "whyNow": { "kind": "topic_engagement", "role": "comment", "days": 0 },
+        "whyNowEventId": "evt_l1",
+        "breakdown": [["evt_l1", "topic_engagement", "comment", 2.25]]
+      }
+    },
+    {
+      "name": "a repost counts as a reaction",
+      "fit": 60,
+      "at": "2026-11-02T10:00Z",
+      "items": [
+        ["evt_p1", "competitor_engagement", "repost", 1.0, "pain_or_complaint", "2026-10-31T10:00Z"]
+      ],
+      "expected": {
+        "intent": 47,
+        "strength": 5.0721,
+        "priority": 54,
+        "tier": "cool",
+        "boostUntil": null,
+        "whyNow": { "kind": "competitor_engagement", "role": "reaction", "days": 2 },
+        "whyNowEventId": "evt_p1",
+        "breakdown": [["evt_p1", "competitor_engagement", "reaction", 5.07]]
+      }
+    },
+    {
+      "name": "an author's post weighs 7 and boosts; job_seeking's 0.6",
+      "fit": 70,
+      "at": "2026-11-02T10:00Z",
+      "items": [["evt_a1", "topic_engagement", "author", 0.8, "job_seeking", "2026-11-02T05:00Z"]],
+      "expected": {
+        "intent": 34,
+        "strength": 3.3255,
+        "priority": 64,
+        "tier": "warm",
+        "boostUntil": "2026-11-04T05:00Z",
+        "whyNow": { "kind": "topic_engagement", "role": "author", "days": 0 },
+        "whyNowEventId": "evt_a1",
+        "breakdown": [["evt_a1", "topic_engagement", "author", 3.33]]
+      }
+    },
+    {
+      "name": "a reaction on the workspace's own post boosts as first-party, weight 4",
+      "fit": 55,
+      "at": "2026-11-02T10:00Z",
+      "items": [["evt_m1", "my_post_engagement", "reaction", 1.0, "other", "2026-11-02T08:00Z"]],
+      "expected": {
+        "intent": 39,
+        "strength": 3.9835,
+        "priority": 58,
+        "tier": "warm",
+        "boostUntil": "2026-11-04T08:00Z",
+        "whyNow": { "kind": "my_post_engagement", "role": "reaction", "days": 0 },
+        "whyNowEventId": "evt_m1",
+        "breakdown": [["evt_m1", "my_post_engagement", "reaction", 3.98]]
+      }
+    },
+    {
+      "name": "a competitor reaction, weight 4 and not first-party, does not boost",
+      "fit": 55,
+      "at": "2026-11-02T10:00Z",
+      "items": [["evt_n1", "competitor_engagement", "reaction", 1.0, "other", "2026-11-02T08:00Z"]],
+      "expected": {
+        "intent": 39,
+        "strength": 3.9835,
+        "priority": 48,
+        "tier": "cool",
+        "boostUntil": null,
+        "whyNow": { "kind": "competitor_engagement", "role": "reaction", "days": 0 },
+        "whyNowEventId": "evt_n1",
+        "breakdown": [["evt_n1", "competitor_engagement", "reaction", 3.98]]
+      }
+    },
+    {
+      "name": "a weight of 6 boosts until 48 hours after the newest boosting item",
+      "fit": 40,
+      "at": "2026-11-02T10:00Z",
+      "items": [
+        ["evt_b1", "competitor_engagement", "comment", 1.0, "other", "2026-10-31T10:01Z"],
+        ["evt_b2", "my_post_engagement", "comment", 0.5, "other", "2026-11-01T14:00Z"]
+      ],
+      "expected": {
+        "intent": 70,
+        "strength": 9.5603,
+        "priority": 64,
+        "tier": "warm",
+        "boostUntil": "2026-11-03T14:00Z",
+        "whyNow": { "kind": "competitor_engagement", "role": "comment", "days": 1 },
+        "whyNowEventId": "evt_b1",
+        "breakdown": [
+          ["evt_b1", "competitor_engagement", "comment", 5.43],
+          ["evt_b2", "my_post_engagement", "comment", 2.88]
+        ]
+      }
+    },
+    {
+      "name": "an item 48 hours old boosts no more",
+      "fit": 40,
+      "at": "2026-11-02T10:00Z",
+      "items": [["evt_b3", "competitor_engagement", "comment", 1.0, "other", "2026-10-31T10:00Z"]],
+      "expected": {
+        "intent": 49,
+        "strength": 5.4343,
+        "priority": 44,
+        "tier": "cool",
+        "boostUntil": null,
+        "whyNow": { "kind": "competitor_engagement", "role": "comment", "days": 2 },
+        "whyNowEventId": "evt_b3",
+        "breakdown": [["evt_b3", "competitor_engagement", "comment", 5.43]]
+      }
+    },
+    {
+      "name": "items past 90 days count for nothing: intent 0, no why-now, the fit's share only",
+      "fit": 70,
+      "at": "2026-11-02T10:00Z",
+      "items": [["evt_old", "topic_engagement", "author", 1.0, "other", "2026-08-03T10:00Z"]],
+      "expected": {
+        "intent": 0,
+        "strength": 0.0,
+        "priority": 39,
+        "tier": "cool",
+        "boostUntil": null,
+        "whyNow": null,
+        "whyNowEventId": null,
+        "breakdown": []
+      }
+    },
+    {
+      "name": "no items: intent 0",
+      "fit": 90,
+      "at": "2026-11-02T10:00Z",
+      "items": [],
+      "expected": {
+        "intent": 0,
+        "strength": 0.0,
+        "priority": 50,
+        "tier": "cool",
+        "boostUntil": null,
+        "whyNow": null,
+        "whyNowEventId": null,
+        "breakdown": []
+      }
+    },
+    {
+      "name": "a role a kind does not weigh counts for nothing",
+      "fit": 60,
+      "at": "2026-11-02T10:00Z",
+      "items": [["evt_z1", "competitor_engagement", "author", 1.0, "other", "2026-11-02T10:00Z"]],
+      "expected": {
+        "intent": 0,
+        "strength": 0.0,
+        "priority": 33,
+        "tier": "cool",
+        "boostUntil": null,
+        "whyNow": null,
+        "whyNowEventId": null,
+        "breakdown": []
+      }
+    },
+    {
+      "name": "an item dated after the time counts as of the time",
+      "fit": 60,
+      "at": "2026-11-02T10:00Z",
+      "items": [
+        [
+          "evt_f1",
+          "post_engagement",
+          "comment",
+          1.0,
+          "evaluating_or_comparing",
+          "2026-11-02T13:00Z"
+        ]
+      ],
+      "expected": {
+        "intent": 56,
+        "strength": 6.5,
+        "priority": 58,
+        "tier": "warm",
+        "boostUntil": null,
+        "whyNow": { "kind": "post_engagement", "role": "comment", "days": 0 },
+        "whyNowEventId": "evt_f1",
+        "breakdown": [["evt_f1", "post_engagement", "comment", 6.5]]
+      }
+    },
+    {
+      "name": "the priority stays at most 100",
+      "fit": 100,
+      "at": "2026-11-02T10:00Z",
+      "items": [
+        [
+          "evt_h1",
+          "topic_engagement",
+          "author",
+          1.0,
+          "seeking_recommendation",
+          "2026-11-02T10:00Z"
+        ],
+        [
+          "evt_h2",
+          "competitor_engagement",
+          "comment",
+          1.0,
+          "pain_or_complaint",
+          "2026-11-02T10:00Z"
+        ],
+        [
+          "evt_h3",
+          "my_post_engagement",
+          "comment",
+          1.0,
+          "evaluating_or_comparing",
+          "2026-11-02T10:00Z"
+        ]
+      ],
+      "expected": {
+        "intent": 99,
+        "strength": 34.71,
+        "priority": 100,
+        "tier": "hot",
+        "boostUntil": "2026-11-04T10:00Z",
+        "whyNow": { "kind": "topic_engagement", "role": "author", "days": 0 },
+        "whyNowEventId": "evt_h1",
+        "breakdown": [
+          ["evt_h1", "topic_engagement", "author", 10.5],
+          ["evt_h2", "competitor_engagement", "comment", 8.4],
+          ["evt_h3", "my_post_engagement", "comment", 7.8]
+        ]
+      }
+    },
+    {
+      "name": "equal contributions: the newest first, then by event id",
+      "fit": 60,
+      "at": "2026-11-02T10:00Z",
+      "items": [
+        ["evt_e2", "post_engagement", "comment", 1.0, "other", "2026-11-01T10:00Z"],
+        ["evt_e1", "post_engagement", "comment", 1.0, "other", "2026-11-01T10:00Z"],
+        ["evt_e3", "competitor_engagement", "comment", 1.0, "other", "2026-10-19T10:00Z"],
+        ["evt_e4", "topic_engagement", "reaction", 1.0, "other", "2026-11-02T10:00Z"]
+      ],
+      "expected": {
+        "intent": 92,
+        "strength": 20.172,
+        "priority": 74,
+        "tier": "warm",
+        "boostUntil": null,
+        "whyNow": { "kind": "post_engagement", "role": "comment", "days": 1 },
+        "whyNowEventId": "evt_e1",
+        "breakdown": [
+          ["evt_e1", "post_engagement", "comment", 4.76],
+          ["evt_e2", "post_engagement", "comment", 4.76],
+          ["evt_e4", "topic_engagement", "reaction", 3.0],
+          ["evt_e3", "competitor_engagement", "comment", 3.0]
+        ]
+      }
+    },
+    {
+      "name": "generic_praise and self_promotion count less; the why-now names the strongest, 9 days old",
+      "fit": 65,
+      "at": "2026-11-02T10:00Z",
+      "items": [
+        ["evt_g1", "competitor_engagement", "comment", 1.0, "generic_praise", "2026-10-24T10:00Z"],
+        ["evt_g2", "topic_engagement", "comment", 0.5, "self_promotion", "2026-11-01T10:00Z"]
+      ],
+      "expected": {
+        "intent": 48,
+        "strength": 5.1769,
+        "priority": 57,
+        "tier": "warm",
+        "boostUntil": null,
+        "whyNow": { "kind": "competitor_engagement", "role": "comment", "days": 9 },
+        "whyNowEventId": "evt_g1",
+        "breakdown": [
+          ["evt_g1", "competitor_engagement", "comment", 3.07],
+          ["evt_g2", "topic_engagement", "comment", 1.43]
+        ]
+      }
+    }
+  ]
+}

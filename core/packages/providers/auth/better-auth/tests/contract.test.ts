@@ -11,8 +11,10 @@ import { betterAuthAdapter } from "../index.ts";
 
 withTestDb();
 before(() => useAuthDatabase(asRole("app")));
+// `requires` names what a production server needs, for deploy:check; here, outside production, the
+// adapter runs without either, so the suite never skips.
 contractSuite(
   authPort,
-  betterAuthAdapter,
+  { ...betterAuthAdapter, requires: [] },
   authCases(async (url, init) => fetch(url, { ...init, redirect: "manual" })),
 );

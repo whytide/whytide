@@ -1,12 +1,15 @@
 // The candidates whose profiles were read (README.md "Processing"; docs/flows.md), a chunk at a time
-// in one tenant run, the ICP's hard filters prepared once for it. A profile that names the own
-// company is dropped; one the filters stop leaves a salted hash with the reason (contacts'
-// recordHash) and nothing else; one that passes becomes or updates a person with linkedin's
-// provenance, its company, its lead (source `signal`, with the source's label and post URL, which
-// contacts' lead list shows), an event (one per dedupe key) and its evidence. The chunk's new
-// leads go to qualification as signals.person_found, the known persons' new events as a re-score
-// request; its staging rows are deleted and its counts added to the run's. An event's id carries its
-// candidate's ULID (ids.ts).
+// in one tenant run, the hard filters and the noise rules of the run's audience (its agent's, else
+// the default; agents.ts, gamma-p5-045) prepared once for it. A profile that names the own company
+// is dropped, and one at a competitor (noise.ts; a recruiter or a job seeker is the assessment's
+// since signals-triage-ai); one the filters stop, by its country (the title is the assessment's,
+// title-check-ai), leaves a salted hash with the reason (contacts' recordHash) and nothing else; one
+// that passes becomes or updates a person with linkedin's provenance and its member id under
+// `unipile`, which campaigns' first invite reads (gamma-p5-020), its company, its lead (source
+// `signal`, with the source's label and the candidate's post, which contacts' lead list shows), an
+// event (one per dedupe key) and its evidence. The chunk's new leads go to qualification as
+// signals.person_found, the known persons' new events as a re-score request; its staging rows are
+// deleted and its counts added to the run's. An event's id carries its candidate's ULID (ids.ts).
 import { json } from "node:stream/consumers";
 import {
   errors as contactsErrors,
@@ -18,7 +21,6 @@ import {
   upsertPersonFromSource,
 } from "@whytide/contacts";
 import { outboxWriter, tenantClient } from "@whytide/db";
-import { readIcpForScoring } from "@whytide/icp";
 import { type ProfileFile, profileFile } from "@whytide/linkedin";
 import { getCompanyDomain } from "@whytide/onboarding";
 import { isAppError, newId, publish } from "@whytide/platform";
@@ -32,13 +34,17 @@ import { events } from "../../events.ts";
 import { eventIdOf, ids } from "../../ids.ts";
 import type { SourceKind } from "../../sources/_contract.ts";
 import { sourceKind } from "../../sources/registry.ts";
+import { audienceOf } from "../agents.ts";
 import { addCounts, type RunRef } from "../runs.ts";
-import { profileKeys } from "./keys.ts";
+import { MEMBER_REF_KEY, profileKeys } from "./keys.ts";
+import type { NoiseRules } from "./noise.ts";
 import { dedupeKeyOf, excerptOf, ownCompanyRule } from "./rules.ts";
+import { noiseRulesOf } from "./select.ts";
 
 type Outcome =
   | "dropped_unread"
   | "dropped_own"
+  | "dropped_competitor"
   | "dropped_hashed"
   | "dropped_filtered"
   | "dropped_known"
@@ -54,6 +60,8 @@ type Staged = {
   readonly reaction: string;
   readonly commentText: string | null;
   readonly engagedAt: Date;
+  readonly objectUrl: string | null;
+  readonly postExcerpt: string | null;
 };
 /** A company the profile names that contacts refuses (a page off /company/, no domain): skipped. */
 const NO_COMPANY: ReadonlySet<string> = new Set([
@@ -63,10 +71,12 @@ const NO_COMPANY: ReadonlySet<string> = new Set([
 type Chunk = {
   readonly ref: RunRef;
   readonly kind: SourceKind;
+  /** The source's post, for a row staged before gamma-p5-020; every other row names its own. */
   readonly objectUrl: string;
-  /** The source's label, which contacts' lead list shows with its post, `objectUrl`. */
+  /** The source's label, which contacts' lead list shows with the candidate's post. */
   readonly label: string;
   readonly filters: PreparedHardFilters;
+  readonly noise: NoiseRules;
   readonly own: (text: string | null | undefined) => boolean;
   readonly now: Date;
 };
@@ -106,11 +116,12 @@ export async function processCandidates(
   });
   if (source === null || staged.length === 0) return { processed: 0 };
   const kind = sourceKind(source.kind);
-  const { icp } = await readIcpForScoring(workspaceId);
+  const { icp } = await audienceOf(workspaceId, ref.playbookId);
   const own = ownCompanyRule({ domain: await getCompanyDomain(), name: ownName });
-  const objectUrl = kind.event.objectOf(source.config);
+  const objectUrl = kind.event.objectOf?.(source.config) ?? "";
   const { label } = source;
-  const chunk = { ref, kind, objectUrl, label, filters: prepareHardFilters(icp), own, now };
+  const filters = prepareHardFilters(icp);
+  const chunk = { ref, kind, objectUrl, label, filters, noise: await noiseRulesOf(icp), own, now };
   const counts: Record<string, number> = { profiles_read: 0 };
   const found: string[] = [];
   const known: string[] = [];
@@ -136,7 +147,7 @@ export async function processCandidates(
 
 /** One candidate: dropped with its reason, or kept, its person created or known already. */
 async function processOne(
-  { ref, kind, objectUrl, label, filters, own, now }: Chunk,
+  { ref, kind, objectUrl, label, filters, noise, own, now }: Chunk,
   candidate: Staged,
   profile: ProfileFile | undefined,
 ): Promise<{ outcome: Outcome; personId?: string }> {
@@ -144,8 +155,11 @@ async function processOne(
   if ([profile.headline, profile.companyName, profile.companyUrl].some(own)) {
     return { outcome: "dropped_own" };
   }
+  const noisy = noise.profile(profile);
+  if (noisy !== null) return { outcome: noisy };
   const locationCountry = countryOf(profile.locationText);
-  const filtered = filters({ title: profile.title, locationCountry }, null);
+  // The country only: the title is the assessment's (title-check-ai), and no company row yet.
+  const filtered = filters({ locationCountry }, null);
   if (!filtered.passed) {
     const rejected = {
       providerId: candidate.providerMemberRef,
@@ -158,7 +172,8 @@ async function processOne(
   if (personId === null) return { outcome: "dropped_hashed" };
   await linkCompany(personId, profile);
   const at = candidate.engagedAt;
-  const source = { kind: "signal" as const, ref: ref.sourceId, at, label, url: objectUrl };
+  const url = candidate.objectUrl ?? objectUrl;
+  const source = { kind: "signal" as const, ref: ref.sourceId, at, label, url };
   const { created } = await createLeadForPerson({ personId, source });
   const { providerMemberRef: actor, reaction: role } = candidate;
   // The candidate's ULID: its credit's subject is the candidate, whose row goes with the run, so the
@@ -170,7 +185,7 @@ async function processOne(
     sourceId: ref.sourceId,
     runId: ref.runId,
     kind: kind.event.kind,
-    dedupeKey: dedupeKeyOf({ kind: kind.event.kind, actor, objectUrl, role }),
+    dedupeKey: dedupeKeyOf({ kind: kind.event.kind, actor, objectUrl: url, role }),
     occurredAt: candidate.engagedAt,
   };
   const { count } = await tenantClient.signalEvent.createMany({
@@ -178,11 +193,12 @@ async function processOne(
     skipDuplicates: true,
   });
   if (count === 0) return { outcome: "dropped_known", personId };
-  const { profileUrl, name, headline, commentText, engagedAt } = candidate;
+  const { profileUrl, name, headline, commentText, engagedAt, postExcerpt } = candidate;
   const evidence = kind.evidenceOf({
     ...{ providerMemberRef: actor, profileUrl, name, headline, reaction: role, engagedAt },
     ...(commentText === null ? {} : { commentText }),
-    objectUrl,
+    ...(postExcerpt === null ? {} : { postExcerpt }),
+    objectUrl: url,
   });
   // captured_at is set once, here, with its new event, and never moves (alpha-p10-020; security §2):
   // a known event stops above, a later engagement is an event of its own, a re-import writes no
@@ -193,8 +209,9 @@ async function processOne(
       workspaceId: ref.workspaceId,
       eventId: event.id,
       url: evidence.url,
-      excerpt: excerptOf(evidence.commentText),
+      excerpt: excerptOf(evidence.ownWords ?? evidence.commentText),
       commentText: evidence.commentText ?? null,
+      postExcerpt: excerptOf(evidence.postExcerpt),
       reaction: evidence.reaction,
       author: evidence.author,
       capturedAt: now,
@@ -203,16 +220,20 @@ async function processOne(
   return { outcome: created ? "created" : "attached", personId };
 }
 
-/** The person of the profile, linkedin's provenance; null when contacts has it erased. */
+/**
+ * The person of the profile, linkedin's provenance, its member id under campaigns' key, `unipile`,
+ * as campaigns' storeMemberRef keeps it; null when contacts has it erased.
+ */
 async function upsertPerson(profile: ProfileFile): Promise<string | null> {
   const { profileUrl, firstName, lastName, headline, title, companyName, locationText } = profile;
   const values = { firstName, lastName, headline, title, companyName, locationText };
   const fetchedAt = new Date(profile.fetchedAt);
+  const providerId = profile.providerMemberRef;
   try {
     const { person } = await upsertPersonFromSource({
       source: "linkedin",
-      provider: null,
-      profile: { linkedinUrl: profileUrl, ...values, fetchedAt },
+      provider: MEMBER_REF_KEY,
+      profile: { linkedinUrl: profileUrl, providerId, ...values, fetchedAt },
     });
     return person.id;
   } catch (error) {

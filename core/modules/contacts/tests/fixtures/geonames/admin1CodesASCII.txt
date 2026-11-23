@@ -1,0 +1,4 @@
+US.MA	Massachusetts	Massachusetts	6254926
+CA.08	Ontario	Ontario	6093943
+ZZ.01	Nowhere	Nowhere	1
+CA.10	Québec	Quebec	6115047

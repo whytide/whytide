@@ -18,10 +18,12 @@
   "discovery.import.empty": "No import yet. The files you upload show here.",
   "discovery.import.error": "The past imports could not be loaded.",
   "discovery.import.history.file": "File",
+  "discovery.import.history.leads": "Leads",
   "discovery.import.history.skipped": "Skipped",
   "discovery.import.history.status": "Status",
   "discovery.import.history.title": "Past imports",
   "discovery.import.history.uploaded": "Uploaded",
+  "discovery.import.history.view_leads_of": "View leads of {file}",
   "discovery.import.history.you": "You",
   "discovery.import.limit": "A .csv file of {megabytes, number} MB at most, saved as CSV UTF-8.",
   "discovery.import.loading": "Loading the past imports…",
@@ -53,5 +55,5 @@
   "discovery.import.title": "Import a CSV",
   "discovery.import.uploaded_by": "Uploaded by",
   "discovery.import.uploading": "Uploading {file}…",
-  "discovery.import.view_leads": "Open the lead list"
+  "discovery.import.view_leads": "View leads"
 }

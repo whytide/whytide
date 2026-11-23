@@ -1,0 +1,9 @@
+# playbooks: the brief for a coding agent
+
+1. Read `README.md`, then `docs/concepts.md`, `docs/data.md`, `docs/flows.md`, `docs/security.md` and `docs/runbook.md`. They say what is true now and change in the same merge request as the behavior.
+2. The rules: [coding](../../../docs/rules/coding.md), [security](../../../docs/rules/security.md), [delivery](../../../docs/rules/delivery.md). The shape of this folder is [architecture §4.2](../../../docs/architecture.md#42-inside-a-module): rules in `domain/` without a framework, Zod schemas in `schemas/`, NestJS in `api/`, Temporal in `workflows/`, agent tasks in `agents/` (importing `@whytide/ai`, never `@mastra/*`), Next.js in `ui/`, every screen string a key in `messages/en.json`, the registries in `permissions.ts`, `prices.ts`, `events.ts` and `settings.ts`, the tests in `tests/`.
+3. Commands, from the repository root: `pnpm -F playbooks build`, `pnpm -F playbooks typecheck`, `pnpm -F playbooks test`, `pnpm -F playbooks test:tenancy`, `pnpm -F playbooks lint`; the routes' test is the api's, `core/apps/api/tests/playbooks-api.test.ts`.
+4. Stay inside this folder and the module's schema file. A change to a shared package is its own task.
+5. playbooks imports icp, and tenancy for its events: never import signals, campaigns or qualification, which import playbooks. Signals' sources are reached through the source checker it registers (`domain/source-checker.ts`).
+6. The screens (`ui/`, README "Screens") reach other modules only through their routes, with the web's api client; their Playwright test is `core/apps/web/tests/playbooks-agents.spec.ts`, on the e2e api, which loads signals and so its checker.
+7. A write of an agent goes through `lockedPlaybook`, which asks platform's `canWriteOwned` with its `ownerUserId` and `playbooks.manage`; a new write of an agent calls it too (README "Decided here", gamma-p6-015).

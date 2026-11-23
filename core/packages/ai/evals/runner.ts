@@ -13,6 +13,7 @@ import { z } from "zod";
 import { type AttemptFailure, runAttempts } from "../call/attempts.ts";
 import { type AgentGate, type AgentTask, registeredAgentTasks } from "../registry/define.ts";
 import { agentModel } from "../run/run-agent.ts";
+import { GOLDEN_PREFIX } from "./constants.ts";
 
 const json = z.record(z.string(), z.unknown());
 const caseSchema = z.strictObject({
@@ -161,13 +162,21 @@ function checkReport(check: string, threshold: number, cases: readonly CaseRepor
   return { check, threshold, mean, cases: values.length, below, pass };
 }
 
-/** Runs evals/<name>/: every case, scored, then each check's mean against its threshold. */
-export async function runEval(dir: string, name: string, live: boolean): Promise<EvalReport> {
+/**
+ * Runs evals/<name>/: every case, then `extra` (the golden set's, `--cases`), scored, then each
+ * check's mean against its threshold.
+ */
+export async function runEval(
+  dir: string,
+  name: string,
+  live: boolean,
+  extra: readonly EvalCase[] = [],
+): Promise<EvalReport> {
   const folder = join(dir, name);
   const scorer = await loadScorer(folder, name);
   const task = registeredAgentTasks().get(name);
   if (!task) throw new Error(`evals/${name}: no agent task ${name} is registered`);
-  const evalCases = readCases(folder, name);
+  const evalCases = [...readCases(folder, name), ...extra];
   // Not live, the fake, whatever PROVIDER_LLM names: a case never reaches a model by mistake.
   const llm = live ? undefined : await getAdapter(llmPort, "fake");
   const { vendor, modelId } = await agentModel(task, llm);
@@ -181,11 +190,14 @@ export async function runEval(dir: string, name: string, live: boolean): Promise
 }
 
 /**
- * A live run's record, for evals/<task>/runs/<date>.json: the model, the checks and each case's
- * name, result and scores. No input, output or issue text, and an error only as its code.
+ * A live run's record, for evals/<task>/runs/<date>.json: the model, the counts, the checks and each
+ * case's name, result and scores. No input, output or issue text, and an error only as its code; a
+ * golden case (`--cases`) is its name, `golden-<line>`, and its scores.
  */
 export function runRecord(report: EvalReport, date: string) {
   const { task, promptVersion, vendor, modelId, checks, pass } = report;
+  const golden = report.cases.filter((c) => c.name.startsWith(GOLDEN_PREFIX)).length;
+  const counts = { cases: report.cases.length, golden };
   const cases = report.cases.map((c) => ({
     name: c.name,
     result:
@@ -193,7 +205,7 @@ export function runRecord(report: EvalReport, date: string) {
     attempts: c.outcome?.attempts ?? 0,
     score: c.score,
   }));
-  return { task, date, vendor, modelId, promptVersion, pass, checks, cases };
+  return { task, date, vendor, modelId, promptVersion, pass, counts, checks, cases };
 }
 
 /** Why a task failed: each check under its threshold with its cases below 1, and each case that threw. */

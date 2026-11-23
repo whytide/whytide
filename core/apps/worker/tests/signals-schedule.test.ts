@@ -4,7 +4,8 @@
 // `signals-<sourceId>` through the scheduler the host binds and start a run by hand through its
 // starter. The sources' sender account is disconnected, so each run the test causes ends at once,
 // failed, before any read. Before a host binds it, createSchedule is workflows_not_bound, as in the
-// api. The schedules a test made are deleted after it.
+// api. The schedules a test made are deleted after it. A research source (gamma-wr-030) gets no
+// schedule, and its run by hand starts signals_research_run, which plans on the LLM fake (gamma-wr-040).
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -30,9 +31,16 @@ const built = (path: string) => import(new URL(`../../../modules/${path}`, impor
 type Sources = typeof import("../../../modules/signals/dist/domain/sources.js");
 type Events = typeof import("../../../modules/signals/dist/events.js");
 type LinkedinTesting = typeof import("../../../modules/linkedin/dist/testing/index.js");
+type IcpCommands = typeof import("../../../modules/icp/dist/domain/commands.js");
+process.env.PROVIDER_LLM = "fake";
+const { loadAgentTasks } = await import("@whytide/ai");
+const { getAdapter, llmPort } = await import("@whytide/providers");
+await loadAgentTasks();
+const llm = (await getAdapter(llmPort, "fake")) as unknown as import("@whytide/providers").LlmFake;
 const sources: Sources = await built("signals/dist/domain/sources.js");
 const { events }: Events = await built("signals/dist/events.js");
 const linkedin: LinkedinTesting = await built("linkedin/dist/testing/index.js");
+const icp: IcpCommands = await built("icp/dist/domain/commands.js");
 type RunResult = { runId: string; status: string; code?: string };
 
 withTestDb();
@@ -204,5 +212,46 @@ test("through the host: enabling a source that has no schedule (saved before its
     await host.close();
     for (const id of made)
       await unless(env.client.schedule.getHandle(id).delete(), ScheduleNotFoundError);
+  }
+});
+
+test("through the host: a research source has no Temporal schedule, whatever is delivered for it; its run by hand starts signals_research_run as signals.run:<workspace>:<run> and ends done, with no sender account", async () => {
+  const taskQueue = `test-${randomUUID()}`;
+  const modules = moduleLoaders.filter(({ name }) => name === "signals");
+  const host = await start({
+    modules,
+    taskQueue,
+    healthPort: 0,
+    client: db(),
+    log,
+    schedules: "off",
+  });
+  try {
+    const workspaceId = newId("wsp");
+    await inRun(workspaceId, async (tx) => {
+      const { id } = (await icp.readIcpForScoring(workspaceId)).icp;
+      await tx.icp.update({ where: { id }, data: { countries: ["DE"] } });
+    });
+    const input = { kind: "web_research", config: { focus: "traders of grain" }, label: "Grain" };
+    const source = await inRun(workspaceId, () => sources.createSource(input));
+    assert.equal(source.senderAccountId, null);
+    llm.script({ words: [], places: [], queries: [] });
+    const requested = await inRun(workspaceId, () => sources.requestRun(source.id));
+    const byHand = env.client.workflow.getHandle<() => Promise<RunResult>>(
+      `signals.run:${workspaceId}:${requested.id}`,
+    );
+    const ended = await until(() => unless(byHand.result(), WorkflowNotFoundError));
+    assert.deepEqual(ended, { runId: requested.id, status: "done" });
+    assert.equal((await byHand.describe()).type, "signals_research_run");
+    // The created event was delivered before the run's: no schedule was made, enabled or not.
+    const schedule = env.client.schedule.getHandle(`signals-${source.id}`);
+    await assert.rejects(schedule.describe(), ScheduleNotFoundError);
+    await inRun(workspaceId, () => sources.updateSource(source.id, { enabled: false }));
+    await inRun(workspaceId, () => sources.updateSource(source.id, { enabled: true }));
+    const pending = () => db().outboxEntry.count({ where: { workspaceId, deliveredAt: null } });
+    await until(async () => ((await pending()) === 0 ? true : undefined));
+    await assert.rejects(schedule.describe(), ScheduleNotFoundError);
+  } finally {
+    await host.close();
   }
 });

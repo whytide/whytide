@@ -21,6 +21,8 @@ const tally = z.strictObject({
 export const countsResponse = z.strictObject({
   /** When the counts were read: today is this instant's local day in each account's zone. */
   asOf: z.iso.datetime(),
+  /** Whose accounts: `own`, the caller's; `all`, every member's, for a holder of linkedin.manage. */
+  scope: z.enum(["own", "all"]),
   /** By label; an account linkedin no longer holds last. Empty without an enrollment. */
   senders: z.array(
     z.strictObject({

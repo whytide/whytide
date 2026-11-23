@@ -23,11 +23,14 @@
     { "path": "../../modules/contacts" },
     { "path": "../../modules/credits" },
     { "path": "../../modules/discovery" },
+    { "path": "../../modules/email" },
+    { "path": "../../modules/enrichment" },
     { "path": "../../modules/icp" },
     { "path": "../../modules/identity" },
     { "path": "../../modules/linkedin" },
     { "path": "../../modules/messaging" },
     { "path": "../../modules/onboarding" },
+    { "path": "../../modules/playbooks" },
     { "path": "../../modules/signals" },
     { "path": "../../modules/tenancy" }
   ]

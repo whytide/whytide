@@ -1,7 +1,7 @@
 // The draft of the ICP (icp-draft; README "The draft", "The script") on the worktree's database: the
 // request's run, then `pnpm icp:draft` end to end, the test playing the worker by writing the draft
-// as the drafter leaves it. The drafter itself runs in the worker's tests/icp-draft.test.ts, on the
-// LLM fake, with its workflow.
+// as the drafter leaves it; with --icp, another audience than the default (gamma-p3-020). The
+// drafter itself runs in the worker's tests/icp-draft.test.ts, on the LLM fake, with its workflow.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { type TenantClient, withTenant } from "@whytide/db";
@@ -9,7 +9,8 @@ import { asRole, withTestDb } from "@whytide/db/testing";
 import { isAppError, servicePrincipal } from "@whytide/platform";
 import { createTwoWorkspaces, useTenancyClient } from "@whytide/tenancy/testing";
 import { runDraft } from "../cli/draft.ts";
-import { requestDraft } from "../domain/draft.ts";
+import { createAudience } from "../domain/commands.ts";
+import { discardDraft, requestDraft } from "../domain/draft.ts";
 import { draftStart } from "../events.ts";
 
 withTestDb();
@@ -147,4 +148,77 @@ test("pnpm icp:draft: --dry-run prints the proposal and saves nothing; a save mo
     lines.at(-1),
     "workspace_not_found: no single workspace is no-such-slug: pass its id",
   );
+});
+
+test("pnpm icp:draft: a draft used or discarded on the ICP screen between two reads exits 6 icp_draft_ended, nothing saved", async () => {
+  const [{ workspace }] = await createTwoWorkspaces();
+  const ws = workspace.id;
+  /** The worker drafts, then the screen's Discard ends the draft before the script's next read. */
+  const discarded = async () => {
+    const pendingDraft = { model: "fake-model", promptVersion: 1, decisionRecordId: "dec_b" };
+    const data = { draftStatus: "drafted", pendingDraft: { ...pendingDraft, fields: PROPOSAL } };
+    await run(ws, (tx) => tx.icp.updateMany({ data }));
+    await run(ws, () => discardDraft());
+  };
+  const lines: string[] = [];
+  const options = { client: asRole("app"), pollMs: 1, timeoutMs: 10_000, wait: discarded };
+  const args = ["--workspace", ws, "--brief", "Bakeries in France"];
+  assert.equal(await runDraft(args, (line) => lines.push(line), options), 6);
+  assert.match(
+    lines.at(-1) ?? "",
+    /^icp_draft_ended: the draft of idrun_\w+ was used or discarded on the ICP screen$/,
+  );
+  const icp = await run(ws, (tx) => tx.icp.findFirstOrThrow({}));
+  assert.deepEqual([icp.draftStatus, icp.version, icp.titles], ["none", 1, []]);
+  assert.deepEqual(await outbox(ws, "icp.updated"), []);
+});
+
+test("pnpm icp:draft --icp: drafts and saves that audience alone, icp.audience_updated and no icp.updated; an id the workspace does not hold is icp_not_found", async () => {
+  const [{ workspace }] = await createTwoWorkspaces();
+  const ws = workspace.id;
+  const audience = await run(ws, () => createAudience({ name: "Bakeries", createdBy: "usr_a" }));
+  /** The worker's part: the audience's run drafted, as the drafter leaves it. */
+  const drafted = async () => {
+    const pendingDraft = { model: "fake-model", promptVersion: 1, decisionRecordId: "dec_c" };
+    const data = { draftStatus: "drafted", pendingDraft: { ...pendingDraft, fields: PROPOSAL } };
+    await run(ws, (tx) => tx.icp.updateMany({ where: { id: audience.id }, data }));
+  };
+  const lines: string[] = [];
+  const options = { client: asRole("app"), pollMs: 1, timeoutMs: 10_000, wait: drafted };
+  const draft = (icpId: string) => {
+    lines.length = 0;
+    const args = ["--workspace", ws, "--icp", icpId, "--brief", "Bakeries in France"];
+    return runDraft(args, (line) => lines.push(line), options);
+  };
+
+  assert.equal(await draft(audience.id), 0);
+  const requested = new RegExp(
+    `^icp_draft_requested: (idrun_\\w+) in ${ws}, audience ${audience.id}$`,
+  );
+  const draftRunId = requested.exec(lines[0] ?? "")?.[1];
+  assert.ok(draftRunId, lines[0] ?? "no line");
+  assert.equal(
+    lines.at(-1),
+    `icp_saved: version 2 of ${audience.id}; not the default audience: no re-score`,
+  );
+  const rows = await run(ws, (tx) => tx.icp.findMany({ orderBy: { isDefault: "desc" } }));
+  assert.deepEqual(
+    rows.map((row) => [row.isDefault, row.version, row.titles, row.draftStatus]),
+    [
+      [true, 1, [], "none"],
+      [false, 2, PROPOSAL.titles, "none"],
+    ],
+  );
+  const payloads = async (eventName: string) =>
+    (await outbox(ws, eventName)).map((entry) => entry.payload);
+  assert.deepEqual(await payloads("icp.draft_requested"), [
+    { workspaceId: ws, icpId: audience.id, draftRunId },
+  ]);
+  assert.deepEqual(await payloads("icp.audience_updated"), [
+    { workspaceId: ws, icpId: audience.id, version: 2 },
+  ]);
+  assert.deepEqual(await payloads("icp.updated"), []);
+
+  assert.equal(await draft("icp_none"), 1);
+  assert.deepEqual(lines, ["icp_not_found: icp_none"]);
 });

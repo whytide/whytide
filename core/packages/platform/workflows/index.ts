@@ -6,9 +6,13 @@
 // registry or a `/// pii` column. Nothing here imports Temporal: the workflow functions sit in the
 // module's workflows/workflows.ts, and startWorkflow, a subscriber's start of one on demand, goes to
 // the starter the worker host binds, cancelWorkflow to its canceller, as createSchedule and the
-// others of a row's schedule go to its scheduler.
+// others of a row's schedule go to its scheduler. An activity may narrow its kind's retries with its
+// own `attempts` and `notRetried`; defineActivity refuses a bad one when the module loads.
 import { z } from "zod";
-import { AppError, defineErrors } from "../errors/index.ts";
+import { AppError, defineErrors, registeredErrors } from "../errors/index.ts";
+import { ACTIVITY_ATTEMPTS } from "./constants.ts";
+
+export { ACTIVITY_ATTEMPTS } from "./constants.ts";
 
 /** The base of every workflow and activity input: the workspace it works for. Ids only. */
 export const workflowInput = z.object({ workspaceId: z.string().min(1) });
@@ -50,6 +54,17 @@ export type ActivityDefinition<I extends z.ZodObject = z.ZodObject, O = unknown,
   readonly kind: ActivityKind;
   /** Extends workflowInput, or globalWorkflowInput with `scope: "global"`. */
   readonly input: I;
+  /**
+   * Its own bound, a whole number from 1 to its kind's ACTIVITY_ATTEMPTS: 1 for a send whose retry
+   * would need a check first. Unset, the kind's.
+   */
+  readonly attempts?: number;
+  /**
+   * Its codes that are never retried, beside the worker's own: `mail_rejected` and
+   * `mail_input_invalid` for a mail. Each a registered code: the module imports where it is
+   * declared (a port, its errors.ts), which registers it first.
+   */
+  readonly notRetried?: readonly string[];
 } & (
   | {
       readonly scope?: undefined;
@@ -85,12 +100,35 @@ export type ActivityFunctions<T extends Record<string, ActivityDefinition<z.ZodO
     readonly [K in keyof T]: (input: z.input<T[K]["input"]>) => ReturnType<T[K]["run"]>;
   };
 
+/** What the worker retries an activity by: its kind, and its own bound and codes. */
+export type ActivityRetries = Pick<ActivityDefinition, "kind" | "attempts" | "notRetried">;
+
 export const defineWorkflows = <const T extends Record<string, WorkflowRegistration>>(map: T): T =>
   map;
-/** Types `run` from `input`; `Tx` stays out of the result, so the module's exports name no Prisma type. */
+/**
+ * Types `run` from `input`; `Tx` stays out of the result, so the module's exports name no Prisma type.
+ * Refuses an `attempts` off its range and a `notRetried` entry that is no registered code.
+ */
 export const defineActivity = <I extends z.ZodObject, O, Tx = unknown>(
   definition: ActivityDefinition<I, O, Tx>,
-): ActivityDefinition<I, O> => definition;
+): ActivityDefinition<I, O> => {
+  checkRetries(definition);
+  return definition;
+};
+
+/** activity_definition_invalid, `details.field` naming the field, `details.index` the entry's place. */
+function checkRetries({ kind, attempts, notRetried = [] }: ActivityRetries): void {
+  const refuse = (field: keyof ActivityRetries, index?: number) =>
+    new AppError(workflowErrors.activity_definition_invalid, {
+      details: { field, kind, ...(index !== undefined && { index }) },
+    });
+  const bound = ACTIVITY_ATTEMPTS[kind];
+  if (attempts !== undefined && !(Number.isInteger(attempts) && attempts >= 1 && attempts <= bound))
+    throw refuse("attempts");
+  const index = notRetried.findIndex((code) => !registeredErrors().has(code));
+  if (index !== -1) throw refuse("notRetried", index);
+}
+
 export const defineSchedules = (
   schedules: readonly ScheduleDefinition[],
 ): readonly ScheduleDefinition[] => schedules;
@@ -113,8 +151,14 @@ export type WorkflowStarted = { readonly started: boolean };
 /** The worker host's (core/apps/worker/src/starter.ts). */
 export type WorkflowStarter = { start(request: WorkflowStart): Promise<WorkflowStarted> };
 
-/** A start where no starter is bound, in the api or before the worker's start: a bug, so 500. */
-export const workflowErrors = defineErrors({ workflows_not_bound: { status: 500 } });
+/**
+ * A start where no starter is bound, in the api or before the worker's start: a bug, so 500; and a
+ * definition defineActivity refuses, when its module loads: a bug too.
+ */
+export const workflowErrors = defineErrors({
+  workflows_not_bound: { status: 500 },
+  activity_definition_invalid: { status: 500 },
+});
 let starter: WorkflowStarter | undefined;
 
 /** At the worker's start; the function returned, at its close, puts back the one bound before. */

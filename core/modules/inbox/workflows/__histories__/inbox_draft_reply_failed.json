@@ -1,0 +1,365 @@
+{
+  "events": [
+    {
+      "eventId": "1",
+      "eventTime": "2026-11-03T22:00:04.712029996Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED",
+      "taskId": "1490531",
+      "workflowExecutionStartedEventAttributes": {
+        "workflowType": {
+          "name": "inbox_draft_reply"
+        },
+        "taskQueue": {
+          "name": "test-310a0de5-3dff-4183-8cef-e23a7f4fc59f",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJ3b3Jrc3BhY2VJZCI6IndzcF8wMU02SFBUQzk4NEZWMFFTRDQ5TUQxRjQzWSIsImRyYWZ0SWQiOiJyZHJfMDFNNkhQVENCMzE4REtGMUpTRkZGVzlNSFAifQ=="
+            }
+          ]
+        },
+        "workflowTaskTimeout": "10s",
+        "originalExecutionRunId": "01a1a36d-3168-7072-a798-d4ec58211f09",
+        "identity": "whytide-worker",
+        "firstExecutionRunId": "01a1a36d-3168-7072-a798-d4ec58211f09",
+        "attempt": 1,
+        "firstWorkflowTaskBackoff": "0s",
+        "header": {},
+        "workflowId": "inbox_draft_reply-34ab4fd7-ed12-469a-bb24-6c935a1db63c"
+      }
+    },
+    {
+      "eventId": "2",
+      "eventTime": "2026-11-03T22:00:04.712095Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "taskId": "1490532",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "test-310a0de5-3dff-4183-8cef-e23a7f4fc59f",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "3",
+      "eventTime": "2026-11-03T22:00:04.724496202Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "taskId": "1490537",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "whytide-worker",
+        "requestId": "5a607e8f-0e50-4639-afac-522b31d290de",
+        "historySizeBytes": "459",
+        "workerVersion": {
+          "buildId": "@temporalio/worker@1.24.0+e69e2bb3c7ff78e67af3cf5ba55a48b0a5d419a9a1e996dfcdfc5563c879fb73"
+        }
+      }
+    },
+    {
+      "eventId": "4",
+      "eventTime": "2026-11-03T22:00:04.745102737Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "taskId": "1490541",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "2",
+        "startedEventId": "3",
+        "identity": "whytide-worker",
+        "workerVersion": {
+          "buildId": "@temporalio/worker@1.24.0+e69e2bb3c7ff78e67af3cf5ba55a48b0a5d419a9a1e996dfcdfc5563c879fb73"
+        },
+        "sdkMetadata": {
+          "coreUsedFlags": [3, 1, 2],
+          "sdkName": "temporal-typescript",
+          "sdkVersion": "1.24.0"
+        },
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "5",
+      "eventTime": "2026-11-03T22:00:04.745142350Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "taskId": "1490542",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "1",
+        "activityType": {
+          "name": "inbox_write_reply_draft"
+        },
+        "taskQueue": {
+          "name": "test-310a0de5-3dff-4183-8cef-e23a7f4fc59f",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJ3b3Jrc3BhY2VJZCI6IndzcF8wMU02SFBUQzk4NEZWMFFTRDQ5TUQxRjQzWSIsImRyYWZ0SWQiOiJyZHJfMDFNNkhQVENCMzE4REtGMUpTRkZGVzlNSFAifQ=="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "0s",
+        "scheduleToStartTimeout": "0s",
+        "startToCloseTimeout": "180s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "4",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "100s"
+        },
+        "useWorkflowBuildId": true
+      }
+    },
+    {
+      "eventId": "6",
+      "eventTime": "2026-11-03T22:00:07.926108199Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "taskId": "1490554",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "5",
+        "identity": "whytide-worker",
+        "requestId": "21b91d0b-ac84-4fa1-a8e8-95519244128a",
+        "attempt": 3,
+        "lastFailure": {
+          "message": "llm_provider_error",
+          "source": "TypeScriptSDK",
+          "stackTrace": "ApplicationFailure: llm_provider_error\n    at ApplicationFailure.create (/whytide/node_modules/.pnpm/@temporalio+common@1.24.0/node_modules/@temporalio/common/lib/failure.js:185:16)\n    at failure (file:///whytide/core/apps/worker/src/activities.ts:45:33)\n    at file:///whytide/core/apps/worker/src/activities.ts:62:17\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async Activity.execute (/whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/activity.js:104:20)\n    at async NativeConnection.withAbortSignal (/whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/connection.js:172:16)\n    at async Client.withAbortSignal (/whytide/node_modules/.pnpm/@temporalio+client@1.24.0/node_modules/@temporalio/client/lib/base-client.js:65:16)\n    at async /whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/activity.js:164:32\n    at async /whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/worker.js:813:30",
+          "applicationFailureInfo": {
+            "type": "llm_provider_error"
+          }
+        },
+        "workerVersion": {
+          "buildId": "@temporalio/worker@1.24.0+e69e2bb3c7ff78e67af3cf5ba55a48b0a5d419a9a1e996dfcdfc5563c879fb73"
+        }
+      }
+    },
+    {
+      "eventId": "7",
+      "eventTime": "2026-11-03T22:00:07.994877433Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_FAILED",
+      "taskId": "1490555",
+      "activityTaskFailedEventAttributes": {
+        "failure": {
+          "message": "llm_provider_error",
+          "source": "TypeScriptSDK",
+          "stackTrace": "ApplicationFailure: llm_provider_error\n    at ApplicationFailure.create (/whytide/node_modules/.pnpm/@temporalio+common@1.24.0/node_modules/@temporalio/common/lib/failure.js:185:16)\n    at failure (file:///whytide/core/apps/worker/src/activities.ts:45:33)\n    at file:///whytide/core/apps/worker/src/activities.ts:62:17\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async Activity.execute (/whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/activity.js:104:20)\n    at async NativeConnection.withAbortSignal (/whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/connection.js:172:16)\n    at async Client.withAbortSignal (/whytide/node_modules/.pnpm/@temporalio+client@1.24.0/node_modules/@temporalio/client/lib/base-client.js:65:16)\n    at async /whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/activity.js:164:32\n    at async /whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/worker.js:813:30",
+          "applicationFailureInfo": {
+            "type": "llm_provider_error",
+            "nonRetryable": true
+          }
+        },
+        "scheduledEventId": "5",
+        "startedEventId": "6",
+        "identity": "whytide-worker",
+        "retryState": "RETRY_STATE_NON_RETRYABLE_FAILURE"
+      }
+    },
+    {
+      "eventId": "8",
+      "eventTime": "2026-11-03T22:00:07.994885323Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "taskId": "1490556",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "whytide-worker-ce033af373a14b60ab963e14266765f3",
+          "kind": "TASK_QUEUE_KIND_STICKY",
+          "normalName": "test-310a0de5-3dff-4183-8cef-e23a7f4fc59f"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "9",
+      "eventTime": "2026-11-03T22:00:07.999954570Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "taskId": "1490560",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "8",
+        "identity": "whytide-worker",
+        "requestId": "e8fa1c8e-dbc4-442d-8be6-8bb315f1df20",
+        "historySizeBytes": "5564",
+        "workerVersion": {
+          "buildId": "@temporalio/worker@1.24.0+e69e2bb3c7ff78e67af3cf5ba55a48b0a5d419a9a1e996dfcdfc5563c879fb73"
+        }
+      }
+    },
+    {
+      "eventId": "10",
+      "eventTime": "2026-11-03T22:00:08.032601576Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "taskId": "1490564",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "8",
+        "startedEventId": "9",
+        "identity": "whytide-worker",
+        "workerVersion": {
+          "buildId": "@temporalio/worker@1.24.0+e69e2bb3c7ff78e67af3cf5ba55a48b0a5d419a9a1e996dfcdfc5563c879fb73"
+        },
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "11",
+      "eventTime": "2026-11-03T22:00:08.032651473Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "taskId": "1490565",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "2",
+        "activityType": {
+          "name": "inbox_reply_draft_failed"
+        },
+        "taskQueue": {
+          "name": "test-310a0de5-3dff-4183-8cef-e23a7f4fc59f",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJ3b3Jrc3BhY2VJZCI6IndzcF8wMU02SFBUQzk4NEZWMFFTRDQ5TUQxRjQzWSIsImRyYWZ0SWQiOiJyZHJfMDFNNkhQVENCMzE4REtGMUpTRkZGVzlNSFAiLCJjb2RlIjoibGxtX3Byb3ZpZGVyX2Vycm9yIn0="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "0s",
+        "scheduleToStartTimeout": "0s",
+        "startToCloseTimeout": "10s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "10",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "100s"
+        },
+        "useWorkflowBuildId": true
+      }
+    },
+    {
+      "eventId": "12",
+      "eventTime": "2026-11-03T22:00:08.038388808Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "taskId": "1490570",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "11",
+        "identity": "whytide-worker",
+        "requestId": "6c9b212a-e4ce-42a2-9ab9-bf3ba07cc112",
+        "attempt": 1,
+        "workerVersion": {
+          "buildId": "@temporalio/worker@1.24.0+e69e2bb3c7ff78e67af3cf5ba55a48b0a5d419a9a1e996dfcdfc5563c879fb73"
+        }
+      }
+    },
+    {
+      "eventId": "13",
+      "eventTime": "2026-11-03T22:00:08.055141203Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "taskId": "1490571",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "YmluYXJ5L251bGw="
+              }
+            }
+          ]
+        },
+        "scheduledEventId": "11",
+        "startedEventId": "12",
+        "identity": "whytide-worker"
+      }
+    },
+    {
+      "eventId": "14",
+      "eventTime": "2026-11-03T22:00:08.055150698Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "taskId": "1490572",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "whytide-worker-ce033af373a14b60ab963e14266765f3",
+          "kind": "TASK_QUEUE_KIND_STICKY",
+          "normalName": "test-310a0de5-3dff-4183-8cef-e23a7f4fc59f"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "15",
+      "eventTime": "2026-11-03T22:00:08.062082555Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "taskId": "1490576",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "14",
+        "identity": "whytide-worker",
+        "requestId": "ca133cd2-7749-433f-8692-d564b1a41f06",
+        "historySizeBytes": "6562",
+        "workerVersion": {
+          "buildId": "@temporalio/worker@1.24.0+e69e2bb3c7ff78e67af3cf5ba55a48b0a5d419a9a1e996dfcdfc5563c879fb73"
+        }
+      }
+    },
+    {
+      "eventId": "16",
+      "eventTime": "2026-11-03T22:00:08.078316080Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "taskId": "1490580",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "14",
+        "startedEventId": "15",
+        "identity": "whytide-worker",
+        "workerVersion": {
+          "buildId": "@temporalio/worker@1.24.0+e69e2bb3c7ff78e67af3cf5ba55a48b0a5d419a9a1e996dfcdfc5563c879fb73"
+        },
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "17",
+      "eventTime": "2026-11-03T22:00:08.078346417Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_FAILED",
+      "taskId": "1490581",
+      "workflowExecutionFailedEventAttributes": {
+        "failure": {
+          "message": "Activity task failed",
+          "cause": {
+            "message": "llm_provider_error",
+            "source": "TypeScriptSDK",
+            "stackTrace": "ApplicationFailure: llm_provider_error\n    at ApplicationFailure.create (/whytide/node_modules/.pnpm/@temporalio+common@1.24.0/node_modules/@temporalio/common/lib/failure.js:185:16)\n    at failure (file:///whytide/core/apps/worker/src/activities.ts:45:33)\n    at file:///whytide/core/apps/worker/src/activities.ts:62:17\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async Activity.execute (/whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/activity.js:104:20)\n    at async NativeConnection.withAbortSignal (/whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/connection.js:172:16)\n    at async Client.withAbortSignal (/whytide/node_modules/.pnpm/@temporalio+client@1.24.0/node_modules/@temporalio/client/lib/base-client.js:65:16)\n    at async /whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/activity.js:164:32\n    at async /whytide/node_modules/.pnpm/@temporalio+worker@1.24.0_esbuild@0.28.2_lightningcss@1.32.0_postcss@8.5.23/node_modules/@temporalio/worker/lib/worker.js:813:30",
+            "applicationFailureInfo": {
+              "type": "llm_provider_error",
+              "nonRetryable": true
+            }
+          },
+          "activityFailureInfo": {
+            "scheduledEventId": "5",
+            "startedEventId": "6",
+            "identity": "whytide-worker",
+            "activityType": {
+              "name": "inbox_write_reply_draft"
+            },
+            "activityId": "1",
+            "retryState": "RETRY_STATE_NON_RETRYABLE_FAILURE"
+          }
+        },
+        "retryState": "RETRY_STATE_RETRY_POLICY_NOT_SET",
+        "workflowTaskCompletedEventId": "16"
+      }
+    }
+  ]
+}

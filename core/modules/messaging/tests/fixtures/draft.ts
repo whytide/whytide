@@ -1,4 +1,4 @@
-// What tests/draft.test.ts and tests/tenancy.test.ts share: the two agent tasks loaded from the
+// What tests/draft.test.ts and tests/tenancy.test.ts share: the three agent tasks loaded from the
 // sources as a host loads them, the LLM fake, a workspace with a Member and the fixture lead (its
 // company, Company Knowledge and one comment event) written through contacts', onboarding's table
 // and signals' factory, a `drafting` draft, and writeDraft's context: an activity's tenant runs and
@@ -31,7 +31,9 @@ import type { Channel, PlanOutput } from "../../schemas/writer.ts";
 useHashSalt("test-salt-".repeat(4));
 const agents = new URL("../../agents/", import.meta.url);
 await loadAgentTasks(
-  ["plan-message", "write-message"].map((agent) => new URL(`${agent}/task.ts`, agents).href),
+  ["plan-message", "write-message", "write-email"].map(
+    (agent) => new URL(`${agent}/task.ts`, agents).href,
+  ),
 );
 export const fake = (await getAdapter(llmPort, "fake")) as unknown as LlmFake;
 const prices = {

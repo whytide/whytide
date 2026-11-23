@@ -11,4 +11,6 @@ export const errors = defineErrors({
   assessment_agent_not_loaded: { status: 500 },
   /** scoreSnapshot: no snapshot of the workspace has this id. 404. */
   score_snapshot_not_found: { status: 404 },
+  /** defineSignalReader: a reader is registered already; one per process, at start. 500. */
+  signal_reader_duplicate: { status: 500 },
 });

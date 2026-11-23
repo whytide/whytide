@@ -1,7 +1,7 @@
 # The lead page's reads (core/modules/qualification/README.md and core/modules/contacts/README.md "Routes"): a member's session, leads.read.
 # `personId` is a person of your workspace with a lead: put it in http-client.private.env.json with your workspaceId.
 
-### GET /v1/workspaces/{workspaceId}/qualification/leads/{personId}/snapshot: the lead's current snapshot, its six verdicts with evidence, weight and points, the disqualifiers and the model's summary; 404 score_snapshot_not_found without one, lead_not_found without a lead
+### GET /v1/workspaces/{workspaceId}/qualification/leads/{personId}/snapshot: the lead's current snapshot, `audience` (gamma-p5-050): the audience it was judged against, `{ id, name, isDefault }` or null, its six verdicts with evidence, weight and points, the disqualifiers and the model's summary, and `intent` (gamma-p5-065): the lead's intent, priority and tier, why now with its date and each signal's share newest first, or null without an intent row; 404 score_snapshot_not_found without one, lead_not_found without a lead
 GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/qualification/leads/{{personId}}/snapshot
 Accept: application/json
 Cookie: {{sessionCookie}}

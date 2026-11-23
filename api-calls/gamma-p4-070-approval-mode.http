@@ -1,0 +1,51 @@
+# campaigns' approval mode (gamma-p4-070; core/modules/campaigns/README.md "The approval mode",
+# "Routes"): a member's session, campaigns.approval_mode (Owner and Admin). review_everything is
+# always taken; review_first_touches only once the campaign's first 7 days are over. Put a
+# `campaignId` of your workspace (GET …/campaigns), `otherCampaignId`, a campaign of another
+# workspace, and `memberSessionCookie`, a Member's session (pnpm session:token), in
+# http-client.private.env.json. A write sends the cookie, so it sends Origin: {{appOrigin}} too.
+
+### PUT /v1/workspaces/{workspaceId}/campaigns/{campaignId}/approval-mode: review_everything, taken during the lock and after it: the mode, the one in force now and the lock's end; from review_first_touches, every step the mode approved waits for a person again
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{campaignId}}/approval-mode
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "mode": "review_everything" }
+
+### PUT /v1/workspaces/{workspaceId}/campaigns/{campaignId}/approval-mode: review_first_touches: 409 approval_mode_locked with lockedUntil in the campaign's first 7 days; after them, taken, its follow-ups approved by the mode with the AI disclosure line; a repeat changes nothing
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{campaignId}}/approval-mode
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "mode": "review_first_touches" }
+
+### PUT /v1/workspaces/{workspaceId}/campaigns/{campaignId}/approval-mode: a mode this version lacks: 400 approval_mode_unavailable
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{campaignId}}/approval-mode
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "mode": "review_exceptions" }
+
+### PUT /v1/workspaces/{workspaceId}/campaigns/{campaignId}/approval-mode: a Member's call: 403 forbidden, nothing changed
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{campaignId}}/approval-mode
+Accept: application/json
+Content-Type: application/json
+Cookie: {{memberSessionCookie}}
+Origin: {{appOrigin}}
+
+{ "mode": "review_first_touches" }
+
+### PUT /v1/workspaces/{workspaceId}/campaigns/{campaignId}/approval-mode: another workspace's campaign: 404 campaign_not_found
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/campaigns/{{otherCampaignId}}/approval-mode
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "mode": "review_everything" }

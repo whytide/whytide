@@ -1,0 +1,42 @@
+{
+  "object": "CompanyProfile",
+  "id": "1000002",
+  "name": "Copper Harbor Labs",
+  "description": "fixture-body-marker: a synthetic company that makes harbour software.",
+  "entity_urn": "urn:li:fsd_company:1000002",
+  "public_identifier": "copper-harbor-labs",
+  "profile_url": "https://www.linkedin.com/company/copper-harbor-labs",
+  "tagline": "Synthetic tagline",
+  "followers_count": 1234,
+  "is_following": false,
+  "is_employee": false,
+  "hashtags": [{ "title": "synthetic" }],
+  "messaging": { "is_enabled": false },
+  "claimed": true,
+  "viewer_permissions": { "canReadMessages": false, "canCreateAds": false },
+  "organization_type": "PRIVATELY_HELD",
+  "locations": [
+    { "is_headquarter": false, "country": "FR", "city": "Lyon", "street": ["1 rue Exemple"] },
+    {
+      "is_headquarter": true,
+      "country": "GB",
+      "city": "Bristol",
+      "street": ["1 Example Quay"],
+      "postalCode": "BS1 0AA"
+    }
+  ],
+  "industry": ["Software Development", "Maritime Transportation"],
+  "employee_count": 140,
+  "employee_count_range": { "from": 51, "to": 200 },
+  "website": "https://www.copperharbor.example/about",
+  "foundation_date": "2012-01-01",
+  "phone": "+44 117 496 0000",
+  "insights": {
+    "employeesCount": {
+      "totalCount": 140,
+      "averageTenure": "2 years",
+      "employeesCountGraph": [],
+      "growthGraph": []
+    }
+  }
+}

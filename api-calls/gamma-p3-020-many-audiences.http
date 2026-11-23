@@ -1,0 +1,67 @@
+# icp's audiences (core/modules/icp/README.md "Routes"): a workspace holds up to
+# ICP_MAX_AUDIENCES_PER_WORKSPACE (10 unset; the list answers it as limits.audiences), its default
+# among them, which the ICP's own routes act on. A member's session: icp.read for the reads,
+# icp.write for the writes. `icpId` is an audience of your workspace, from the list's or the
+# create's answer: put it in http-client.private.env.json with your workspaceId. Another workspace's
+# id is 404 icp_not_found on every route here. A write sends the cookie, so it sends
+# Origin: {{appOrigin}} too (the api's origin check).
+
+### GET /v1/workspaces/{workspaceId}/icp/audiences: the workspace's audiences, the default first, then by name, and their limit; the first read makes the default
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/audiences
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/icp/audiences: a new audience with the six default criteria; 201, or 409 icp_audience_limit past the limit
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/audiences
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{ "name": "Logistics founders" }
+
+### GET /v1/workspaces/{workspaceId}/icp/audiences/{icpId}: the audience's name, targeting and version
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/audiences/{{icpId}}
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PUT /v1/workspaces/{workspaceId}/icp/audiences/{icpId}: saves the audience; a targeting change moves its version and publishes icp.audience_updated
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/audiences/{{icpId}}
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{
+  "name": "Logistics founders",
+  "titles": ["Founder", "Head of Operations"],
+  "seniorities": ["c_level", "director"],
+  "industries": ["Logistics"],
+  "sizeRanges": ["11-50"],
+  "countries": ["FR"],
+  "mustHaves": "Ships parcels every day.",
+  "disqualifiers": "Freight brokers."
+}
+
+### GET /v1/workspaces/{workspaceId}/icp/audiences/{icpId}/criteria: the audience's six criteria
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/audiences/{{icpId}}/criteria
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### PUT /v1/workspaces/{workspaceId}/icp/audiences/{icpId}/criteria: saves the audience's six criteria; their weights sum to 100
+PUT {{baseUrl}}/v1/workspaces/{{workspaceId}}/icp/audiences/{{icpId}}/criteria
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+
+{
+  "criteria": [
+    { "key": "title_function", "weight": 30, "isMust": true, "enabled": true },
+    { "key": "seniority", "weight": 15, "isMust": false, "enabled": true },
+    { "key": "company_size", "weight": 10, "isMust": false, "enabled": true },
+    { "key": "industry", "weight": 15, "isMust": false, "enabled": true },
+    { "key": "location", "weight": 10, "isMust": true, "enabled": true },
+    { "key": "must_haves", "weight": 20, "isMust": false, "enabled": true }
+  ]
+}

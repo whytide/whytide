@@ -1,6 +1,7 @@
 // "Why this lead" (docs/concepts.md "The why"), pure: buildWhy's bullets, at most three, a key and
 // params only, the data gap only on an unknown, no text but codes and the input's quotes, each worded
-// by its message in messages/en.json; the bullet of a lead the hard filters stopped; the cut.
+// by its message in messages/en.json, a member's verdict named as such; the bullet of a lead the hard
+// filters stopped; the cut.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -101,6 +102,26 @@ test("buildWhy: at most three bullets of a key and params, the gap only on an un
       "nothing met: the gap alone",
       input(verdicts(Object.fromEntries(CRITERIA.map((c) => [c, "unknown" as Verdict])))),
       [gap("title_function", 5)],
+    ],
+    [
+      "members' verdicts (README \"A member's verdict\"): named as a member's, never quoted",
+      input(
+        verdicts({ location: "not_met" }).map((v) =>
+          v.criterion === "location" || v.criterion === "title_function"
+            ? { ...v, evidence: "", byMember: true }
+            : v,
+        ),
+      ),
+      [
+        {
+          key: "qualification.why.must_missed_member",
+          params: { criterion: "location" },
+        },
+        {
+          key: "qualification.why.fit_member",
+          params: { criterion: "title_function", met: 5, total: 6 },
+        },
+      ],
     ],
   ];
   const codes = new Set<string>([...CRITERIA, ...DISQUALIFIERS, ...HARD_FILTER_REASONS]);

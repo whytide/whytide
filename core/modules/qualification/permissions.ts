@@ -1,5 +1,5 @@
 // The permission actions this module declares; platform assembles them at start (docs/rules/coding.md
-// §3). Roles are kept, not evaluated, in alpha: every member is Owner.
+// §3) and its `can` evaluates their roles: a Member is refused qualification.rescore.
 import { definePermissions } from "@whytide/platform";
 
 export const permissions = definePermissions(

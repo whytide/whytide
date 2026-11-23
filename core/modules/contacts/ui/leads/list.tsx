@@ -9,7 +9,14 @@
 // outreach status. The row menu, above the link, opens nothing: Approve (../lead/approve.tsx),
 // and the one-click blocks of the person or their company (../never-contact/block.tsx); a toast
 // says so, and the rows they change show their new status until the next read. Export downloads
-// the CSV of the filters set (GET …/contacts/exports/leads.csv), its failure in words with a retry.
+// the CSV of the filters set (GET …/contacts/exports/leads.csv), its failure in words with a retry;
+// a Member's 403 says that only an owner exports, with none (gamma-p6-010). Add lead, beside Export
+// and in the empty state, opens the dialog that adds one lead by hand (add-lead.tsx), whose source
+// the Source cell names Added manually (lead-manual-create).
+// A view of one source (`?source=`, from a source's View leads) shows a chip above the table that
+// names it, from the label of the listed leads' entry of that ref, or Added manually for a
+// member's, with a Clear that drops it alone; it shows every status unless one is named, the status
+// filter's All.
 "use client";
 
 import {
@@ -35,12 +42,14 @@ import {
   Download,
   Ellipsis,
   FileUp,
+  ListFilter,
   Radar,
   SignalHigh,
   SignalLow,
   SignalMedium,
   ThumbsDown,
   ThumbsUp,
+  X,
 } from "@whytide/ui/icons";
 import { ApiError, browserApi, data } from "@whytide/web/api/browser";
 import { useSearchParams } from "next/navigation";
@@ -50,6 +59,7 @@ import { ApproveFailed, canApprove, useApprove } from "../lead/approve.tsx";
 import { OutreachBadge, useOutreachText, useRoleText } from "../lead/header.tsx";
 import { NeverContactItems, useToast } from "../never-contact/block.tsx";
 import { useReasonText } from "../review-panel/reasons.ts";
+import { AddLead } from "./add-lead.tsx";
 import {
   filtersOf,
   OUTREACH,
@@ -101,10 +111,15 @@ const DOT: Record<Status, string> = {
 };
 const CONFIDENCE_ICON = { high: SignalHigh, medium: SignalMedium, low: SignalLow };
 const sameFilters = (a: View, b: View) =>
-  a.status === b.status && a.tier === b.tier && a.review === b.review && a.outreach === b.outreach;
+  a.status === b.status &&
+  a.tier === b.tier &&
+  a.review === b.review &&
+  a.outreach === b.outreach &&
+  a.source === b.source;
 
 const read = (workspaceId: string, view: View, limit: number) => {
-  const { status, sort, cursors } = view;
+  const { sort, cursors } = view;
+  const status = view.status || undefined;
   const query = { status, sort, limit, ...filtersOf(view), cursor: cursors.at(-1) };
   const path = { workspaceId };
   return data(
@@ -114,6 +129,7 @@ const read = (workspaceId: string, view: View, limit: number) => {
 type LeadPage = Awaited<ReturnType<typeof read>>;
 type Row = LeadPage["leads"][number] & { id: string };
 type Source = Row["sources"][number];
+type SourceKind = Source["kind"];
 /** The most recent of the lead's sources, the later one of a tie; none for a lead without one. */
 const latestOf = (sources: readonly Source[]) =>
   sources.reduce<Source | undefined>(
@@ -209,7 +225,7 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
   async function exportCsv() {
     setExporting({ busy: true });
     const path = { workspaceId: workspace };
-    const query = { status: view.status, ...filtersOf(view) };
+    const query = { status: view.status || undefined, ...filtersOf(view) };
     try {
       const {
         data: file,
@@ -240,7 +256,11 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
     warm: t("tier.warm"),
     cool: t("tier.cool"),
   };
-  const sourceText = { signal: t("source.signal"), imported: t("source.imported") };
+  const sourceText: Record<SourceKind, string> = {
+    signal: t("source.signal"),
+    imported: t("source.imported"),
+    manual: t("source.manual"),
+  };
   const reviewText = { good_lead: decision("good_lead"), not_a_fit: decision("not_a_fit") };
   const confidenceText = {
     high: t("confidence.high"),
@@ -267,7 +287,7 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
   };
   const name = ({ person }: Row) =>
     t("name", { first: person.firstName ?? "", last: person.lastName ?? "" }).trim() ||
-    person.linkedinUrl;
+    (person.linkedinUrl ?? t("unnamed"));
   /** The person, after the initial of their name (a URL's would mislead), their role under it. */
   const who = (lead: Row) => {
     const role = roleText(lead.person);
@@ -291,16 +311,26 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
         </span>
       </span>
     );
-  /** A source in words: a signal source's label, else its kind's word. */
-  const sourceName = (entry: Source) =>
-    entry.kind === "signal" && entry.label !== undefined ? entry.label : sourceText[entry.kind];
+  /** An import in words: Imported from its file when its entry names it, else Imported. */
+  const importedText = (entry: Source) =>
+    entry.label === undefined
+      ? sourceText.imported
+      : t("source.imported_from", { file: entry.label });
+  /** A source in words: a signal's label, an import's file, Added manually, else its kind. */
+  const sourceName = (entry: Source) => {
+    if (entry.kind === "imported") return importedText(entry);
+    if (entry.kind === "manual") return sourceText.manual;
+    return entry.label !== undefined ? entry.label : sourceText[entry.kind];
+  };
   /**
    * A source as the cell shows it: a signal source's label, linked to its post in a new tab, or a
-   * signal without one linked to its source's runs, where the post is; Imported. Each link stands
+   * signal without one linked to its source's runs, where the post is; Imported, from its file when
+   * the entry names it; Added manually, a member's. Each link stands
    * above the row's own, which covers the row (the ui's DataTable), so that it takes the pointer.
    */
   const sourceLink = (entry: Source) => {
-    if (entry.kind === "imported") return sourceText.imported;
+    if (entry.kind === "imported") return importedText(entry);
+    if (entry.kind === "manual") return sourceText.manual;
     if (entry.label === undefined) {
       const runs = `/w/${workspace}/sources?runs=${encodeURIComponent(entry.ref)}`;
       return (
@@ -464,7 +494,7 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
   const loading = view !== shown.view && failed === undefined;
   const leadsInAll = Object.values(counts).reduce((sum, count) => sum + count, 0);
   const empty =
-    leadsInAll === 0 ? (
+    leadsInAll === 0 && !view.source ? (
       <EmptyState
         message={t("empty.none")}
         action={
@@ -477,6 +507,7 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
               <FileUp aria-hidden="true" />
               {t("links.import")}
             </ButtonLink>
+            <AddLead workspace={workspace} />
           </div>
         }
       />
@@ -519,10 +550,13 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
         description={t("description")}
         meta={pills}
         actions={
-          <Button onClick={exportCsv} loading={exporting.busy}>
-            <Download aria-hidden="true" />
-            {t("export")}
-          </Button>
+          <>
+            <Button onClick={exportCsv} loading={exporting.busy}>
+              <Download aria-hidden="true" />
+              {t("export")}
+            </Button>
+            <AddLead workspace={workspace} />
+          </>
         }
       />
       <div className="mb-4 grid grid-cols-2 items-end gap-3 rounded-xl border border-line bg-surface p-3 shadow-xs sm:flex sm:flex-wrap [&_.wt-field]:min-w-0">
@@ -530,9 +564,13 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
           <Select
             label={t("filter.status")}
             value={view.status}
-            options={STATUSES.map((status) => ({ value: status, label: statusText[status] }))}
+            options={[
+              // Every status: a source's view only, its first view.
+              ...(view.source ? [{ value: "", label: t("status.all") }] : []),
+              ...STATUSES.map((status) => ({ value: status, label: statusText[status] })),
+            ]}
             onChange={(event) =>
-              choose({ ...view, status: event.target.value as Status, cursors: [] })
+              choose({ ...view, status: event.target.value as View["status"], cursors: [] })
             }
           />
         </div>
@@ -580,7 +618,17 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
           />
         </div>
       </div>
-      {exporting.failed ? (
+      {view.source ? (
+        <SourceChip
+          entry={entryOf(view.source, view.source === shown.view.source ? page.leads : [])}
+          clear={`/w/${workspace}/leads${queryOf({ ...view, status: view.status || "qualified", source: "", cursors: [] })}`}
+        />
+      ) : null}
+      {exporting.failed === "forbidden" ? (
+        <p role="status" className="mb-4 text-sm text-ink-muted">
+          {t("export_owner_only")}
+        </p>
+      ) : exporting.failed ? (
         <div className="mb-4">
           <ErrorState module="contacts" code={exporting.failed} onRetry={exportCsv} />
         </div>
@@ -631,5 +679,38 @@ export function LeadList({ workspace, counts, start, first, limit }: Props) {
       )}
       <Toast message={toast} />
     </>
+  );
+}
+
+/** This ref's entry among the listed leads' sources: the first with a label, else the first. */
+function entryOf(ref: string, leads: readonly { sources: readonly Source[] }[]) {
+  const entries = leads.flatMap((lead) => lead.sources.filter((entry) => entry.ref === ref));
+  return entries.find((entry) => entry.label !== undefined) ?? entries[0];
+}
+
+/**
+ * The view's source, named by its label, Added manually for a member's, else "One source"; Clear, a
+ * link to the same view without it, which reads the counts of every lead again.
+ */
+function SourceChip({ entry, clear }: { entry: Source | undefined; clear: string }) {
+  const t = useTranslations("contacts.leads.source_filter");
+  const label = entry?.label;
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2">
+      <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-accent-soft px-3 py-1 text-sm text-accent-ink ring-1 ring-accent/30 ring-inset">
+        <ListFilter aria-hidden="true" className="size-4 shrink-0" />
+        <span className="min-w-0 wrap-break-word">
+          {entry?.kind === "manual"
+            ? t("manual")
+            : label === undefined
+              ? t("one")
+              : t("named", { source: label })}
+        </span>
+      </span>
+      <ButtonLink href={clear} variant="ghost" size="sm">
+        <X aria-hidden="true" />
+        {t("clear")}
+      </ButtonLink>
+    </div>
   );
 }

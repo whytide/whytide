@@ -1,0 +1,22 @@
+# enrichment's lead routes (core/modules/enrichment/README.md "The lead page"): a member's session,
+# enrichment.read for the GET and enrichment.run for the POST. The GET answers the person's
+# company facts and country, each with its source class and when, an empty one null, and the
+# person's last run; never a provider's name. The POST asks for a run now, free: 202 with the run
+# and its status, queued; the worker runs it and the GET then answers it done with the fields it
+# filled. The Idempotency-Key is an example UUID and the run's request key too: the same one
+# answers the same run. A write sends the cookie, so it sends Origin: {{appOrigin}} too. Put in
+# http-client.private.env.json, with your workspaceId: `personId`, a lead of yours. Refusals: 404
+# enrichment_person_not_found (another workspace's person, an unknown one), 400
+# idempotency_key_required.
+
+### GET /v1/workspaces/{workspaceId}/enrichment/leads/{personId}: the company's facts, the lead's country and the last run
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/enrichment/leads/{{personId}}
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/enrichment/leads/{personId}: asks for a run now; 202, queued
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/enrichment/leads/{{personId}}
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000000550

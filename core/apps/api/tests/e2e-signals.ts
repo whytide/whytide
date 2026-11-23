@@ -3,10 +3,13 @@
 // disconnected, so that the spec never shares the e2e user's own account, which
 // linkedin-connect.spec.ts disconnects and connects again; and POST /test/signals/runs
 // `{ sourceId, runs }`, which seeds a source's runs through signals' factory, as no public route
-// writes runs. The spec names the accounts by their labels. Two more of them, and the runs, in
+// writes runs, and sets the source's last_run_at to its newest start, as a run's start does
+// (gamma-p5-040), and a run's research plan when it names one (gamma-wr-041). The spec names the accounts by their labels. Two more of them, and the runs, in
 // RUN_NOW_WORKSPACE (signals-run-now.spec.ts); STATES_WORKSPACE (signals-states.spec.ts) gets none.
 // For the lead page's evidence panel (core/apps/web/tests/evidence-panel.spec.ts),
-// POST /test/signals/evidence `{ leads }` (below).
+// POST /test/signals/evidence `{ leads }` (below). For the Companies found screen and the agent's panel
+// (core/apps/web/tests/signals-found-companies.spec.ts), POST /test/signals/found `{ sourceId,
+// companies, reset? }` (below).
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLeadForPerson, upsertPersonFromSource } from "@whytide/contacts";
 import { createDbClient, type PrismaClient, withTenant } from "@whytide/db";
@@ -18,7 +21,13 @@ type SignalsTesting = typeof import("../../../modules/signals/dist/testing/index
 const testing: SignalsTesting = await import(
   new URL("../../../../modules/signals/dist/testing/index.js", import.meta.url).href
 );
-const { createSignalEvent, createSignalRun, createSignalSource } = testing;
+const {
+  createFoundCompany,
+  createResearchPlan,
+  createSignalEvent,
+  createSignalRun,
+  createSignalSource,
+} = testing;
 
 /** The workspaces of signals' screen states and of Run now, which no other spec writes to. */
 export const STATES_WORKSPACE = "wsp_e2e_signals";
@@ -65,6 +74,8 @@ type SeededRun = {
   finishedAt?: string;
   counts?: Record<string, number>;
   error?: string;
+  /** The run's research plan (gamma-wr-041): the card of a Web research source shows the last. */
+  plan?: { words: { language: string; words: string[] }[]; placeIds: string[] };
 };
 
 /**
@@ -86,9 +97,20 @@ export function seedRunsRoute(...workspaceIds: string[]) {
           return void res.end();
         }
         const { workspaceId } = source;
+        let lastRunAt = source.lastRunAt;
         for (const run of runs) {
           const times = { startedAt: date(run.startedAt), finishedAt: date(run.finishedAt) };
-          await createSignalRun({ ...run, ...times, workspaceId, sourceId }, client);
+          const { plan, ...row } = run;
+          const made = await createSignalRun({ ...row, ...times, workspaceId, sourceId }, client);
+          if (plan)
+            await createResearchPlan({ ...plan, workspaceId, sourceId, runId: made.id }, client);
+          const { startedAt } = times;
+          if (startedAt !== null && (lastRunAt === null || startedAt > lastRunAt)) {
+            lastRunAt = startedAt;
+          }
+        }
+        if (lastRunAt !== source.lastRunAt) {
+          await client.signalSource.update({ where: { id: sourceId }, data: { lastRunAt } });
         }
         res.statusCode = 204;
         res.end();
@@ -109,12 +131,23 @@ type SeededLead = {
   sources: string[];
   events: {
     source: string;
-    reaction: "like" | "comment" | "repost";
+    reaction?: "like" | "comment" | "repost";
     commentText?: string;
-    author: string;
+    author?: string;
     occurredAt: string;
     /** Reduced as alpha-p10-020 leaves it: no excerpt or comment. */
     reduced?: boolean;
+    /** A Web research event (gamma-wr-061): the page the person was found on and the company's reasons. */
+    research?: {
+      page: string;
+      company: string;
+      domain: string;
+      reasons: object[];
+      /** The person's profile was found by a web search (gamma-wr-070), or the person by the managers' search (gamma-wr-090). */
+      foundBy?: string;
+      /** The title of the managers' search's result (gamma-wr-090). */
+      title?: string;
+    };
   }[];
 };
 
@@ -134,6 +167,7 @@ export function seedEvidenceRoute(workspaceId: string) {
       .then(async ({ leads }: { leads: SeededLead[] }) => {
         const where = { workspaceId };
         await client.signalEvent.deleteMany({ where });
+        await client.signalFoundCompany.deleteMany({ where });
         await client.signalSource.deleteMany({ where });
         await client.lead.deleteMany({ where });
         const labels = new Set(
@@ -160,12 +194,26 @@ export function seedEvidenceRoute(workspaceId: string) {
             return person.id;
           };
           const personId = await withTenant(tenant, writeLead, { client });
-          for (const { source, occurredAt, reduced, ...event } of events) {
+          for (const { source, occurredAt, reduced, research, ...event } of events) {
             const at = new Date(occurredAt);
             const reducedAt = reduced ? new Date() : undefined;
             const sourceId = sourceIds.get(source);
             const input = { ...event, workspaceId, personId, sourceId, occurredAt: at, reducedAt };
-            await createSignalEvent(input, client);
+            if (research === undefined) {
+              await createSignalEvent(input, client);
+              continue;
+            }
+            const { page: url, company: name, domain, reasons, foundBy, title } = research;
+            const found = { workspaceId, sourceId: sourceId ?? "e2e", domain, name, reasons };
+            const { id: foundCompanyId } = await createFoundCompany(found, client);
+            await createSignalEvent(
+              {
+                ...input,
+                ...{ url, ...(title === undefined ? {} : { ownWords: title }) },
+                research: { foundCompanyId, ...(foundBy === undefined ? {} : { foundBy }) },
+              },
+              client,
+            );
           }
           personIds.push(personId);
         }
@@ -175,6 +223,61 @@ export function seedEvidenceRoute(workspaceId: string) {
       .catch(next);
   };
 }
+
+/** The Companies found screen's workspace, which no other spec writes to. */
+export const FOUND_WORKSPACE = "wsp_e2e_found";
+const FOUND_PATH = "/test/signals/found";
+
+type SeededCompany = {
+  domain: string;
+  name: string;
+  verdict: "fit" | "not_fit" | "unsure";
+  judgedAt: string;
+  reasons?: object[];
+  country?: string;
+  town?: string;
+  state?: string;
+  placeId?: string;
+  pageUrl?: string;
+  email?: string;
+  phones?: string[];
+  postalAddress?: string;
+};
+
+/**
+ * The handler of POST /test/signals/found `{ sourceId, companies, reset? }`, which the e2e api mounts
+ * ahead of the routes: the found companies of a source of one of these workspaces, written by
+ * signals' factory as no public route writes them (the worker's judge does), after the workspace's
+ * own are removed when `reset` is true; else 404 for a source of another workspace.
+ */
+export function seedFoundRoute(...workspaceIds: string[]) {
+  let db: PrismaClient | undefined;
+  return (req: IncomingMessage, res: ServerResponse, next: (error?: unknown) => void): void => {
+    if (req.method !== "POST" || req.url !== FOUND_PATH) return next();
+    db ??= createDbClient("app");
+    const client = db;
+    readJson(req)
+      .then(async ({ sourceId, companies, reset }: Body) => {
+        const source = await client.signalSource.findUnique({ where: { id: sourceId } });
+        if (source === null || !workspaceIds.includes(source.workspaceId)) {
+          res.statusCode = 404;
+          return void res.end();
+        }
+        const { workspaceId } = source;
+        if (reset) await client.signalFoundCompany.deleteMany({ where: { workspaceId } });
+        const ids: string[] = [];
+        for (const { judgedAt, ...company } of companies) {
+          const input = { ...company, workspaceId, sourceId, sourceLabel: source.label };
+          const made = await createFoundCompany({ ...input, judgedAt: new Date(judgedAt) }, client);
+          ids.push(made.id);
+        }
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ ids }));
+      })
+      .catch(next);
+  };
+}
+type Body = { sourceId: string; companies: SeededCompany[]; reset?: boolean };
 
 async function readJson(req: IncomingMessage) {
   const chunks: Buffer[] = [];

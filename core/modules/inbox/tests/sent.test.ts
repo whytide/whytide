@@ -1,6 +1,7 @@
 // campaigns.step_sent's store (domain/store/sent.ts; README.md "The platform's own messages"), on a
 // schema of the worktree's database, in tenant runs as the delivery has them: the campaign's message
-// in the chat's thread with the approved text, the approver and the approval time, once; the echo
+// in the chat's thread with the approved text, the approver and the approval time, once; a
+// follow-up the campaign's mode approved, its frozen text with no approver (gamma-p4-090); the echo
 // stored first made the campaign's; a connection request, nothing; a step without its send, its
 // approval or its refs, nothing and one line with the step's id only; an erased person, nothing.
 // The safety case is tests/safety/tester-touch.test.ts.
@@ -52,6 +53,7 @@ test("a sent message step's event stores the campaign's message in the chat's th
       ...{ body: TEXT, providerMessageRef: step.messageRef, sentAt: step.executedAt },
       ...{ receivedAt: undefined, approvedBy: OWNER, approvedAt: step.approvedAt },
       ...{ optOutMatched: false, ownerNotifiedAt: null },
+      ...{ sendStatus: null, errorCode: null, createdBy: null },
     },
   );
   const thread = await f.app().thread.findFirstOrThrow({ where: { personId } });
@@ -60,6 +62,28 @@ test("a sent message step's event stores the campaign's message in the chat's th
     [thread.providerThreadRef, thread.senderAccountId, thread.ownerUserId, thread.lastMessageAt],
     [step.chatRef, senderAccountId, OWNER, step.executedAt],
   );
+});
+
+test("a follow-up the campaign's mode approved is stored once with its frozen text, its line included, no approver and the approval time", async () => {
+  const senderAccountId = (await f.account()).id;
+  const personId = await f.enrolled(senderAccountId, "sent-by-mode");
+  const line = "Written with AI assistance and sent without a person's review.";
+  const step = await f.sent(senderAccountId, personId, TEXT, new Date(), {
+    stepKey: "follow_up_1",
+    line,
+  });
+  const event = { stepExecutionId: step.stepExecutionId, personId, actionType: "message" };
+
+  assert.equal(await store(event), "stored");
+  assert.equal(await store(event), "repeat");
+
+  const [message, ...more] = await messagesOf(personId);
+  assert.deepEqual(more, []);
+  assert.deepEqual(
+    [message?.sentBy, message?.stepExecutionId, message?.body],
+    ["campaign", step.stepExecutionId, `${TEXT}\n\n${line}`],
+  );
+  assert.deepEqual([message?.approvedBy, message?.approvedAt], [null, step.approvedAt]);
 });
 
 test("the echo stored first as the user's becomes the campaign's when the step's event comes", async () => {

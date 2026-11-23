@@ -1,0 +1,23 @@
+# The Companies found page's routes (core/modules/signals/README.md "API"; gamma-wr-110): a member's session.
+# `foundCompanyId` is a company of your workspace (the list's `id`), `sourceId` one of its sources,
+# `playbookId` one of its agents: put them in http-client.private.env.json with your workspaceId.
+
+### GET /v1/workspaces/{workspaceId}/signals/found-companies: the found companies, newest judged first, in pages (`nextCursor` is the next page's `cursor`); with no `verdict` the fit and unsure ones, `verdict=not_fit` the others; `sourceId` and `playbookId` (an agent's sources) each narrow it; each with its reasons (line, quote, page, date read), the page that led to it and its source type, the general address, phones and postal address, and the source's label; `signals.read`
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/found-companies?verdict=fit&sourceId={{sourceId}}&limit=25
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/signals/found-companies: an agent's newest fitting companies, as the agent's page shows them
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/found-companies?playbookId={{playbookId}}&verdict=fit&limit=5
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### POST /v1/workspaces/{workspaceId}/signals/found-companies/{id}/not-fit: marks the company Not a fit: not_fit, the member's, with who and when; its source never reads or judges it again; the source's creator or a holder of signals.manage; 404 signal_found_company_not_found, 403 forbidden
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/found-companies/{{foundCompanyId}}/not-fit
+Accept: application/json
+Cookie: {{sessionCookie}}
+
+### GET /v1/workspaces/{workspaceId}/signals/found-companies/export.csv: the list's view as a CSV file (UTF-8 with a byte-order mark), the company's own facts only; the same filters, no page; contacts' exports.read
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/signals/found-companies/export.csv?verdict=fit
+Accept: text/csv
+Cookie: {{sessionCookie}}

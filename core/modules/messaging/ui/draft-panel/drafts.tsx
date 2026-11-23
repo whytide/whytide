@@ -48,7 +48,11 @@ export function Drafts({ workspace, personId, first, cited: read }: Props) {
   const { channel: channelText } = useDraftWords();
   const ids = { title: useId(), history: useId() };
   const [drafts, setDrafts] = useState(first);
-  const [channel, setChannel] = useState(first[0]?.channel ?? "linkedin_note");
+  // LinkedIn's two only: an email's draft is asked from the campaign page (gamma-p3-050).
+  const newest = first[0]?.channel;
+  const [channel, setChannel] = useState<(typeof CHANNELS)[number]>(
+    newest === "linkedin_message" ? newest : "linkedin_note",
+  );
   const [asking, setAsking] = useState<"draft" | "regenerate">();
   const [failure, setFailure] = useState<Failure>();
   const [toast, setToast] = useState<string>();

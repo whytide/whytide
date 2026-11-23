@@ -1,7 +1,8 @@
 // The health mails (README.md "Health"; docs/security.md "The health mail"), linkedin_mail_health's
 // work. The owner's, about a health event: a run reads the event and the account's owner, and an
-// event mailed already answers already_sent; tenancy's findUser outside any run, and a missing or
-// disabled owner answers owner_unavailable; the mail rendered in the owner's locale and sent through
+// event mailed already answers already_sent; tenancy's findUser and resolveMembership outside any
+// run, and an owner missing, disabled or no longer an active member of the workspace (gamma-p6-070)
+// answers owner_unavailable; the mail rendered in the owner's locale and sent through
 // the app-mail port, never inside a run; then a run sets owner_notified_at where it is still null.
 // The workflow's id stops a second delivery of the event, the marker a retry once the mail went (C38).
 // The mail says what happened, what stops, until when and what to do, with the link to the LinkedIn
@@ -12,7 +13,7 @@
 import type { TenantClient } from "@whytide/db";
 import { defaultLocale, formatDate, renderMail, resolveLocale } from "@whytide/platform";
 import { appMailConfig, appMailPort, getAdapter } from "@whytide/providers";
-import { findUser } from "@whytide/tenancy";
+import { findUser, resolveMembership } from "@whytide/tenancy";
 import { linkedinConfig } from "../../config.ts";
 import { now } from "../clock.ts";
 import { MAIL_DATE_FORMAT, OPERATOR_MAIL_DATE_FORMAT } from "./constants.ts";
@@ -52,6 +53,10 @@ export async function mailHealthEvent(
   if (event.ownerNotifiedAt !== null) return { sent: false, reason: "already_sent" };
   const owner = await findUser(account.ownerUserId);
   if (owner === null || owner.disabledAt !== null) {
+    return { sent: false, reason: "owner_unavailable" };
+  }
+  const member = { userId: owner.id, workspaceIdOrSlug: workspaceId };
+  if ((await resolveMembership(member)) === null) {
     return { sent: false, reason: "owner_unavailable" };
   }
   const locale = resolveLocale(owner.locale);

@@ -1,0 +1,277 @@
+// The tables of core/modules/enrichment (its docs/data.md), gamma-en-050; migration
+// <timestamp>_enrichment_initial. enrichment_runs is a tenant table: one row per run, ids, field
+// names and codes, never a value. source_usage is global: the instance's count of each source's calls
+// per UTC day or month, shared by every workspace, with no workspace and no personal data; `app`
+// reads, inserts and updates it and never deletes (the migration's hand-written REVOKE). No foreign
+// key to contacts' persons or companies: Prisma would need the opposite relation field in the other
+// module's file.
+
+/// tenant
+model EnrichmentRun {
+  id           String              @id
+  workspaceId  String              @map("workspace_id")
+  /// contacts' person.
+  personId     String              @map("person_id")
+  /// contacts' company the run worked on; null when the person had none at the start.
+  companyId    String?             @map("company_id")
+  trigger      EnrichmentTrigger
+  /// `new_lead:<personId>` for the batch's run, the caller's key for a request.
+  requestKey   String              @map("request_key")
+  status       EnrichmentRunStatus @default(queued)
+  /// Why the company was not asked: `no_company`, `enriched_recently` or `company_running`.
+  skipReason   String?             @map("skip_reason")
+  /// The fields the run looked for and the fields its sources filled: names, never a value.
+  wanted       String[]            @default([])
+  filled       String[]            @default([])
+  /// `[{ source, outcome, code, filled, ms }]` in the order asked: names and codes, never a value.
+  sourcesTried Json                @default("[]") @map("sources_tried")
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz()
+  startedAt    DateTime?           @map("started_at") @db.Timestamptz()
+  finishedAt   DateTime?           @map("finished_at") @db.Timestamptz()
+
+  @@unique([workspaceId, requestKey])
+  @@index([workspaceId, personId, createdAt])
+  @@index([workspaceId, companyId, finishedAt])
+  @@map("enrichment_runs")
+}
+
+enum EnrichmentTrigger {
+  new_lead
+  request
+
+  @@map("enrichment_trigger")
+}
+
+enum EnrichmentRunStatus {
+  queued
+  running
+  done
+  failed
+
+  @@map("enrichment_run_status")
+}
+
+/// The calls of one source in one period, for the whole instance.
+model SourceUsage {
+  id          String             @id
+  /// `<port>/<adapter>` (`company-data/wikidata`), or a module source's name.
+  source      String
+  /// The period's first day in UTC, `YYYY-MM-DD`: text, as the schema lint takes no @db.Date.
+  periodStart String             @map("period_start")
+  period      SourceUsagePeriod
+  used        Int                @default(0)
+  /// The vendor said its free calls or credits are gone: no call until the period ends.
+  spent       Boolean            @default(false)
+  updatedAt   DateTime           @default(now()) @map("updated_at") @db.Timestamptz()
+
+  @@unique([source, periodStart])
+  @@map("source_usage")
+}
+
+enum SourceUsagePeriod {
+  day
+  month
+
+  @@map("source_usage_period")
+}
+
+// The email lookup's tables (gamma-en-080; the module's docs/data.md), migration
+// <timestamp>_enrichment_email. contact_points, enrichment_requests and enrichment_cache_entries are
+// tenant tables; email_domain_statuses is global: a company domain's catch-all status for every
+// workspace, no workspace and no personal data. An address lives in a contact point and a cache
+// entry only, never in a request: a candidate waits in its raw/ file until the lookup settles.
+
+/// tenant
+model ContactPoint {
+  id           String             @id
+  workspaceId  String             @map("workspace_id")
+  /// contacts' person.
+  personId     String             @map("person_id")
+  kind         ContactPointKind
+  /// The address, lower case: a work address, or a personal one the lead gave; for a phone, the number
+  /// as its form leaves it (digits, a leading `+` when the page printed one).
+  /// pii: personal
+  value        String
+  /// Null for a phone (gamma-wr-100); the table's CHECK keeps it required for the two email kinds.
+  verification EmailVerification?
+  verifiedAt   DateTime?          @map("verified_at") @db.Timestamptz()
+  confidence   String?
+  /// `email_finder` here; `lead_reply`, `website` and `pattern` from gamma-en-085.
+  sourceClass  String             @map("source_class")
+  /// The adapter or the source that found it, never shown.
+  provider     String
+  acquiredAt   DateTime           @map("acquired_at") @db.Timestamptz()
+  legalBasis   String             @map("legal_basis")
+  status       ContactPointStatus @default(active)
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt    DateTime           @default(now()) @map("updated_at") @db.Timestamptz()
+  /// The address of the page the value came from (gamma-wr-100: the page that printed a phone), without its query; null for none.
+  pageUrl      String?            @map("page_url")
+
+  /// One address on one person, whatever its kind.
+  @@unique([workspaceId, value])
+  @@index([workspaceId, personId])
+  @@map("contact_points")
+}
+
+enum ContactPointKind {
+  work_email
+  personal_email
+  phone
+
+  @@map("contact_point_kind")
+}
+
+enum EmailVerification {
+  valid
+  catch_all
+  risky
+  invalid
+  unknown
+
+  @@map("email_verification")
+}
+
+enum ContactPointStatus {
+  active
+  bounced
+  opted_out
+
+  @@map("contact_point_status")
+}
+
+/// tenant
+model EnrichmentRequest {
+  id             String                  @id
+  workspaceId    String                  @map("workspace_id")
+  /// contacts' person.
+  personId       String                  @map("person_id")
+  trigger        EmailLookupTrigger
+  /// The caller's key: one request per key.
+  requestKey     String                  @map("request_key")
+  status         EnrichmentRequestStatus @default(queued)
+  /// Why it ended without an address (MISSING_REASONS), null otherwise.
+  reason         String?
+  attempt        Int                     @default(1)
+  /// `[{ source, step, outcome, code, ms }]` in order: names and codes, never an address.
+  providersTried Json                    @default("[]") @map("providers_tried")
+  contactPointId String?                 @map("contact_point_id")
+  creditUsageId  String?                 @map("credit_usage_id")
+  errorCode      String?                 @map("error_code")
+  creditsCharged Decimal                 @default(0) @map("credits_charged")
+  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime                @default(now()) @map("updated_at") @db.Timestamptz()
+  finishedAt     DateTime?               @map("finished_at") @db.Timestamptz()
+  /// The address a company's page printed with the person (gamma-wr-070), verified first by a lookup
+  /// with the trigger `found`; held while the lookup runs, null once it ends.
+  /// pii: personal
+  printedAddress String?                 @map("printed_address")
+
+  @@unique([workspaceId, requestKey])
+  @@index([workspaceId, personId, createdAt])
+  @@index([workspaceId, status, createdAt])
+  @@map("enrichment_requests")
+}
+
+enum EmailLookupTrigger {
+  jit_step
+  request
+  reverify
+  found
+
+  @@map("email_lookup_trigger")
+}
+
+enum EnrichmentRequestStatus {
+  queued
+  running
+  found
+  not_found
+  failed
+  skipped_suppressed
+  waiting_budget
+  waiting_allowance
+
+  @@map("enrichment_request_status")
+}
+
+/// tenant
+model EnrichmentCacheEntry {
+  id           String              @id
+  workspaceId  String              @map("workspace_id")
+  /// SHA-256 of the normalized first name, last name and company domain.
+  keyHash      String              @map("key_hash")
+  kind         EnrichmentCacheKind
+  /// The address of an `email` entry; null for a `negative` one.
+  /// pii: personal
+  value        String?
+  verification EmailVerification?
+  /// Why a `negative` entry; null for an `email` one.
+  reason       String?
+  provider     String
+  retrievedAt  DateTime            @map("retrieved_at") @db.Timestamptz()
+  expiresAt    DateTime            @map("expires_at") @db.Timestamptz()
+  /// contacts' person, so that the eraser finds the row.
+  personId     String              @map("person_id")
+
+  @@unique([workspaceId, kind, keyHash])
+  @@index([workspaceId, personId])
+  @@index([workspaceId, expiresAt])
+  @@map("enrichment_cache_entries")
+}
+
+enum EnrichmentCacheKind {
+  email
+  negative
+
+  @@map("enrichment_cache_kind")
+}
+
+/// A company domain that takes every address, for every workspace; and its address pattern
+/// (gamma-en-085, migration enrichment_email_pattern): one of the fixed pattern names, never an
+/// address, with where it came from and when, the three set together or none (the hand-written CHECK
+/// email_domain_statuses_pattern). A row kept for its pattern only is not catch-all, its catch-all
+/// status expired at its writing. Since gamma-rf-030 the three pattern columns are neither read nor
+/// written: a domain's patterns are email_domain_patterns' rows; dropping them waits for the owner.
+model EmailDomainStatus {
+  id               String              @id
+  domain           String              @unique
+  catchAll         Boolean             @map("catch_all")
+  provider         String
+  checkedAt        DateTime            @map("checked_at") @db.Timestamptz()
+  expiresAt        DateTime            @map("expires_at") @db.Timestamptz()
+  pattern          String?
+  patternSource    EmailPatternSource? @map("pattern_source")
+  patternCheckedAt DateTime?           @map("pattern_checked_at") @db.Timestamptz()
+
+  @@map("email_domain_statuses")
+}
+
+/// Where a domain's pattern came from: the company's site, or an address a verifier called valid.
+enum EmailPatternSource {
+  website
+  verified
+
+  @@map("email_pattern_source")
+}
+
+/// A company domain's address patterns, for every workspace (gamma-rf-030, migration
+/// enrichment_domain_patterns): one row per domain and pattern, how many verified addresses fitted it
+/// and when one last did, and when the company's site last showed it. No workspace and no personal
+/// data: a domain, a pattern's name, a count and two times. The hand-written CHECKs: the pattern is one
+/// of the fixed names (email_domain_patterns_pattern), a row has at least one of the two times
+/// (email_domain_patterns_seen), the count is above 0 exactly when last_verified_at is set
+/// (email_domain_patterns_count); `app` reads, inserts and updates, never deletes (REVOKE DELETE).
+model EmailDomainPattern {
+  domain         String
+  /// One of the fixed names of enrichment's domain/email/constants.ts (`PATTERNS`), never an address.
+  pattern        String
+  /// The verified addresses that fitted it, 0 for a pattern only seen on the site.
+  verifiedCount  Int       @default(0) @map("verified_count")
+  lastVerifiedAt DateTime? @map("last_verified_at") @db.Timestamptz()
+  siteSeenAt     DateTime? @map("site_seen_at") @db.Timestamptz()
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  @@id([domain, pattern])
+  @@map("email_domain_patterns")
+}

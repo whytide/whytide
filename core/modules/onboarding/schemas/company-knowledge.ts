@@ -1,8 +1,19 @@
 // The request and answer of the Company Knowledge routes (README "Routes"), from which the api host
 // validates the input and builds the OpenAPI document. The lengths and counts are checked here (400
 // validation_failed, `details.fields`); a URL is any string here, so that one that is not http or
-// https answers its own code from domain/rules.ts.
+// https answers its own code from domain/rules.ts. The Draft's documents are the texts the Company
+// screen read in the browser (README "The documents"), by the rules of domain/documents.ts; how many
+// a Draft takes is a setting (README "Settings"), which requestDraft checks (documents_too_many): no
+// schema here reads the environment, so the OpenAPI document is the same everywhere, and the answer
+// carries the two limits the screen reads files by, the descriptions naming only their defaults.
 import { z } from "zod";
+import {
+  DOCUMENT_BYTES,
+  DOCUMENT_FILES,
+  DOCUMENT_LIMITS,
+  DOCUMENT_TYPES,
+} from "../domain/constants.ts";
+import { isDocumentName } from "../domain/documents.ts";
 import { FETCH_STATUSES, LIMITS } from "../domain/fields.ts";
 import { pendingDraft } from "./draft-company-knowledge.ts";
 
@@ -44,6 +55,47 @@ export const acceptDraftBody = z.strictObject({
 });
 export type AcceptDraftBody = z.infer<typeof acceptDraftBody>;
 
+const draftDocument = z.strictObject({
+  name: z
+    .string()
+    .refine(isDocumentName)
+    .describe("The file's base name, no control or format character, a slash or a backslash"),
+  mediaType: z.enum(DOCUMENT_TYPES),
+  status: z
+    .enum(["read", "truncated"])
+    .describe("truncated: its text was cut at 50,000 characters"),
+  text: z
+    .string()
+    .min(1)
+    .max(DOCUMENT_LIMITS.text)
+    .refine((text) => !text.includes("\u0000"))
+    .describe("The file's text, no U+0000"),
+});
+
+/** The Draft's body, none as before: a refusal names the field (`documents.2.text`), never a value. */
+export const draftBody = z
+  .strictObject({
+    documents: z
+      .array(draftDocument)
+      .min(1)
+      .superRefine((documents, context) => {
+        documents.forEach(({ name }, at) => {
+          if (documents.findIndex((other) => other.name === name) === at) return;
+          context.addIssue({ code: "custom", path: [at, "name"], message: "repeated" });
+        });
+      })
+      .optional()
+      .describe(
+        `The documents the drafter reads after the website's pages, each name once; at most ONBOARDING_MAX_FILES (${DOCUMENT_FILES.default} by default), else documents_too_many`,
+      ),
+    autoAccept: z
+      .boolean()
+      .optional()
+      .describe("Accept the draft as it lands, as Accept without replacing a person's fields"),
+  })
+  .optional();
+export type DraftBody = z.infer<typeof draftBody>;
+
 const fieldSource = z.strictObject({
   kind: z.enum(["ai_draft", "human"]),
   at: z.iso.datetime(),
@@ -81,7 +133,9 @@ export const companyKnowledgeResponse = z.strictObject({
   fetchError: z
     .string()
     .nullable()
-    .describe("The code of the last failed run: egress_*, fetch_failed, ai_failed or draft_failed"),
+    .describe(
+      "The code of the last failed run: egress_*, fetch_failed, ai_failed, draft_failed or draft_empty",
+    ),
   oneLiner: z.string(),
   longDescription: z.string(),
   products: z.array(z.string()),
@@ -95,5 +149,17 @@ export const companyKnowledgeResponse = z.strictObject({
   updatedAt: z.iso.datetime(),
   pendingDraft: pendingDraft.nullable().describe("The drafter's draft until accepted or discarded"),
   pages: z.array(websitePage),
+  documentLimits: z
+    .strictObject({
+      files: z
+        .number()
+        .int()
+        .describe(`ONBOARDING_MAX_FILES, ${DOCUMENT_FILES.default} by default`),
+      bytes: z
+        .number()
+        .int()
+        .describe(`ONBOARDING_MAX_FILE_BYTES, ${DOCUMENT_BYTES.default} (10 MB) by default`),
+    })
+    .describe("The documents a Draft takes at most, and the bytes of one file at most"),
 });
 export type CompanyKnowledgeResponse = z.infer<typeof companyKnowledgeResponse>;

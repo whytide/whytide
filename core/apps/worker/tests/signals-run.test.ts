@@ -3,13 +3,15 @@
 // from their builds by the worker's own loader, their activities through the host's wrapper, on the
 // LinkedIn fake and the files fake, set here before the providers load. linkedin's clock (useClock)
 // sets the time the read quota reads: a working day at 10:00 UTC, the account's zone. There is no
-// time skipping on this Temporal (README "Testing"): a run refused for the cap or the hours waits on
-// a timer until the refusal's retryAt, a second at least, and the test moves the quota's clock to the
-// next day or into the window while it waits, so the next reservation, the day rolled, is granted. A
+// time skipping on this Temporal (README "Testing"): a run refused for the hours waits on a timer
+// until the refusal's retryAt, a second at least, and the test moves the quota's clock into the
+// window while it waits, so the next reservation is granted; a read refused for the run's budget or
+// the cap ends its day of reading instead, and its pages take half its budget at most (gamma-p5-040). A
 // test replaces an activity to see the staging before the last step empties it, to cancel the run
 // mid-read, or to stop the workspace's LinkedIn actions after a page (beta-p1-040). The pages cost nothing: `run` selects no candidate, so it reads no profile (the
 // processing: signals-process.test.ts); `readAll` reads a profile per candidate, each paid with a
-// credit of signals.engager at the price list the api's start writes (writePrices).
+// credit of signals.engager at the price list the api's start writes (writePrices). A profile read
+// runs three attempts at most, linkedin_read_profile's own bound (gamma-p0-085).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -44,7 +46,7 @@ const linkedin: LinkedinTesting = await built("linkedin/dist/testing/index.js");
 const tenancy: TenancyTesting = await built("tenancy/dist/testing/index.js");
 const signalsPrices = new URL("../../../modules/signals/dist/prices.js", import.meta.url).href;
 type LinkedinFake = import("@whytide/providers").LinkedinFake;
-type Engager = import("@whytide/providers").Engager;
+type Engager = import("@whytide/providers").FakeEngager;
 type RunResult = { runId: string; status: string; code?: string };
 
 withTestDb();
@@ -307,24 +309,67 @@ test("95 engagers over four pages: four reads and no credit, 95 staged and the s
   linkedin.useClock(undefined);
 });
 
-test("the cap reached after a page: the run waits, no credit held, and resumes once the quota day rolls", async () => {
+test("the day's reading ended after a page (gamma-p5-040): with 21 reads left the run's budget is one read, so it reads a page and ends done with budget_reached, no credit held, its watermark kept; the next day's run reads on from the same cut and moves it", async () => {
   linkedin.useClock(() => WEDNESDAY);
-  const source = await sourceOf(engagers(30));
-  await db().senderAccount.update({ where: { id: source.accountId }, data: { dailyReadCap: 1 } });
-  const pending = run(source);
-  await until(() =>
-    db().signalRun.findFirst({ where: { sourceId: source.sourceId, status: "waiting" } }),
-  );
+  const seeded = engagers(30);
+  const source = await sourceOf(seeded);
+  const cap = (dailyReadCap: number) =>
+    db().senderAccount.update({ where: { id: source.accountId }, data: { dailyReadCap } });
+  await cap(21);
+  const ended = await run(source);
+  assert.equal(ended.status, "done");
+  const first = await stateOf(source, ended.runId);
+  assert.deepEqual(first.row.counts, {
+    ...{ pages: 1, read: 25, staged: 25, created: 0, budget_reached: 1 },
+  });
+  assert.deepEqual([first.row.quotaDay, first.row.readBudget], ["2026-10-07", 1]);
+  assert.deepEqual(first.reads, [[1, 1, "committed"]]);
+  assert.deepEqual(first.credits, []);
+  const kept = await db().signalSource.findUniqueOrThrow({ where: { id: source.sourceId } });
+  assert.equal(kept.watermark, null);
+
   linkedin.useClock(() => THURSDAY);
-  const done = await pending;
+  await cap(100);
+  const done = await run(source);
   assert.equal(done.status, "done");
-  const state = await stateOf(source, done.runId);
-  assert.deepEqual(state.row.counts, { pages: 2, read: 30, staged: 30, created: 0 });
-  assert.deepEqual(state.reads, [
-    [1, 1, "committed"],
-    [1, 1, "committed"],
-  ]);
-  assert.deepEqual(state.credits, []);
+  const next = await stateOf(source, done.runId);
+  assert.deepEqual(next.row.counts, { pages: 2, read: 30, staged: 30, created: 0 });
+  assert.deepEqual([next.row.quotaDay, next.row.readBudget], ["2026-10-08", 80]);
+  const moved = await db().signalSource.findUniqueOrThrow({ where: { id: source.sourceId } });
+  assert.deepEqual(moved.watermark, { engagedAt: seeded[0]?.engagedAt.toISOString() });
+  linkedin.useClock(undefined);
+});
+
+test("a source whose pages pass its page limit still reads profiles each day (gamma-p5-040): with 26 reads left the run's budget is six reads, its pages three at most, so it reads three of the four pages and the profiles of three of the 75 staged, commenters first, and ends done with budget_reached, its watermark kept; the next day's run reads the same three pages, drops those three as known and reads three new ones", async () => {
+  linkedin.useClock(() => WEDNESDAY);
+  const source = await sourceOf(withProfiles(engagers(100, 5000)));
+  await db().senderAccount.update({ where: { id: source.accountId }, data: { dailyReadCap: 26 } });
+  /** The run's profiles read, each by its member's number. */
+  const readBy = async (day: Date) => {
+    linkedin.useClock(() => day);
+    const calls = fake.recordedCalls.length;
+    const done = await readAll(source);
+    assert.equal(done.status, "done");
+    const profiles = fake.recordedCalls
+      .slice(calls)
+      .filter(({ method }) => method === "getProfile")
+      .map(({ input }) => (input as { profileUrl: string }).profileUrl.split("member-")[1]);
+    return { state: await stateOf(source, done.runId), profiles };
+  };
+  const pages = { pages: 3, read: 75, staged: 75, profiles_read: 3, created: 3 };
+  const one = await readBy(WEDNESDAY);
+  assert.deepEqual(one.profiles, ["5000", "5003", "5006"]);
+  assert.deepEqual(one.state.row.counts, { ...pages, budget_reached: 1 });
+  assert.deepEqual([one.state.row.quotaDay, one.state.row.readBudget], ["2026-10-07", 6]);
+  assert.deepEqual(one.state.reads, Array(6).fill([1, 1, "committed"]));
+  const kept = await db().signalSource.findUniqueOrThrow({ where: { id: source.sourceId } });
+  assert.equal(kept.watermark, null);
+
+  const two = await readBy(THURSDAY);
+  assert.deepEqual(two.profiles, ["5009", "5012", "5015"]);
+  assert.deepEqual(two.state.row.counts, { ...pages, dropped_known: 3, budget_reached: 1 });
+  assert.deepEqual([two.state.row.quotaDay, two.state.row.readBudget], ["2026-10-08", 6]);
+  assert.equal(await db().person.count({ where: { workspaceId: source.workspaceId } }), 6);
   linkedin.useClock(undefined);
 });
 
@@ -470,7 +515,7 @@ test("outside the working hours the run waits for the window; a disconnected acc
   linkedin.useClock(undefined);
 });
 
-test("30 profiles read commit 30 credits of signals.engager, one per candidate on its own key with the candidate as subject, whose event carries its ULID, and none of signals.engager_read; with SIGNALS_CREDITS_PER_ENGAGER=2 the same run commits 60; with PRICE_SIGNALS_ENGAGER=3 set too, 90", async () => {
+test("30 profiles read commit 30 credits of signals.engager, one per candidate on its own key with the candidate as subject, whose event carries its ULID, and none of signals.engager_read; with SIGNALS_CREDITS_PER_ENGAGER=2 and PRICE_SIGNALS_ENGAGER=3 the same run commits 90, with the setting alone 60", async () => {
   linkedin.useClock(() => WEDNESDAY);
   const charged = async (prices: Record<string, string> = {}) => {
     const source = await sourceOf(withProfiles(engagers(30)), 100, prices);
@@ -487,14 +532,15 @@ test("30 profiles read commit 30 credits of signals.engager, one per candidate o
     return { credits: state.credits, committed: await committedOf(done.runId) };
   };
   const credit = (credits: string) => ["signals.engager", "sigprof:<run>:<cand>:1", "1", credits];
-  const byDefault = await charged();
-  assert.deepEqual(byDefault.credits, Array(30).fill([...credit("1"), "committed"]));
-  assert.deepEqual(byDefault.committed, { "signals.engager": 30 });
+  // Highest first: a drop applies at once, where a rise waits 30 days (credits' README).
   const set = { SIGNALS_CREDITS_PER_ENGAGER: "2" };
-  assert.deepEqual((await charged(set)).committed, { "signals.engager": 60 });
   const overridden = await charged({ ...set, PRICE_SIGNALS_ENGAGER: "3" });
   assert.deepEqual(overridden.credits, Array(30).fill([...credit("3"), "committed"]));
   assert.deepEqual(overridden.committed, { "signals.engager": 90 });
+  assert.deepEqual((await charged(set)).committed, { "signals.engager": 60 });
+  const byDefault = await charged();
+  assert.deepEqual(byDefault.credits, Array(30).fill([...credit("1"), "committed"]));
+  assert.deepEqual(byDefault.committed, { "signals.engager": 30 });
   linkedin.useClock(undefined);
 });
 
@@ -538,13 +584,14 @@ test("a refused read releases its credit: a profile gone is dropped_unread, its 
   ]);
 
   // The one candidate selected twice: its first credit released, the second is a key of its own.
+  // No agent is loaded here, so the triage's step is the rules' (signals-triage-ai), which orders it.
   const twice = await sourceOf(withProfiles(engagers(1, 3000), [0]));
-  const signals_select_candidates = async (input: never) => {
-    const selected = await activities.signals_select_candidates?.(input);
-    const { candidateIds } = selected as { candidateIds: string[] };
-    return { candidateIds: [...candidateIds, ...candidateIds] };
+  const signals_triage_fallback = async (input: never) => {
+    const decided = await activities.signals_triage_fallback?.(input);
+    const { ranks } = decided as { ranks: string[][] };
+    return { ranks: ranks.map((ids) => [...ids, ...ids]) };
   };
-  const again = await readAll(twice, { signals_select_candidates });
+  const again = await readAll(twice, { signals_triage_fallback });
   assert.equal(again.status, "done");
   const released = (n: number) => [
     "signals.engager",
@@ -579,9 +626,10 @@ test("a retried reserve or settle step charges once: each candidate one row, com
 
 test("an empty balance ends the run failed, insufficient_credits: a released credit back in the balance, the candidate refused its credit has its read released, the profiles read before it processed, the watermark kept", async () => {
   linkedin.useClock(() => WEDNESDAY);
-  // Two credits: the first profile's, the second's released as it is gone, the third's; none left
-  // for the fourth. The history signals_run_engager_price.json is this run's.
-  const source = await sourceOf(withProfiles(engagers(4, 4000), [1]), 2);
+  // Two credits, the commenters read first (gamma-p5-040): the first profile's, the second's
+  // released as it is gone, the third's; none left for the fourth. The history
+  // signals_run_engager_price.json is this run's, recorded when the staged order was the read order.
+  const source = await sourceOf(withProfiles(engagers(4, 4000), [3]), 2);
   const failed = await readAll(source);
   const code = "insufficient_credits";
   assert.deepEqual(failed, { runId: failed.runId, status: "failed", code });
@@ -602,5 +650,35 @@ test("an empty balance ends the run failed, insufficient_credits: a released cre
   assert.equal(leads, 2);
   const kept = await db().signalSource.findUniqueOrThrow({ where: { id: source.sourceId } });
   assert.equal(kept.watermark, null);
+  linkedin.useClock(undefined);
+});
+
+test("a profile read failing at the provider on every attempt runs three times, linkedin_read_profile's own bound: a rate limit fails the run with its code; a provider error is the profile skipped on the third", async () => {
+  linkedin.useClock(() => WEDNESDAY);
+  const { linkedin_provider_error, linkedin_rate_limited } = linkedinPort.errors;
+  /** The read, each attempt's call failed with `code`, a rate limit's wait a second. */
+  const failing = (code: Parameters<LinkedinFake["failNext"]>[0], attempts: number[]) => ({
+    linkedin_read_profile: async (input: never) => {
+      attempts.push(Context.current().info.attempt);
+      fake.failNext(code, code === linkedin_rate_limited ? { retryAfterSec: 1 } : undefined);
+      return activities.linkedin_read_profile?.(input);
+    },
+  });
+  const reads = (since: number) =>
+    fake.recordedCalls.slice(since).filter(({ method }) => method === "getProfile").length;
+
+  const limited = await sourceOf(withProfiles(engagers(1, 5000)));
+  const tries: number[] = [];
+  const before = fake.recordedCalls.length;
+  const failed = await readAll(limited, failing(linkedin_rate_limited, tries));
+  assert.deepEqual(failed, { runId: failed.runId, status: "failed", code: linkedin_rate_limited });
+  assert.deepEqual([tries, reads(before)], [[1, 2, 3], 3]);
+
+  const unreadable = await sourceOf(withProfiles(engagers(1, 5100)));
+  const again: number[] = [];
+  const since = fake.recordedCalls.length;
+  const done = await readAll(unreadable, failing(linkedin_provider_error, again));
+  assert.equal(done.status, "done");
+  assert.deepEqual([again, reads(since)], [[1, 2, 3], 3]);
   linkedin.useClock(undefined);
 });

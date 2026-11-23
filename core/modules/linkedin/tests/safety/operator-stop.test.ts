@@ -22,7 +22,7 @@ import {
   useLinkedinClient,
   useRandom,
 } from "../../testing/index.ts";
-import { ALWAYS, THURSDAY } from "../fixtures/send.ts";
+import { ALWAYS, member, THURSDAY } from "../fixtures/send.ts";
 
 withTestDb();
 const app = asRole("app");
@@ -175,15 +175,15 @@ test("the tester's unpause and workspace stop of domain/controls/, which the rou
   const before = await switches();
 
   await assert.rejects(
-    w.run(() => unpauseAccount(a.id, a.owner)),
+    w.run(() => unpauseAccount(a.id, member(a.owner, w.id))),
     failsWith("stopped_by_operator"),
   );
   await assert.rejects(
-    w.run(() => setWorkspaceStop(false, a.owner)),
+    w.run(() => setWorkspaceStop(false, member(a.owner, w.id))),
     failsWith("stopped_by_operator"),
   );
-  await w.run(() => pauseAccount(a.id, a.owner));
-  await w.run(() => setWorkspaceStop(true, a.owner));
+  await w.run(() => pauseAccount(a.id, member(a.owner, w.id)));
+  await w.run(() => setWorkspaceStop(true, member(a.owner, w.id)));
   assert.deepEqual(await switches(), before);
   const held = before.paused.find((row) => row.id === a.id);
   assert.deepEqual([held?.killSwitch, held?.killSwitchSource], [true, "operator"]);

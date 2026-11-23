@@ -16,7 +16,9 @@ import { USAGE } from "../cli/constants.ts";
 import { runControl } from "../cli/control.ts";
 import { pauseAccount, setWorkspaceStop } from "../domain/controls/controls.ts";
 import { tripBreaker } from "../domain/health/breaker.ts";
+import { pauseRemovedMember } from "../domain/removed.ts";
 import { createConnectedAccount, useLinkedinClient } from "../testing/index.ts";
+import { member } from "./fixtures/send.ts";
 
 withTestDb();
 const app = asRole("app");
@@ -167,7 +169,7 @@ test("pause and unpause --workspace, by slug and by id: the workspace's stop, so
     lines: [`unchanged: workspace ${w.id} unpaused`],
   });
 
-  await asTester(w.id, () => setWorkspaceStop(true, "usr_tester"));
+  await asTester(w.id, () => setWorkspaceStop(true, member("usr_tester", w.id)));
   const before = await everything();
   assert.deepEqual(await control(["unpause", "--workspace", w.slug, ...BY]), {
     code: 1,
@@ -210,7 +212,7 @@ test("pause and unpause --workspace --account: the account's switch, source oper
     lines: [`unchanged: account ${id} unpaused`],
   });
 
-  await asTester(w.id, () => pauseAccount(id, "usr_owner"));
+  await asTester(w.id, () => pauseAccount(id, member("usr_owner", w.id)));
   const before = await everything();
   assert.deepEqual(await control(unpause), {
     code: 1,
@@ -239,7 +241,7 @@ test("status prints the platform's switches, then each workspace's id, slug, sto
     (await control(["pause", "--workspace", w1.id, "--account", one.id, ...BY])).code,
     0,
   );
-  await asTester(w2.id, () => setWorkspaceStop(true, "usr_tester"));
+  await asTester(w2.id, () => setWorkspaceStop(true, member("usr_tester", w2.id)));
   assert.equal((await control(["stop", "--platform", ...BY])).code, 0);
   const before = await everything();
 
@@ -263,6 +265,26 @@ test("status prints the platform's switches, then each workspace's id, slug, sto
     lines: [all.lines[0], all.lines[4]],
   });
   assert.deepEqual(await everything(), before, "status changes nothing");
+});
+
+test("a removed member's pause (gamma-p6-070): status prints its source, member_removed; the operator's unpause leaves it, paused_by_member_removed, as a tester's, and the operator's pause takes it over", async () => {
+  const w = await tenant();
+  const { id } = await createConnectedAccount(w.id, { ownerUserId: "usr_removed" });
+  assert.equal(await asTester(w.id, () => pauseRemovedMember("usr_removed")), 1);
+  const status = await control(["status", "--workspace", w.id]);
+  const line = `account: ${id} workspace=${w.id} owner=usr_removed status=connected switch=on source=member_removed`;
+  assert.deepEqual([status.code, status.lines.includes(line)], [0, true], status.lines.join("\n"));
+  const account = ["--workspace", w.id, "--account", id, ...BY];
+  assert.deepEqual(await control(["unpause", ...account]), {
+    code: 1,
+    lines: [`paused_by_member_removed: account ${id}`],
+  });
+  assert.deepEqual(await control(["pause", ...account]), {
+    code: 0,
+    lines: [`changed: account ${id} paused`],
+  });
+  const row = await app.senderAccount.findUniqueOrThrow({ where: { id } });
+  assert.deepEqual([row.killSwitch, row.killSwitchSource], [true, "operator"]);
 });
 
 test("breaker reopen opens the connection requests the fleet breaker paused: not paused, unchanged and no row; paused, status prints the reason, the reopen clears it, the operator its changed_by, one event naming the operator; a repeat prints unchanged and appends none", async () => {

@@ -23,7 +23,7 @@ import { settleFailed } from "../../domain/send/outcome.ts";
 import { handleWebhook } from "../../domain/status.ts";
 import { ids } from "../../ids.ts";
 import { useClock, useLinkedinClient, useRandom } from "../../testing/index.ts";
-import { ALWAYS, granted, sender, THURSDAY } from "../fixtures/send.ts";
+import { ALWAYS, granted, member, sender, THURSDAY } from "../fixtures/send.ts";
 
 const db = withTestDb();
 const app = asRole("app");
@@ -291,10 +291,11 @@ test("only the operator's breaker reopen lifts it: the tester's pause and unpaus
   await handleWebhook("fake", fake.emitAccountStatus(restricted.ref, "restricted"));
   const other = await sender();
   const { ownerUserId } = await app.senderAccount.findUniqueOrThrow({ where: { id: other.id } });
-  await other.run(() => pauseAccount(other.id, ownerUserId));
-  await other.run(() => unpauseAccount(other.id, ownerUserId));
-  await other.run(() => setWorkspaceStop(true, ownerUserId));
-  await other.run(() => setWorkspaceStop(false, ownerUserId));
+  const owner = member(ownerUserId, other.workspaceId);
+  await other.run(() => pauseAccount(other.id, owner));
+  await other.run(() => unpauseAccount(other.id, owner));
+  await other.run(() => setWorkspaceStop(true, owner));
+  await other.run(() => setWorkspaceStop(false, owner));
   for (const args of ["sending close", "sending open", "stop --platform", "start --platform"]) {
     assert.equal((await control(`${args} --operator ${OPERATOR}`)).code, 0, args);
   }

@@ -1,9 +1,11 @@
 // The inbox's routes (README.md "API"), which the api host mounts under
 // /v1/workspaces/:workspaceId/inbox: thin handlers over domain/threads/ and domain/labels/, inside the
-// request's tenant run. They read and write inbox's tables only, contacts' getLead aside, and call no
-// provider: nothing here sends. A module cannot import the host, so each route sets the host's
-// metadata itself: its permission and its @ApiRoute. The label's PUT sets a state, so a repeat changes
-// nothing: it takes no Idempotency-Key.
+// request's tenant run. They read and write inbox's tables, contacts' getLead and the reply state's
+// reads of linkedin's account and contacts' person aside; the label locks the person's lead and runs
+// campaigns' default action of the thread owner's label (gamma-p4-055). None calls a provider or a
+// model: nothing here sends (the reply's route is replies.controller.ts). A module cannot import the
+// host, so each route sets the host's metadata itself: its permission and its @ApiRoute. The label's
+// PUT sets a state, so a repeat changes nothing: it takes no Idempotency-Key.
 import { Body, Controller, Get, Param, Put, Query, SetMetadata } from "@nestjs/common";
 import { currentTenant } from "@whytide/platform";
 import { setLabel } from "../domain/labels/label.ts";
@@ -22,6 +24,7 @@ import {
   type LabelResponse,
   labelBody,
   labelResponse,
+  type MessageLabel,
   type ThreadPage,
   type ThreadResponse,
   type ThreadSummaryResponse,
@@ -56,15 +59,17 @@ export class ThreadsController {
   @Get("threads/:id")
   @canRead
   @route({
-    summary: "A thread with its lead and its messages, oldest first, each reply with its label",
+    summary:
+      "A thread with its lead and its messages, oldest first, each reply with its label and each reply from the inbox with its send's status; and whether the caller replies on it",
     params: idParams,
     response: threadResponse,
     errors: [errors.thread_not_found],
   })
   async thread(@Param("id") id: string): Promise<ThreadResponse> {
-    const { messages, ...thread } = await readThread(id);
+    const { messages, reply, ...thread } = await readThread(id);
     return {
       ...toSummary(thread),
+      reply,
       messages: messages.map((message) => ({
         ...message,
         sentAt: message.sentAt.toISOString(),
@@ -78,14 +83,15 @@ export class ThreadsController {
   @canLabel
   @route({
     summary:
-      "Labels a reply Positive or Not positive as the member, or changes its label; the label it holds already changes nothing",
+      "Labels a reply of the caller's own thread with one of the 7 labels, confirming the classifier's suggestion or changing it, and runs that label's default action when it is the person's newest reply; the label it holds already changes nothing",
     params: idParams,
     body: labelBody,
     response: labelResponse,
     errors: [errors.inbox_message_not_found, errors.message_not_inbound],
   })
   async label(@Param("id") id: string, @Body() body: LabelBody): Promise<LabelResponse> {
-    return toLabel(await setLabel(id, body.label, currentTenant().principal.userId));
+    const chosen = await setLabel(id, body.label, currentTenant().principal.userId);
+    return { ...chosen, labeledAt: chosen.labeledAt.toISOString() };
   }
 }
 
@@ -93,6 +99,6 @@ function toSummary(thread: ThreadSummary): ThreadSummaryResponse {
   return { ...thread, lastMessageAt: thread.lastMessageAt.toISOString() };
 }
 
-function toLabel(state: LabelState): LabelResponse {
+function toLabel(state: LabelState): MessageLabel {
   return { ...state, labeledAt: state.labeledAt.toISOString() };
 }

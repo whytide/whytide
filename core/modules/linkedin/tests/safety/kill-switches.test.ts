@@ -29,7 +29,7 @@ import {
   useLinkedinClient,
   useRandom,
 } from "../../testing/index.ts";
-import { granted, sender, THURSDAY } from "../fixtures/send.ts";
+import { granted, member, sender, THURSDAY } from "../fixtures/send.ts";
 
 withTestDb();
 const app = asRole("app");
@@ -42,6 +42,9 @@ const NOTHING = { invites: 0, messages: 0, withdrawals: 0, actions: 0, windowEnd
 const OPERATOR = "ops-anna";
 
 type Sender = Awaited<ReturnType<typeof sender>>;
+/** The user as an Owner of the account's workspace, or with `role`. */
+const as = (userId: string, account: Sender, role?: "Member") =>
+  member(userId, account.workspaceId, role);
 
 /** The account's owner, as createConnectedAccount made it. */
 async function ownerOf(account: Sender): Promise<string> {
@@ -86,13 +89,13 @@ test("each kill switch, the account's, the workspace's and the platform's, refus
   const stops = [
     {
       code: "account_stopped",
-      stop: () => account.run(() => pauseAccount(account.id, owner)),
-      lift: () => account.run(() => unpauseAccount(account.id, owner)),
+      stop: () => account.run(() => pauseAccount(account.id, as(owner, account))),
+      lift: () => account.run(() => unpauseAccount(account.id, as(owner, account))),
     },
     {
       code: "workspace_stopped",
-      stop: () => account.run(() => setWorkspaceStop(true, owner)),
-      lift: () => account.run(() => setWorkspaceStop(false, owner)),
+      stop: () => account.run(() => setWorkspaceStop(true, as(owner, account))),
+      lift: () => account.run(() => setWorkspaceStop(false, as(owner, account))),
     },
     {
       code: "platform_stopped",
@@ -151,8 +154,8 @@ test("with sending open, the invites' pause refuses an invite invites_paused wit
 test("the order: sending closed before every stop; the platform's stop before the workspace's before the account's; the stops before the account's status; the status before the invites' pause", async () => {
   const account = await sender();
   const owner = await ownerOf(account);
-  await account.run(() => pauseAccount(account.id, owner));
-  await account.run(() => setWorkspaceStop(true, owner));
+  await account.run(() => pauseAccount(account.id, as(owner, account)));
+  await account.run(() => setWorkspaceStop(true, as(owner, account)));
   await setPlatformControls({ sendingOpen: false, stopped: true, invitesPaused: true });
   await app.senderAccount.update({ where: { id: account.id }, data: { status: "disconnected" } });
   const first = async () => {
@@ -164,9 +167,9 @@ test("the order: sending closed before every stop; the platform's stop before th
   assert.deepEqual(await first(), ["platform_stopped", "platform_stopped"]);
   await setPlatformControls({ stopped: false });
   assert.deepEqual(await first(), ["workspace_stopped", "workspace_stopped"]);
-  await account.run(() => setWorkspaceStop(false, owner));
+  await account.run(() => setWorkspaceStop(false, as(owner, account)));
   assert.deepEqual(await first(), ["account_stopped", "account_stopped"]);
-  await account.run(() => unpauseAccount(account.id, owner));
+  await account.run(() => unpauseAccount(account.id, as(owner, account)));
   assert.deepEqual(await first(), [
     "linkedin_account_disconnected",
     "linkedin_account_disconnected",
@@ -179,7 +182,7 @@ test("a send reserved before a stop: a repeat of its key answers its hold, and s
   const account = await sender();
   const owner = await ownerOf(account);
   const held = granted(await account.send("held", "message"));
-  await account.run(() => pauseAccount(account.id, owner));
+  await account.run(() => pauseAccount(account.id, as(owner, account)));
   assert.deepEqual(await account.send("held", "message"), {
     reservationId: held,
     status: "reserved",
@@ -190,7 +193,7 @@ test("a send reserved before a stop: a repeat of its key answers its hold, and s
   assert.deepEqual(check, { refused: "account_stopped", retryAt: null });
 });
 
-test("a tester cannot lift the operator's stop: unpause and the workspace's stop off answer stopped_by_operator and change nothing; the operator's pause takes a tester's over; the operator's unpause leaves a tester's pause, paused_by_tester; only the owner unpauses, not_account_owner", async () => {
+test("a tester cannot lift the operator's stop: unpause and the workspace's stop off answer stopped_by_operator and change nothing; the operator's pause takes a tester's over; the operator's unpause leaves a tester's pause, paused_by_tester; a Member lifts no teammate's pause, not_account_owner (gamma-p6-070: an Owner's pause of it holds)", async () => {
   const account = await sender();
   const { workspaceId } = account;
   const owner = await ownerOf(account);
@@ -204,23 +207,23 @@ test("a tester cannot lift the operator's stop: unpause and the workspace's stop
   assert.equal(await setWorkspaceStopAsOperator(workspaceId, true, OPERATOR), "changed");
   const before = await events();
   await assert.rejects(
-    account.run(() => unpauseAccount(account.id, owner)),
+    account.run(() => unpauseAccount(account.id, as(owner, account))),
     failsWith("stopped_by_operator"),
   );
   await assert.rejects(
-    account.run(() => setWorkspaceStop(false, owner)),
+    account.run(() => setWorkspaceStop(false, as(owner, account))),
     failsWith("stopped_by_operator"),
   );
-  await account.run(() => pauseAccount(account.id, owner));
-  await account.run(() => setWorkspaceStop(true, owner));
+  await account.run(() => pauseAccount(account.id, as(owner, account)));
+  await account.run(() => setWorkspaceStop(true, as(owner, account)));
   assert.deepEqual(await state(), [true, "operator", true, "operator"]);
   assert.deepEqual(await events(), before, "no event for what changed nothing");
   refused(await account.read(), "workspace_stopped");
 
   assert.equal(await unpauseAccountAsOperator(workspaceId, account.id, OPERATOR), "changed");
   assert.equal(await setWorkspaceStopAsOperator(workspaceId, false, OPERATOR), "changed");
-  await account.run(() => pauseAccount(account.id, owner));
-  await account.run(() => setWorkspaceStop(true, owner));
+  await account.run(() => pauseAccount(account.id, as(owner, account)));
+  await account.run(() => setWorkspaceStop(true, as(owner, account)));
   assert.equal(
     await unpauseAccountAsOperator(workspaceId, account.id, OPERATOR),
     "paused_by_tester",
@@ -231,9 +234,9 @@ test("a tester cannot lift the operator's stop: unpause and the workspace's stop
   assert.deepEqual((await state()).slice(0, 2), [true, "operator"]);
 
   const other = await sender();
-  await other.run(() => pauseAccount(other.id, "usr_someone_else"));
+  await other.run(() => pauseAccount(other.id, as("usr_workspace_owner", other)));
   await assert.rejects(
-    other.run(() => unpauseAccount(other.id, "usr_someone_else")),
+    other.run(() => unpauseAccount(other.id, as("usr_someone_else", other, "Member"))),
     failsWith("not_account_owner"),
   );
   assert.equal((await findAccountRow(other.id)).killSwitch, true);
@@ -244,9 +247,9 @@ test("each change writes one control event with its scope, target, states, actor
   const { workspaceId } = account;
   const owner = await ownerOf(account);
   const at = THURSDAY.toISOString();
-  const pause = () => account.run(() => pauseAccount(account.id, owner));
-  const unpause = () => account.run(() => unpauseAccount(account.id, owner));
-  const stop = (on: boolean) => account.run(() => setWorkspaceStop(on, "usr_member"));
+  const pause = () => account.run(() => pauseAccount(account.id, as(owner, account)));
+  const unpause = () => account.run(() => unpauseAccount(account.id, as(owner, account)));
+  const stop = (on: boolean) => account.run(() => setWorkspaceStop(on, as("usr_member", account)));
 
   await Promise.all([pause(), pause()]);
   await pause();
@@ -260,7 +263,7 @@ test("each change writes one control event with its scope, target, states, actor
   assert.equal(await setPlatformSwitch("stop", true, OPERATOR), "unchanged");
   await assert.rejects(
     account.run(async () => {
-      await pauseAccount(account.id, owner);
+      await pauseAccount(account.id, as(owner, account));
       throw new Error("the run rolls back");
     }),
   );

@@ -1,5 +1,6 @@
 // The queue's values (README.md "The queue"), beside the code that reads them: due.ts and open.ts.
-// The window itself is approvals' QUEUE_WINDOW_HOURS, in hours of ../constants.ts MS_PER_HOUR.
+// The window itself is approvals' queueWindowHours (APPROVALS_QUEUE_WINDOW_HOURS), in hours of
+// ../constants.ts MS_PER_HOUR.
 
 /**
  * What a step's turn in a queue run did: its item opened; the step passed over, no longer planned

@@ -1,0 +1,11 @@
+# enrichment's phones route (core/modules/enrichment/README.md "A person's phone"; gamma-wr-100): a
+# member's session, enrichment.read. It answers each number a public page printed with the person,
+# oldest first, with the address of that page (null when none was kept); never an address, a
+# provider's or a source's name. Put in http-client.private.env.json, with your workspaceId:
+# `personId`, a lead of yours. Refusals: 404 enrichment_person_not_found (another workspace's
+# person, an unknown one).
+
+### GET /v1/workspaces/{workspaceId}/enrichment/leads/{personId}/phones: the numbers a page printed with the person, and the pages
+GET {{baseUrl}}/v1/workspaces/{{workspaceId}}/enrichment/leads/{{personId}}/phones
+Accept: application/json
+Cookie: {{sessionCookie}}

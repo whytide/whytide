@@ -1,8 +1,9 @@
 // The items' commands and queries (README.md "Public interface"), each in a tenant run as campaigns
 // and the routes call them, against the worktree's database: an open and its draft, the attach,
 // the approval's texts, the cancel and the wait, the latest decisions, the edit report, and the
-// days and the queue in the sender's zone. The owner checks and the frozen content are the safety
-// suite's (tests/safety/); the routes' refusals the api's (core/apps/api/tests/approvals-items.test.ts).
+// days and each member's own queue in the sender's zone. The owner checks and the frozen content
+// are the safety suite's (tests/safety/); the routes' refusals the api's
+// (core/apps/api/tests/approvals-items.test.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { asRole, withTestDb } from "@whytide/db/testing";
@@ -227,7 +228,7 @@ test("editStats: the approvals since, those unedited and those with a small edit
   await assert.rejects(stats("yesterday"), invalid("since"));
 });
 
-test("decisionDays and the queue in each sender's zone, a gone account's in UTC: the days with decisions; the pending items and the approved ones that wait, by due time, stale, needing attention, decided by their owner; toApprove and decidedToday", async () => {
+test("decisionDays and the queue in each sender's zone, a gone account's in UTC: the days with decisions; each member's queue holds their own account's pending items and approved ones that wait, by due time, stale, needing attention, theirs to decide; toApprove and decidedToday per sender, in its zone (gamma-p6-050)", async () => {
   const seeded = await seed();
   const { workspaceId, personId, accountId: utc } = seeded;
   // The other member's own account: one account per member and workspace.
@@ -282,19 +283,34 @@ test("decisionDays and the queue in each sender's zone, a gone account's in UTC:
   ];
   await item(utc, { status: "approved", scheduledFor: at("20T08:00"), decidedAt: old });
   await item(utc, { status: "blocked", scheduledFor: at("20T08:00") });
-  const queue = await run(workspaceId, () => readQueue(seeded.asOwner, now));
-  const flags = queue.items.map(({ id, stale, needsAttention, canDecide }) => [
-    id,
-    stale,
-    needsAttention,
-    canDecide,
+  type Queue = Awaited<ReturnType<typeof readQueue>>;
+  const flagsOf = (queue: Queue) =>
+    queue.items.map(({ id, stale, needsAttention, canDecide }) => [
+      id,
+      stale,
+      needsAttention,
+      canDecide,
+    ]);
+  const sender = (accountId: string, timeZone: string, toApprove: number) => ({
+    accountId,
+    mailboxId: null,
+    label: "LinkedIn",
+    timeZone,
+    toApprove,
+    decidedToday: 1,
+  });
+  // The owner of the UTC account: its waiting item only, its counts only; the gone account's none.
+  const mine = await run(workspaceId, () => readQueue(seeded.asOwner, now));
+  assert.deepEqual(flagsOf(mine), [[ids[2], false, false, true]]);
+  assert.deepEqual(mine.senders, [sender(utc, "UTC", 0)]);
+  assert.deepEqual(mine.counts, { toApprove: 0, decidedToday: 1 });
+  // The other member, the Auckland account's owner: its pending items, counted from its midnight.
+  const theirs = await run(workspaceId, () => readQueue(seeded.asOther, now));
+  assert.deepEqual(flagsOf(theirs), [
+    [ids[0], true, true, true],
+    [ids[1], false, false, true],
   ]);
-  assert.deepEqual(flags, [
-    [ids[0], true, true, false],
-    [ids[1], false, false, false],
-    [ids[2], false, false, true],
-  ]);
-  const [first] = queue.items;
+  const [first] = theirs.items;
   assert.deepEqual(first?.sender, {
     accountId: auckland,
     label: "LinkedIn",
@@ -304,10 +320,6 @@ test("decisionDays and the queue in each sender's zone, a gone account's in UTC:
     [first?.lead?.firstName, first?.lead?.companyName, first?.draft],
     ["Ines", "Acme", null],
   );
-  assert.deepEqual(queue.counts, { toApprove: 2, decidedToday: 2 });
-  const theirs = await run(workspaceId, () => readQueue(seeded.asOther, now));
-  assert.deepEqual(
-    theirs.items.map(({ canDecide }) => canDecide),
-    [true, true, false],
-  );
+  assert.deepEqual(theirs.senders, [sender(auckland, "Pacific/Auckland", 2)]);
+  assert.deepEqual(theirs.counts, { toApprove: 2, decidedToday: 1 });
 });

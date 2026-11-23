@@ -1,4 +1,4 @@
 {
-  "keys": ["activity", "fields", "namespace", "task_queue"],
+  "keys": ["activity", "fields", "namespace", "task_queue", "workflow"],
   "suffixes": []
 }

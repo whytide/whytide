@@ -18,7 +18,7 @@ export const draftProfileTask = defineAgentTask(
     module: "icp",
     kind: "classification",
     model: settings.AI_MODEL_ICP_DRAFT_PROFILE,
-    promptVersion: 1,
+    promptVersion: 2,
     inputSchema: draftProfileInput,
     outputSchema: draftProfileOutput,
     // Setup is free, as onboarding's draft: the cost event alone records the call.

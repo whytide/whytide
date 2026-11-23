@@ -111,10 +111,11 @@ async function healthOf(account: { workspaceId: string; accountId: string }) {
   };
 }
 
-/** A sender whose owner is a user, as a connect leaves it: the mail's recipient. */
+/** A sender whose owner is a user, a Member of its workspace, as a connect leaves it: the mail's recipient. */
 async function owned() {
   const a = await sender();
   const { id: userId, email } = await tenancy.createUser();
+  await tenancy.createMembership({ userId, workspaceId: a.workspaceId, role: "Member" });
   await db().senderAccount.update({ where: { id: a.accountId }, data: { ownerUserId: userId } });
   return { ...a, userId, email };
 }
@@ -442,6 +443,46 @@ test("the owner's mail's subject follows the trigger: an at_risk account's third
       "Whytide paused the connection requests of your LinkedIn account",
     ],
   );
+});
+
+test("a removed member gets no mail (gamma-p6-070): the account's owner no longer an active member of the workspace answers owner_unavailable, sends nothing and sets no marker; an active member's event of the same kind is mailed", async () => {
+  /** A health event of the account's, as a warning writes it: linkedin_mail_health's input. */
+  const eventOf = async (a: Sender) => {
+    const event = await db().senderHealthEvent.create({
+      data: {
+        id: newId("she"),
+        workspaceId: a.workspaceId,
+        senderId: a.accountId,
+        fromState: "healthy",
+        toState: "at_risk",
+        trigger: "acceptance_rate",
+        metrics: {},
+        automaticAction: "paused_invites",
+        ackRequired: false,
+        createdAt: send.THURSDAY,
+      },
+    });
+    return { workspaceId: a.workspaceId, healthEventId: event.id, recipient: "owner" };
+  };
+  const removed = await owned();
+  const where = { workspaceId: removed.workspaceId, role: "Owner" as const };
+  const { userId: removedBy } = await db().membership.findFirstOrThrow({ where });
+  await db().membership.updateMany({
+    where: { workspaceId: removed.workspaceId, userId: removed.userId },
+    data: { removedAt: new Date(), removedBy },
+  });
+  const input = await eventOf(removed);
+  const unavailable = { sent: false, reason: "owner_unavailable" };
+  assert.deepEqual(await removed.call("linkedin_mail_health", input), unavailable);
+  assert.deepEqual(mailsTo(removed.email), [], "no mail");
+  const marked = { where: { id: input.healthEventId } };
+  const row = await db().senderHealthEvent.findUniqueOrThrow(marked);
+  assert.equal(row.ownerNotifiedAt, null, "no marker: no mail went");
+
+  const active = await owned();
+  const mailed = await active.call("linkedin_mail_health", await eventOf(active));
+  assert.deepEqual(mailed, { sent: true });
+  assert.equal(mailsTo(active.email).length, 1, "the active owner's mail");
 });
 
 test("the recorded history of linkedin_notify replays", () =>

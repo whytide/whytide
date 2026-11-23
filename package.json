@@ -24,6 +24,7 @@
     "env:destroy": "bash deploy/scripts/env.sh destroy",
     "env:status": "bash deploy/scripts/env.sh status",
     "deploy:check": "node deploy/scripts/deploy-check.ts",
+    "unipile:webhooks": "node deploy/scripts/unipile-webhooks.ts",
     "images:build": "bash deploy/scripts/images-build.sh",
     "db:migrate": "pnpm -F db migrate",
     "db:migrate:dev": "pnpm -F db migrate:dev",
@@ -54,8 +55,11 @@
     "grounding-sample": "pnpm -F worker grounding-sample",
     "evidence:reduce": "pnpm -F signals evidence:reduce",
     "erase": "pnpm -F privacy erase",
+    "lead:delete": "pnpm -F privacy lead:delete",
+    "retention:check": "pnpm -F privacy retention:check",
     "linkedin:control": "pnpm -F linkedin linkedin:control",
     "inbox:export-labels": "pnpm -F inbox inbox:export-labels",
+    "inbox:report": "pnpm -F inbox inbox:report",
     "campaigns:report": "pnpm -F campaigns campaigns:report"
   },
   "devDependencies": {

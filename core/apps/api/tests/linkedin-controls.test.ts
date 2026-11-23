@@ -3,8 +3,10 @@
 // worktree's database, answering real HTTP. GET and PUT …/linkedin/controls, POST …/accounts/{id}/pause
 // and …/unpause: who may do what, the codes, a double press under one Idempotency-Key, the account's
 // `paused` and `pausedBy`, one control event per change, and the operator's stop, which no route
-// lifts. The domain's own cases are linkedin's tests/safety/kill-switches.test.ts. It lives here: a
-// module never imports a host.
+// lifts. Who presses what (gamma-p6-070): a Member pauses and lifts their own account's pause and no
+// teammate's, nor the workspace's stop; an Owner pauses a Member's account and lifts that tester's
+// pause, never a removed member's or the operator's. The domain's own cases are linkedin's
+// tests/safety/kill-switches.test.ts. It lives here: a module never imports a host.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
@@ -108,7 +110,7 @@ test("GET and PUT …/controls: a fresh database reads sending closed and nothin
     ["workspace", null, "tester>off", `user:${owner}`],
   ]);
 
-  // B's user is no member of A's workspace: alpha's can() evaluates no role, so that is who lacks it.
+  // B's user is no member of A's workspace, refused before any role is read (roles.test.ts).
   const forbidden = { status: 403, body: { code: "forbidden" } };
   assert.deepEqual(await call(b.user.id, ws, "GET", "/controls"), forbidden);
   assert.deepEqual(await call(b.user.id, ws, "PUT", "/controls", on), forbidden);
@@ -116,11 +118,13 @@ test("GET and PUT …/controls: a fresh database reads sending closed and nothin
   assert.equal((await events()).length, 2, "a refused call changes nothing");
 });
 
-test("POST …/pause and …/unpause: the account answers paused and pausedBy; a double press under one Idempotency-Key acts once; another member pauses and cannot resume, not_account_owner; an outsider is 403; another workspace's account 404", async () => {
+test("POST …/pause and …/unpause: the account answers paused and pausedBy; a double press under one Idempotency-Key acts once; a Member neither lifts nor presses a teammate's pause, not_account_owner; another Owner lifts the tester's pause and pauses it; an outsider is 403; another workspace's account 404", async () => {
   const [a, b] = await createTwoWorkspaces();
   const owner = a.user.id;
   const ws = a.workspace.id;
   const { id } = await createConnectedAccount(ws, { ownerUserId: owner });
+  const teammate = await createUser();
+  await createMembership({ userId: teammate.id, workspaceId: ws, role: "Member" });
   const member = await createUser();
   await createMembership({ userId: member.id, workspaceId: ws });
   const press = (userId: string, action: string, key = randomUUID()) =>
@@ -140,20 +144,21 @@ test("POST …/pause and …/unpause: the account answers paused and pausedBy; a
     [[id, true, "tester"]],
   );
   const notOwner = { status: 403, body: { code: "not_account_owner" } };
-  assert.deepEqual(await press(member.id, "unpause"), notOwner);
+  assert.deepEqual(await press(teammate.id, "unpause"), notOwner);
+  assert.deepEqual(await press(teammate.id, "pause"), notOwner);
 
   const again = randomUUID();
-  const resumed = await press(owner, "unpause", again);
+  const resumed = await press(member.id, "unpause", again);
   assert.deepEqual(
-    [resumed.status, resumed.body.paused, resumed.body.pausedBy],
-    [200, false, null],
+    [resumed.status, resumed.body.paused, resumed.body.pausedBy, resumed.body.mine],
+    [200, false, null, false],
   );
-  assert.deepEqual(await press(owner, "unpause", again), resumed);
+  assert.deepEqual(await press(member.id, "unpause", again), resumed);
   const byMember = await press(member.id, "pause");
   assert.deepEqual([byMember.status, byMember.body.paused, byMember.body.mine], [200, true, false]);
   assert.deepEqual(await events(), [
     ["account", id, "off>tester", `user:${owner}`],
-    ["account", id, "tester>off", `user:${owner}`],
+    ["account", id, "tester>off", `user:${member.id}`],
     ["account", id, "off>tester", `user:${member.id}`],
   ]);
 
@@ -197,4 +202,63 @@ test("the operator's stop holds against the routes: unpause and PUT { stopped: f
     },
   });
   assert.deepEqual(await events(), []);
+});
+
+test("a Member's own account and a teammate's (gamma-p6-070): the Member pauses and lifts their own, and neither a teammate's, not_account_owner, nothing changed; a Member's PUT …/controls is 403 forbidden, the workspace staying stopped; an Owner pauses a Member's account and lifts that tester's pause, but not a removed member's, not_account_owner, nor the operator's, stopped_by_operator", async () => {
+  const [a] = await createTwoWorkspaces();
+  const ws = a.workspace.id;
+  const owner = a.user.id;
+  const [member, teammate] = [await createUser(), await createUser()];
+  for (const { id: userId } of [member, teammate]) {
+    await createMembership({ userId, workspaceId: ws, role: "Member" });
+  }
+  const mine = (await createConnectedAccount(ws, { ownerUserId: member.id })).id;
+  const theirs = (await createConnectedAccount(ws, { ownerUserId: teammate.id })).id;
+  const press = (userId: string, id: string, action: string) =>
+    call(userId, ws, "POST", `/accounts/${id}/${action}`, { key: randomUUID() });
+  const state = async (id: string) => {
+    const row = await app.senderAccount.findUniqueOrThrow({ where: { id } });
+    return [row.killSwitch, row.killSwitchSource];
+  };
+
+  const paused = await press(member.id, mine, "pause");
+  assert.deepEqual(
+    [paused.status, paused.body.pausedBy, paused.body.canUnpause],
+    [200, "tester", true],
+  );
+  const lifted = await press(member.id, mine, "unpause");
+  assert.deepEqual([lifted.status, lifted.body.paused, lifted.body.canPause], [200, false, true]);
+  const notOwner = { status: 403, body: { code: "not_account_owner" } };
+  assert.deepEqual(await press(member.id, theirs, "pause"), notOwner);
+  await setAccountPaused(theirs, "tester");
+  assert.deepEqual(await press(member.id, theirs, "unpause"), notOwner);
+  assert.deepEqual(await state(theirs), [true, "tester"]);
+
+  assert.equal(
+    (await call(owner, ws, "PUT", "/controls", { body: { stopped: true } })).status,
+    200,
+  );
+  const lift = await call(member.id, ws, "PUT", "/controls", { body: { stopped: false } });
+  assert.deepEqual(lift, { status: 403, body: { code: "forbidden" } });
+  const controls = await call(member.id, ws, "GET", "/controls");
+  assert.deepEqual(controls.body.workspace, { stopped: true, stopSource: "tester" });
+
+  const byOwner = await press(owner, theirs, "unpause");
+  assert.deepEqual([byOwner.status, byOwner.body.paused, byOwner.body.mine], [200, false, false]);
+  const pausedByOwner = await press(owner, theirs, "pause");
+  assert.deepEqual([pausedByOwner.status, pausedByOwner.body.pausedBy], [200, "tester"]);
+  await setAccountPaused(theirs, "member_removed");
+  assert.deepEqual(await press(owner, theirs, "unpause"), notOwner);
+  assert.deepEqual(await state(theirs), [true, "member_removed"]);
+  await setAccountPaused(theirs, "operator");
+  const byOperator = { status: 409, body: { code: "stopped_by_operator" } };
+  assert.deepEqual(await press(owner, theirs, "unpause"), byOperator);
+  assert.deepEqual(await state(theirs), [true, "operator"]);
+  assert.deepEqual(await events(), [
+    ["account", mine, "off>tester", `user:${member.id}`],
+    ["account", mine, "tester>off", `user:${member.id}`],
+    ["workspace", null, "off>tester", `user:${owner}`],
+    ["account", theirs, "tester>off", `user:${owner}`],
+    ["account", theirs, "off>tester", `user:${owner}`],
+  ]);
 });

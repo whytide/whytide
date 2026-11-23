@@ -36,6 +36,8 @@ export async function unknownLead(s: Sender, slug: string, note = "", at?: Date)
   const step = await s.ready(slug, "connect", note, at);
   const data = { providerRefs: Prisma.DbNull };
   const { linkedinUrl } = await app.person.update({ where: { id: step.personId }, data });
+  // The sender's leads have a profile; the column is nullable since gamma-rf-050.
+  if (linkedinUrl === null) throw new Error("unknownLead: the lead has no LinkedIn profile");
   return { ...step, linkedinUrl };
 }
 

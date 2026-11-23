@@ -19,10 +19,13 @@ export type InboundMessage = {
 };
 /** The account's message: as InboundMessage, without the opt-out, which reads replies only. */
 export type OutboundMessage = Omit<InboundMessage, "optOutMatched">;
-/** A campaign message's step, and who approved its text when (approvals' approvedContent). */
+/**
+ * A campaign message's step, and who approved its text when (approvals' approvedContent): a person,
+ * or no one for the campaign's mode's approval.
+ */
 export type Approval = {
   readonly stepExecutionId: string;
-  readonly approvedBy: string;
+  readonly approvedBy: string | null;
   readonly approvedAt: Date;
 };
 

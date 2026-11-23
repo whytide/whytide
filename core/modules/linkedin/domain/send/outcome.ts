@@ -12,7 +12,7 @@ import { outcomeOf } from "../action-log/log.ts";
 import { now } from "../clock.ts";
 import { afterPortError } from "../health/signals.ts";
 import { PROVIDER_ERROR_PAUSE_MS, SECOND_MS, SEND_RESERVATION_MS } from "./constants.ts";
-import { type AccountEffect, SEND_ERROR_MAP, sendAnswerOf } from "./error-map.ts";
+import { type AccountEffect, refusedReasonOf, SEND_ERROR_MAP, sendAnswerOf } from "./error-map.ts";
 import { recordSend, type Sent } from "./outreach.ts";
 import { commitSend, holdSendUntil, releaseSend } from "./settle.ts";
 import { hasRow, isCounted, keyRows, type Logged, logStep, type Step, sentAnswer } from "./step.ts";
@@ -43,27 +43,32 @@ export async function settleSent(
 /**
  * The port's typed error after the call: the step's row with the code; the account's retry_at and
  * its health (a warning pauses it, the third provider error in the hour moves retry_at to its next
- * working day); then the slot as the map says, held past the latest retry_at while the outcome is
- * unknown.
+ * working day); then the slot as the map's row for the step's action says, held past the latest
+ * retry_at while the outcome is unknown. The answer names the row's reason beside the code when it
+ * has one (refusedReasonOf).
  */
 export async function settleFailed(
   step: Step,
   reservationId: string,
   error: AppError,
 ): Promise<Logged<SendFailed>> {
-  const effect = effectOf(error);
+  const answer = sendAnswerOf(error.code, error.details?.reason, step.actionType);
+  const effect = SEND_ERROR_MAP[answer];
   const retryAfterSec = retryAfterOf(error);
   const refused = outcomeOf(error);
   const logged = [await logStep(step, refused)];
   const paused = await pauseAccount(step.accountId, effect.account, retryAfterSec);
   const retryAt = later(paused, await afterPortError(step.accountId, error, now()));
   if (effect.slot === "commit") await commitSend(reservationId);
+  if (effect.slot === "commit_not_pending") await commitSend(reservationId, { pending: false });
   if (effect.slot === "release") await releaseSend(reservationId);
   if (effect.slot === "keep_until_checked") {
     const from = (retryAt ?? now()).getTime();
     await holdSendUntil(reservationId, new Date(from + SEND_RESERVATION_MS));
   }
-  return { answer: retryAfterSec === undefined ? { refused } : { refused, retryAfterSec }, logged };
+  const reason = refusedReasonOf(answer);
+  const failed = reason === undefined ? { refused } : { refused, reason };
+  return { answer: retryAfterSec === undefined ? failed : { ...failed, retryAfterSec }, logged };
 }
 
 /** The later of two instants, either null. */

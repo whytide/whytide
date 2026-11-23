@@ -1,0 +1,40 @@
+{
+  "version": 3,
+  "hits": 1,
+  "kgversion": "477",
+  "request_ctx": {
+    "query": {
+      "type": "Organization",
+      "url": "https://www.linkedin.com/company/copper-harbor-labs"
+    },
+    "query_ctx": { "search": "OFF" }
+  },
+  "data": [
+    {
+      "score": 0.93,
+      "esscore": 31.2,
+      "entity": {
+        "type": "Organization",
+        "name": "Copper Harbor Labs",
+        "diffbotUri": "http://diffbot.com/entity/Efixture000000000000001",
+        "industries": ["Software Companies", "Artificial Intelligence Companies"],
+        "nbEmployees": 42,
+        "nbEmployeesMin": 11,
+        "nbEmployeesMax": 50,
+        "homepageUri": "www.copper-harbor.example",
+        "linkedInUri": "linkedin.com/company/copper-harbor-labs",
+        "location": {
+          "country": { "name": "United Kingdom", "type": "AdministrativeArea" },
+          "city": { "name": "Bristol", "type": "AdministrativeArea" },
+          "isCurrent": true
+        },
+        "foundingDate": { "str": "d2019-XX-XX", "precision": 1, "timestamp": 1546300800000 },
+        "description": "Copper Harbor Labs is a synthetic company of the contract suite.",
+        "summary": "Synthetic company",
+        "ceo": { "name": "Ada Example", "type": "Person" },
+        "allNames": ["Copper Harbor Labs", "Copper Harbor"]
+      }
+    }
+  ],
+  "errors": []
+}

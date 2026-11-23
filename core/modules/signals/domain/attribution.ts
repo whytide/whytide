@@ -1,6 +1,7 @@
 // Where a lead came from, for the lead page's evidence panel (README.md "API", alpha-p8-050), in the
 // caller's tenant run: contacts' sources of the lead, the first and the others, each signal source
-// named by its label, and the labels of the sources the person's events name.
+// named by its label, an import by its file (the entry's own label, none before csv-import-sources),
+// and the labels of the sources the person's events name.
 import { getLead, type LeadSource } from "@whytide/contacts";
 import { tenantClient } from "@whytide/db";
 import { isAppError } from "@whytide/platform";
@@ -25,9 +26,9 @@ export async function attributionOf(personId: string, sourceIds: readonly (strin
     select: { id: true, label: true },
   });
   const labels = new Map(rows.map(({ id, label }) => [id, label]));
-  const named = ({ kind, ref }: LeadSource): NamedSource => ({
+  const named = ({ kind, ref, label }: LeadSource): NamedSource => ({
     kind,
-    label: kind === "signal" ? (labels.get(ref) ?? null) : null,
+    label: kind === "signal" ? (labels.get(ref) ?? null) : (label ?? null),
   });
   const [first, ...others] = sources.map(named);
   const attribution: Attribution | null = first ? { first, others } : null;

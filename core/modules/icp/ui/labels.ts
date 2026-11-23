@@ -1,8 +1,8 @@
 // The labels of the ICP's closed lists (domain/lists.ts), its criteria and its codes, for its screen
 // (alpha-p4-050): one t() call per value, written out, so that the message check reads every key of
 // icp.seniority.*, icp.size.*, icp.criterion.* and icp.errors.*.
-import type { CriterionKey, Seniority, SizeRange } from "../domain/lists.ts";
-import type { errors } from "../errors.ts";
+import type { CriterionKey, DRAFT_RUN_CODES, Seniority, SizeRange } from "../domain/lists.ts";
+import type { draftErrors, errors } from "../errors.ts";
 
 type Translate = (key: string) => string;
 
@@ -49,5 +49,27 @@ export function errorLabels(t: Translate): Record<keyof typeof errors, string> {
     icp_unknown_seniority: t("icp.errors.icp_unknown_seniority"),
     icp_unknown_size_range: t("icp.errors.icp_unknown_size_range"),
     icp_unknown_country: t("icp.errors.icp_unknown_country"),
+    icp_not_found: t("icp.errors.icp_not_found"),
+    icp_audience_limit: t("icp.errors.icp_audience_limit"),
+  };
+}
+
+/**
+ * The draft's codes the screen's draft card shows in words (README "The draft"): its routes' and a
+ * failed run's; icp_draft_agent_not_loaded is the worker's, which no route answers.
+ */
+export type DraftCode =
+  | Exclude<keyof typeof draftErrors, "icp_draft_agent_not_loaded">
+  | (typeof DRAFT_RUN_CODES)[keyof typeof DRAFT_RUN_CODES];
+
+export function draftErrorLabels(t: Translate): Record<DraftCode, string> {
+  return {
+    icp_draft_brief_too_long: t("icp.errors.icp_draft_brief_too_long"),
+    icp_draft_no_source: t("icp.errors.icp_draft_no_source"),
+    icp_draft_none: t("icp.errors.icp_draft_none"),
+    icp_not_empty: t("icp.errors.icp_not_empty"),
+    icp_draft_invalid: t("icp.errors.icp_draft_invalid"),
+    ai_failed: t("icp.errors.ai_failed"),
+    draft_failed: t("icp.errors.draft_failed"),
   };
 }

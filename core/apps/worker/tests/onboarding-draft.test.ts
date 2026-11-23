@@ -1,7 +1,10 @@
 // onboarding's drafter end to end (alpha-p4-030; core/modules/onboarding/README.md "The drafter"), on
 // the slice's Temporal, a schema of its database and the LLM fake: the Draft's workflow reads a site
 // this test serves on 127.0.0.1, then the drafter drafts from the pages written, and the Draft's
-// documents after them (knowledge-draft). Synthetic site and documents only.
+// documents after them (knowledge-draft). A Draft from documents alone fetches nothing, and a run with
+// the automatic accept saves its own draft (onboarding-setup). Every page and document reaches the
+// model whole, and the largest input a Draft can give passes the drafter's budget (draft-full-text).
+// Synthetic site and documents only.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
@@ -23,8 +26,15 @@ const pages: Record<string, string> = {
   "/c/about": html("About Corvid", "<p>Founded in 2021 by two couriers.</p>"),
   "/c/customers": html("Customers", "<p>Trusted by 300 shops.</p>"),
   "/i/": html("Wren Parcels", `<p>Parcels by bike.</p><p>${INJECTION}</p>`),
+  // A long page whose price sits past its 40,000th character.
+  "/l/": html(
+    "Lark Logistics",
+    `<p>${"Routes and rates. ".repeat(2_300)}</p><p>Plans start at 49 euros a month.</p>`,
+  ),
 };
+let served = 0;
 const site = createServer((req, res) => {
+  served += 1;
   const page = pages[req.url ?? ""];
   if (page === undefined) res.writeHead(404).end();
   else res.writeHead(200, HTML).end(page);
@@ -34,13 +44,14 @@ const origin = `http://127.0.0.1:${(site.address() as AddressInfo).port}`;
 // The platform's egress config reads it as it loads, below.
 process.env.EGRESS_ALLOW_HOSTS = new URL(origin).host;
 
-const { DATA_SENTENCE } = await import("@whytide/ai");
+const { DATA_SENTENCE, registeredAgentTasks, runAgent } = await import("@whytide/ai");
 const { asRole, withTestDb } = await import("@whytide/db/testing");
 const { collectLogs, createLogger } = await import("@whytide/platform");
 const { hostActivity } = await import("../src/activities.ts");
 const { loadModules } = await import("../src/modules.ts");
 const { runWorkflow, withTestWorkflowEnvironment } = await import("../testing/index.ts");
 const { fake, NOTHING_DRAFTED, onboarding } = await import("./fixtures/onboarding.ts");
+const built = (path: string) => import(new URL(`../../../modules/${path}`, import.meta.url).href);
 
 type RunResult = { status: string; pages: number; code?: string };
 type Recorded = { system: string; messages: { role: string; content: { text: string }[] }[] };
@@ -77,8 +88,11 @@ const VALID = {
 
 type Run = { workspaceId: string; companyKnowledgeId: string; draftRunId: string };
 const newId = (prefix: string) => `${prefix}_${randomUUID()}`;
-/** A record of a new workspace with a one-liner a person wrote, fetching `website` under a Draft. */
-async function requested(website: string): Promise<Run> {
+/**
+ * A record of a new workspace with a one-liner a person wrote, fetching `website` (none: a Draft from
+ * documents alone) under a Draft, which accepts its own draft with `draftAutoAccept`.
+ */
+async function requested(website: string | null, draftAutoAccept = false): Promise<Run> {
   const run = {
     workspaceId: newId("wsp"),
     companyKnowledgeId: newId("ck"),
@@ -86,7 +100,10 @@ async function requested(website: string): Promise<Run> {
   };
   const { workspaceId, companyKnowledgeId: id, draftRunId } = run;
   const fieldSources = { oneLiner: { kind: "human", at: new Date().toISOString() } };
-  const record = { id, workspaceId, sourceUrl: website, fetchStatus: "fetching", draftRunId };
+  const record = {
+    ...{ id, workspaceId, sourceUrl: website, fetchStatus: "fetching", draftRunId },
+    draftAutoAccept,
+  };
   await db().companyKnowledge.create({
     data: { ...record, oneLiner: "Our own words", fieldSources },
   });
@@ -192,7 +209,7 @@ test("the prompt: the data sentence, then every page read in the one <pages> blo
   assert.equal((await recordOf(other.workspaceId)).pendingDraft, null);
 });
 
-test("the Draft's documents follow the pages in the <pages> block, each document:<name> with its name as title, cut like a page; a value citing one and quoting it is drafted", async () => {
+test("the Draft's documents follow the pages in the <pages> block, each document:<name> with its name as title and its text whole; a value citing one and quoting it is drafted", async () => {
   const run = await requested(`${origin}/c/`);
   const deck = `Same-day parcels for small shops.\n${"Rates and routes. ".repeat(400)}`;
   const documents = [
@@ -222,7 +239,7 @@ test("the Draft's documents follow the pages in the <pages> block, each document
   const stored = await pagesOf(workspaceId);
   assert.deepEqual(read, [
     ...stored.map(({ url, title, text }) => ({ url, title, text })),
-    { url: "document:deck.pdf", title: "deck.pdf", text: deck.slice(0, 6_000) },
+    { url: "document:deck.pdf", title: "deck.pdf", text: deck },
     { url: "document:faq.md", title: "faq.md", text: "Sunday deliveries too." },
   ]);
   const { pendingDraft } = await recordOf(workspaceId);
@@ -283,4 +300,170 @@ test("a drafter failing past its three attempts marks the run failed, draft_fail
     ...{ fetchStatus: "failed", fetchError: "draft_failed", pendingDraft: null, own: UNTOUCHED },
   });
   assert.deepEqual(await decisionsOf(run.workspaceId), []);
+});
+
+/** The Draft's documents of `run`'s record, in the order given, as requestDraft writes them. */
+async function withDocuments(run: Run, documents: { name: string; text: string }[]) {
+  const { workspaceId, companyKnowledgeId } = run;
+  const data = documents.map((document, at) => ({
+    ...document,
+    ...{ id: `cdoc_${at + 1}`, workspaceId, companyKnowledgeId, mediaType: "text/plain" },
+    ...{ status: "read", contentHash: "0".repeat(64), addedAt: new Date() },
+  }));
+  await db().companyDocument.createMany({ data });
+}
+const quoted = (text: string, sourceUrl: string, quote: string) => ({ text, sourceUrl, quote });
+const updatesOf = (workspaceId: string) =>
+  db().outboxEntry.findMany({
+    where: { workspaceId, eventName: "onboarding.company_knowledge_updated" },
+  });
+
+test("a Draft from documents alone fetches nothing: fetched with no page, the drafter reads the documents only; with neither, fetch_failed and no model asked", async () => {
+  const run = await requested(null);
+  await withDocuments(run, [{ name: "notes.txt", text: "Same-day parcels for small shops." }]);
+  const fields = {
+    ...NOTHING_DRAFTED,
+    products: [quoted("Same-day parcels", "document:notes.txt", "same-day parcels")],
+  };
+  fake.script(fields);
+  const before = served;
+  assert.deepEqual(await draft(run), { status: "drafted", pages: 0 });
+  assert.equal(served, before, "no request");
+  const block = /^<pages>\n([\s\S]*)\n<\/pages>$/.exec(userText(0));
+  assert.deepEqual(JSON.parse(block?.[1] ?? ""), [
+    { url: "document:notes.txt", title: "notes.txt", text: "Same-day parcels for small shops." },
+  ]);
+  assert.deepEqual(await pagesOf(run.workspaceId), []);
+  const record = await recordOf(run.workspaceId);
+  assert.deepEqual(
+    [record.fetchStatus, record.fetchedAt instanceof Date, record.pendingDraft !== null],
+    ["drafted", true, true],
+  );
+
+  // The website removed while the run fetched, and no document: nothing to draft from.
+  fake.reset();
+  const bare = await requested(null);
+  assert.deepEqual(await draft(bare), { status: "failed", pages: 0, code: "fetch_failed" });
+  assert.equal(fake.recordedCalls.length, 0);
+  assert.deepEqual(await kept(bare.workspaceId), {
+    ...{ fetchStatus: "failed", fetchError: "fetch_failed", pendingDraft: null, own: UNTOUCHED },
+  });
+});
+
+test("a run with the automatic accept saves its draft as Accept does: the version moved and the event published, a field a person wrote before or during the run kept", async () => {
+  const run = await requested(`${origin}/c/`, true);
+  fake.state.delayMs = 1_000;
+  fake.script(VALID);
+  const running = draft(run);
+  for (const deadline = Date.now() + 30_000; fake.recordedCalls.length === 0; await sleep(20)) {
+    assert.ok(Date.now() < deadline, "no model call within thirty seconds");
+  }
+  // A person saves the tone while the model answers, as the form's PUT does.
+  const { fieldSources } = await recordOf(run.workspaceId);
+  const tone = { kind: "human", at: new Date().toISOString() };
+  await db().companyKnowledge.update({
+    where: { id: run.companyKnowledgeId },
+    data: { tone: "Our tone", fieldSources: { ...(fieldSources as object), tone }, version: 2 },
+  });
+  assert.deepEqual(await running, { status: "drafted", pages: 3 });
+  const record = await recordOf(run.workspaceId);
+  assert.deepEqual(
+    [record.fetchStatus, record.pendingDraft, record.oneLiner, record.tone, record.version],
+    ["drafted", null, "Our own words", "Our tone", 3],
+  );
+  assert.deepEqual(
+    [record.products, record.proofPoints],
+    [["Parcel freight"], [{ text: "Trusted by 300 shops", sourceUrl: `${origin}/c/customers` }]],
+  );
+  const sources = record.fieldSources as Record<string, { kind: string; sourceUrl?: string }>;
+  assert.deepEqual(
+    [sources.oneLiner?.kind, sources.tone?.kind, sources.products?.kind],
+    ["human", "human", "ai_draft"],
+  );
+  assert.equal(sources.products?.sourceUrl, `${origin}/c/`);
+  assert.deepEqual(
+    (await updatesOf(run.workspaceId)).map((row) => row.payload),
+    [{ workspaceId: run.workspaceId, version: 3 }],
+  );
+});
+
+test("a run with the automatic accept whose draft holds no value saves nothing and ends failed, draft_empty; a run without the flag waits for review, no field written", async () => {
+  const empty = await requested(`${origin}/c/`, true);
+  fake.script(NOTHING_DRAFTED);
+  assert.deepEqual(await draft(empty), { status: "failed", pages: 3, code: "draft_empty" });
+  assert.deepEqual(await kept(empty.workspaceId), {
+    ...{ fetchStatus: "failed", fetchError: "draft_empty", pendingDraft: null, own: UNTOUCHED },
+  });
+  assert.deepEqual(await updatesOf(empty.workspaceId), []);
+
+  fake.reset();
+  const review = await requested(`${origin}/c/`);
+  fake.script(VALID);
+  assert.deepEqual(await draft(review), { status: "drafted", pages: 3 });
+  const { fetchStatus, pendingDraft, own } = await kept(review.workspaceId);
+  assert.deepEqual(
+    [fetchStatus, (pendingDraft as { fields: object } | null)?.fields, own],
+    ["drafted", VALID, UNTOUCHED],
+  );
+  assert.deepEqual(await updatesOf(review.workspaceId), []);
+});
+
+test("a page and a document whose fact sits past their 40,000th character reach the model whole, and a value quoting each is drafted", async () => {
+  const run = await requested(`${origin}/l/`);
+  const fleet = `${"Fleet notes. ".repeat(3_100)}Used by 120 bakeries.`;
+  await withDocuments(run, [{ name: "fleet.txt", text: fleet }]);
+  const facts = {
+    ...NOTHING_DRAFTED,
+    products: [quoted("Monthly plans", `${origin}/l/`, "plans start at 49 euros a month")],
+    proofPoints: [quoted("Used by 120 bakeries", "document:fleet.txt", "used by 120 bakeries")],
+  };
+  fake.script(facts);
+  assert.deepEqual(await draft(run), { status: "drafted", pages: 1 });
+  const block = /^<pages>\n([\s\S]*)\n<\/pages>$/.exec(userText(0));
+  const read = JSON.parse(block?.[1] ?? "") as { url: string; title: string; text: string }[];
+  const [page] = await pagesOf(run.workspaceId);
+  assert.deepEqual(read, [
+    { url: `${origin}/l/`, title: "Lark Logistics", text: page?.text },
+    { url: "document:fleet.txt", title: "fleet.txt", text: fleet },
+  ]);
+  assert.ok((read[0]?.text.indexOf("Plans start at 49 euros a month.") ?? 0) > 40_000);
+  assert.ok(fleet.indexOf("Used by 120 bakeries.") > 40_000);
+  assert.equal(page?.status, "fetched", "the whole page was kept");
+  const { pendingDraft } = await recordOf(run.workspaceId);
+  assert.deepEqual((pendingDraft as { fields: object }).fields, facts);
+});
+
+/** The context window of every model the anthropic adapter serves (Anthropic's model table). */
+const CONTEXT_TOKENS = 1_000_000;
+
+test("the largest input a Draft can give with the settings' defaults passes the drafter's budget and asks the model: the most pages and documents, each text, title, address and name at its limit, in three-byte characters", async () => {
+  const constants = await built("onboarding/dist/domain/constants.js");
+  const { DOCUMENT_LIMITS, DOCUMENT_NAME, DOCUMENT_SOURCE, FETCH_MAX_PAGES } = constants;
+  // ONBOARDING_MAX_FILES, five unset (onboarding's README "Settings": more can pass the budget).
+  const { settings } = await built("onboarding/dist/settings.js");
+  const { FETCH_LIMITS } = await built("onboarding/dist/workflows/fetch-website.js");
+  // The reader's bounds moved to the platform with it (gamma-en-065).
+  const { url: MAX_URL, title: MAX_TITLE } = FETCH_LIMITS;
+  // Three UTF-8 bytes a UTF-16 unit, the most a text keeps; a name counts code points, four bytes each.
+  const wide = (length: number) => "\u4e2d".repeat(length);
+  let nameLength = 0;
+  while (DOCUMENT_NAME.test("\u{1F600}".repeat(nameLength + 1))) nameLength += 1;
+  const pages = Array.from({ length: FETCH_MAX_PAGES }, (_, at) => ({
+    url: `https://acme.test/${at}/`.padEnd(MAX_URL, "a"),
+    title: wide(MAX_TITLE),
+    text: wide(FETCH_LIMITS.text),
+  }));
+  const documents = Array.from({ length: settings.ONBOARDING_MAX_FILES }, (_, at) => {
+    const name = `${at}${"\u{1F600}".repeat(nameLength - 1)}`;
+    return { url: `${DOCUMENT_SOURCE}${name}`, title: name, text: wide(DOCUMENT_LIMITS.text) };
+  });
+  const task = registeredAgentTasks().get(TASK);
+  assert.ok(task);
+  fake.script(NOTHING_DRAFTED);
+  const run = await runAgent(task, { pages: [...pages, ...documents] });
+  assert.equal(run.ok, true, "never ai_budget_exceeded");
+  assert.equal(fake.recordedCalls.length, 1);
+  assert.equal(userText(0).length, run.message.length);
+  const { maxInputTokens, maxOutputTokens } = task.budget;
+  assert.ok(maxInputTokens + maxOutputTokens <= CONTEXT_TOKENS);
 });

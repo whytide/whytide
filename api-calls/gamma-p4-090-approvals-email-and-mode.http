@@ -1,0 +1,37 @@
+# approvals' queue routes on an email item (core/modules/approvals/README.md "Routes"; gamma-p4-090):
+# a member's session, approvals.decide; only the owner of an email item's mailbox decides it. Both
+# POSTs are @Idempotent(): the Idempotency-Key is an example UUID; the same key answers the first
+# press again. A write sends the cookie, so it sends Origin: {{appOrigin}} too. `emailItemId` is a
+# pending email item of your workspace and `draftId` the draft its row showed (GET …/items, the
+# item's `draft.id`): put both in http-client.private.env.json with your workspaceId.
+
+### POST /v1/workspaces/{workspaceId}/approvals/items/{id}/approve: approves a first email with the subject and body given, frozen and hashed together, for the draft shown; 200 with the item; 403 not_sender_owner, 400 draft_text_refused with details.issues or draft_subject_not_allowed for a follow-up, 409 approval_draft_changed, approval_item_not_pending or approval_draft_pending
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/approvals/items/{{emailItemId}}/approve
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000004090
+
+{
+  "subject": "Warm leads at Acme",
+  "text": "Ines, how does your team follow up on warm leads today? A short question about it.",
+  "draftId": "{{draftId}}"
+}
+
+### POST /v1/workspaces/{workspaceId}/approvals/items/{id}/approve: a draftId that is not the item's draft, as from a stale screen; 409 approval_draft_changed, nothing approved
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/approvals/items/{{emailItemId}}/approve
+Accept: application/json
+Content-Type: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000004091
+
+{ "draftId": "mdr_not_this_items" }
+
+### POST /v1/workspaces/{workspaceId}/approvals/items/{id}/skip: skips the email item, its draft left as it is; 200 with the item; 403 not_sender_owner, 409 approval_item_not_pending, 404 approval_item_not_found
+POST {{baseUrl}}/v1/workspaces/{{workspaceId}}/approvals/items/{{emailItemId}}/skip
+Accept: application/json
+Cookie: {{sessionCookie}}
+Origin: {{appOrigin}}
+Idempotency-Key: 00000000-0000-4000-8000-000000004092

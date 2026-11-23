@@ -70,6 +70,7 @@ test("an invite with a note, a message and a withdrawal go out: the step's key o
   assert.deepEqual(await refs(message.stepExecutionId), {
     messageRef: messaged.lastMessageRef,
     chatRef: messaged.providerChatRef,
+    sentAt: messaged.lastSentAt,
   });
   assert.equal(await refs(invite.stepExecutionId), null, "an invite's step has no message");
 

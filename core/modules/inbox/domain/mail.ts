@@ -1,25 +1,29 @@
 // The reply mail (README.md "The reply mail"; docs/flows.md): one mail per reply to the sender
 // account's owner, who it was addressed to, saying who replied, with a link to the thread, never the
 // reply's text. The activity inbox_mail_reply runs it: the message, its thread and the person's first
-// name in one tenant run; the owner from tenancy's users, outside any run; the mail through the
-// app-mail port; then the sent marker, owner_notified_at, in a second run. The port takes no
-// idempotency key, so a crash between the send and the marker can send a second mail.
+// name in one tenant run; the owner from tenancy's users and their active membership of the thread's
+// workspace (resolveMembership), outside any run, so a removed member hears nothing more about the
+// workspace (gamma-p6-060); the mail through the app-mail port; then the sent marker,
+// owner_notified_at, in a second run. The port takes no idempotency key, so a crash between the send
+// and the marker can send a second mail.
 import { errors as contactsErrors, getPerson } from "@whytide/contacts";
 import { type TenantClient, tenantClient } from "@whytide/db";
 import {
   type ActivityContext,
   createLogger,
   isAppError,
+  type Logger,
   renderMail,
   resolveLocale,
 } from "@whytide/platform";
 import { appMailConfig, appMailPort, getAdapter } from "@whytide/providers";
-import { findUser } from "@whytide/tenancy";
+import { findUser, resolveMembership } from "@whytide/tenancy";
 import { INBOX_PATH, MAIL_NAME_MAX, ORIGIN_VARIABLE, WORKSPACE_PATH } from "./constants.ts";
 
 /**
- * Why a reply got no mail: it went already, the owner is no user who can sign in, or the message,
- * its thread or its person is gone (erased since the event).
+ * Why a reply got no mail: it went already, the owner is no user who can sign in or no longer an
+ * active member of the workspace, or the message, its thread or its person is gone (erased since the
+ * event).
  */
 export type MailSkip = "already_sent" | "owner_unavailable" | "gone";
 /** What the activity answers: never an address, a name or a text. */
@@ -39,7 +43,12 @@ const BREAKS = /[\s\p{Cc}]+/gu;
 /** The marks that turn the direction of the text after them, which could disguise the subject. */
 const BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
 
-let log: ReturnType<typeof createLogger> | undefined;
+let log: Logger | undefined;
+
+/** The host's logger for the owner_unavailable line (workflows/index.ts, onWorkerStart). */
+export function useMailLog(logger: Logger): void {
+  log = logger;
+}
 
 /**
  * The mail of one reply, in the activity's context: its runs are `context.tenant`'s; the rest runs
@@ -51,9 +60,13 @@ export async function mailReply(
 ): Promise<MailResult> {
   const reply = await context.tenant(() => readReply(messageId));
   if (typeof reply === "string") return { sent: false, reason: reply };
-  // Outside any run: tenancy reads the global users table, which no tenant run may.
+  // Outside any run: tenancy reads the global users and memberships, which no tenant run may.
   const owner = await findUser(reply.ownerUserId);
-  if (owner === null || owner.disabledAt !== null) {
+  const member =
+    owner === null || owner.disabledAt !== null
+      ? null
+      : await resolveMembership({ userId: owner.id, workspaceIdOrSlug: context.workspaceId });
+  if (owner === null || member === null) {
     const fields = { message_id: messageId, thread_id: reply.threadId, user_id: reply.ownerUserId };
     (log ??= createLogger()).info(
       { ...fields, outcome: "owner_unavailable" },

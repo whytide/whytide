@@ -21,7 +21,10 @@
     { "path": "../../packages/providers" },
     { "path": "../approvals" },
     { "path": "../contacts" },
+    { "path": "../email" },
     { "path": "../linkedin" },
+    { "path": "../playbooks" },
+    { "path": "../qualification" },
     { "path": "../tenancy" }
   ]
 }

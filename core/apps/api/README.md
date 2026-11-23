@@ -37,7 +37,7 @@ A bad export stops the start with `module_invalid` (`details.module`, `details.f
 
 ## Permissions
 
-Every workspace route declares its action: `@Permission("leads.read")` (`src/permission.ts`), on the handler or the controller, sets the metadata `whytide:permission`, which the permission guard checks with `can()` after the workspace guard. A workspace route without one answers 500 `permission_undeclared`. A module cannot import the host: it writes `SetMetadata("whytide:permission", "<action>")` from `@nestjs/common`.
+Every workspace route declares its action: `@Permission("leads.read")` (`src/permission.ts`), on the handler or the controller, sets the metadata `whytide:permission`, which the permission guard checks with `can()` after the workspace guard. A workspace route without one answers 500 `permission_undeclared`. A module cannot import the host: it writes `SetMetadata("whytide:permission", "<action>")` from `@nestjs/common`. `can()` checks the member's role, read from the membership on every request, against the action's declared roles: a Member is 403 `forbidden` on a route whose action lists only Owner and Admin (`tests/roles.test.ts`); `tests/fixtures/permission-table.txt` holds every module's actions and roles, which `tests/permission-table.test.ts` compares with the declarations (platform README, "Principal and permissions").
 
 ## Health
 

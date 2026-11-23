@@ -1,14 +1,16 @@
 // listPostEngagers on Unipile (README.md "Covers"): a post's reactions and its comments, two lists
 // of the vendor's, merged newest first by engagedAt into the port's Engager rows. A comment carries
-// its date. A reaction carries none at Unipile, so it takes the time its listing started: it sorts
-// above the comments written before, and a cursor read again gives the same page. The cursor,
+// its date, `dateKnown: true`. A reaction carries none at Unipile, so it takes the time its listing
+// started, `dateKnown: false`: it sorts above the comments written before, and a cursor read again
+// gives the same page. The cursor,
 // signed (cursor.ts), holds that time, the post's id and social id and, for each list, the vendor's
 // cursor of the page being read with how many of its items are done, or null once the list is read
 // to the end.
 import { z } from "zod";
+import { POST_PATHS } from "../constants.ts";
 import { type Engager, linkedinEngager } from "../port.ts";
 import { type Client, notFound, providerError, segment } from "./client.ts";
-import { ACTIVITY, POST_PATHS } from "./constants.ts";
+import { ACTIVITY, MAX_LOADS } from "./constants.ts";
 import { type Cursors, cursorInvalid } from "./cursor.ts";
 
 type Input = {
@@ -20,8 +22,6 @@ type Input = {
 type Page = { readonly items: readonly (Engager | undefined)[]; readonly next: string | null };
 
 const METHOD = "listPostEngagers";
-/** Vendor pages one call may load, both lists together: a vendor's cursor that loops stops here. */
-const MAX_LOADS = 10;
 const position = z.tuple([z.string().min(1).nullable(), z.int().min(0)]).nullable();
 const cursorState = z.strictObject({
   post: z.string().min(1),
@@ -180,6 +180,7 @@ function reactionOf(item: unknown, at: number): Engager | undefined {
     headline: headline ?? "",
     reaction: "like",
     engagedAt: new Date(at),
+    dateKnown: false,
   });
 }
 
@@ -196,6 +197,7 @@ function commentOf(item: unknown, at: number): Engager | undefined {
     reaction: "comment",
     commentText: text ?? "",
     engagedAt: new Date(Number.isNaN(written) ? at : written),
+    dateKnown: !Number.isNaN(written),
   });
 }
 

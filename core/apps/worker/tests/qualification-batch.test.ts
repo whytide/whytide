@@ -1,13 +1,17 @@
-// qualification's batch end to end (alpha-p6-040; core/modules/qualification/README.md "The batch"),
-// on the slice's Temporal and a schema of its database: qualification loaded from its build by the
-// worker's own loader, its activities through the host's wrapper, the LLM fake scripted per lead as
-// its assessment starts, credits' client bound on the test's schema; the batch's robustness
-// (alpha-p10-100): the provider's failures tried again, other failures failing the batch, a lease that
-// ran out, a decided lead kept without credits, the tick's skips and failures; last, the worker host
-// itself, from discovery's import event in the outbox, and the tick's schedule; the re-score after a
-// criteria save, and from the route's request through the host. Contacts, icp, tenancy and
-// qualification's code and test helpers come from their builds, the files the loader's modules
-// import. The replay of the recorded histories is `pnpm -F worker test:replay`.
+// qualification's batch end to end (alpha-p6-040; core/modules/qualification/README.md "The
+// batch"), on the slice's Temporal and a schema of its database: qualification loaded from its
+// build by the worker's own loader, its activities through the host's wrapper, the LLM fake
+// scripted per lead as its assessment starts, credits' client bound on the test's schema; the
+// batch's robustness (alpha-p10-100): the provider's failures tried again, other failures failing
+// the batch, a lease that ran out, a decided lead kept without credits, the tick's skips and
+// failures; last, the worker host itself, from discovery's import event in the outbox, and the
+// tick's schedule; the re-score after a criteria save, and from the route's request through the
+// host. Contacts, icp, tenancy and qualification's code and test helpers come from their builds,
+// the files the loader's modules import. The replay of the recorded histories is `pnpm -F worker
+// test:replay`. A fake signal reader gives every decision a known intent, so a lead's tier is its
+// priority's (gamma-p5-060), as in production, where signals' reader is always registered. Last, a
+// batch over two audiences (gamma-p5-050): each lead against its agent's audience, with its own
+// excerpts, which reach neither the workflow's history nor a log line.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -33,26 +37,34 @@ const { start } = await import("../src/start.ts");
 const { runWorkflow, withTestWorkflowEnvironment } = await import("../testing/index.ts");
 const built = (file: string) => new URL(`../../../modules/${file}`, import.meta.url).href;
 const contacts = await import(built("contacts/dist/index.js"));
-const { useHashSalt } = await import(built("contacts/dist/testing/index.js"));
+const { useEnrichmentHold, useHashSalt } = await import(built("contacts/dist/testing/index.js"));
 const { events: discovery } = await import(built("discovery/dist/index.js"));
+const { createPlaybook } = await import(built("playbooks/dist/testing/index.js"));
 const { readIcpForScoring } = await import(built("icp/dist/index.js"));
-const { batchStart, errors: qualificationErrors } = await import(
-  built("qualification/dist/index.js")
-);
+const {
+  batchStart,
+  errors: qualificationErrors,
+  ids: qualificationIds,
+} = await import(built("qualification/dist/index.js"));
 const { requestRescore } = await import(built("qualification/dist/domain/rescore.js"));
-const { useQualificationClient } = await import(built("qualification/dist/testing/index.js"));
+const { useQualificationClient, useSignalReader } = await import(
+  built("qualification/dist/testing/index.js")
+);
 const { useTenancyClient } = await import(built("tenancy/dist/testing/index.js"));
 
 withTestDb();
 const env = withTestWorkflowEnvironment();
 const app = () => asRole("app");
 useHashSalt("test-salt-".repeat(4));
+// A new lead is judged at once here; contacts' enrichment-hold.test.ts holds one (gamma-en-040).
+useEnrichmentHold(0);
 useQualificationClient(app());
 useTenancyClient(app());
 platform.bindCreditsClient(createCreditsClient());
 await loadAgentTasks();
 const fake = (await getAdapter(llmPort, "fake")) as unknown as LlmFake;
-const log = platform.createLogger({ destination: platform.collectLogs().destination });
+const logs = platform.collectLogs();
+const log = platform.createLogger({ destination: logs.destination });
 const qualification = moduleLoaders.filter(({ name }) => name === "qualification");
 const loaded = await loadModules(qualification);
 const activities = Object.fromEntries(
@@ -113,10 +125,33 @@ const answer = (changed: Record<string, string> = {}, disqualifiers: string[] = 
   disqualifiers,
   summary: "A revenue operations head at a software company.",
 });
+/**
+ * Every person's signals, in place of signals' reader, which the @whytide/credits import registers
+ * as the worker host's modules always do: two topics' posts commented on, rated fully relevant and
+ * dated as the decision reads them, so neither decays; their creator unknown, so the alert of a
+ * lead entering Hot mails nobody (owner_unknown). intent-v1 (qualification README "Intent and
+ * priority") makes S = 5 + 5 = 10, with no stacking (one kind) and no boost (a weight under 6): an
+ * intent of round(100 × (1 − e^(−10 ÷ 8))) = 71. A lead's tier is its priority's,
+ * round(0.55 × fit + 0.45 × 71): answer()'s fit of 88 is 80, hot; 82, its location unknown too, 77,
+ * hot; 74, once must_haves weighs 60, 73, warm.
+ */
+const reader = {
+  intentInputs: async ({ personIds }: { personIds: readonly string[] }) =>
+    personIds.flatMap((personId) =>
+      ["src_1", "src_2"].map((sourceId) => ({
+        ...{ personId, sourceId, eventId: `evt_${personId}_${sourceId}`, count: 1 },
+        ...{ kind: "topic_engagement", role: "comment", relevance: 1, intentClass: "other" },
+        ...{ occurredAt: new Date(), ownerUserId: null },
+      })),
+    ),
+  excerpts: async () => [],
+};
+useSignalReader(reader);
 
 /**
- * A workspace of its own organization with `allowance` credits, the price listed, the ICP at version
- * 1; its id starts with `prefix`, which orders the tick's list.
+ * A workspace of its own organization with `allowance` credits, the price listed, the ICP at
+ * version 1, whose id, the default audience's, it gives too; its id starts with `prefix`, which
+ * orders the tick's list.
  */
 async function workspaceWith(allowance: number, prefix = "wsp") {
   const organizationId = `org_${randomUUID()}`;
@@ -135,14 +170,23 @@ async function workspaceWith(allowance: number, prefix = "wsp") {
     },
     update: {},
   });
-  await inRun(workspaceId, async (tx) => {
+  const icpId: string = await inRun(workspaceId, async (tx) => {
     const { id } = (await readIcpForScoring(workspaceId)).icp;
     await tx.icp.update({ where: { id }, data: ICP });
+    return id;
   });
-  return { organizationId, workspaceId };
+  return { organizationId, workspaceId, icpId };
 }
-/** A pending lead with its company; `profile` changes the person, as a filter's miss. */
-function leadOf(workspaceId: string, slug: string, profile: Record<string, string> = {}) {
+/**
+ * A pending lead with its company; `profile` changes the person, as a filter's miss; imported
+ * unless `source` names a signal source.
+ */
+function leadOf(
+  workspaceId: string,
+  slug: string,
+  profile: Record<string, string> = {},
+  source: { kind: string; ref: string } = { kind: "imported", ref: "imp_1" },
+) {
   return inRun(workspaceId, async () => {
     const person = { linkedinUrl: `https://linkedin.com/in/${slug}`, firstName: "Noor" };
     const values = { ...person, title: TITLE, locationText: "Berlin, Germany", ...profile };
@@ -154,7 +198,6 @@ function leadOf(workspaceId: string, slug: string, profile: Record<string, strin
     const company = { ...COMPANY, sizeRange: "51-200" };
     const { company: linked } = await contacts.upsertCompany({ ...imported, company });
     await contacts.linkPersonToCompany({ personId: stored.id, companyId: linked.id });
-    const source = { kind: "imported", ref: "imp_1" };
     await contacts.createLeadForPerson({ personId: stored.id, source });
     return stored.id as string;
   });
@@ -190,10 +233,11 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
 }
 
 test("a batch of ten pending leads ends each as scripted; reservations committed for the stored snapshots and released for ai_failed and the provider's failure, 0.2 per scored lead; one qualification.lead_qualified per decided lead", async () => {
-  const { workspaceId } = await workspaceWith(10);
+  const { workspaceId, icpId } = await workspaceWith(10);
   const ids: string[] = [];
   const plan: [Record<string, string>, (() => void) | undefined][] = [
-    [{ title: "Barista" }, undefined],
+    // A title outside the ICP's no filter stops (title-check-ai): the country does.
+    [{ title: "Barista", locationText: "Madrid, Spain" }, undefined],
     [{}, () => fake.script(answer())],
     [{}, () => fake.script(answer({}, ["recruiter"]))],
     [{}, () => fake.script(answer({ location: "unknown" }))],
@@ -220,7 +264,7 @@ test("a batch of ten pending leads ends each as scripted; reservations committed
     return { status, tier, reason, icpVersion: 1 };
   };
   assert.deepEqual(await leads(workspaceId), [
-    decided("hard_filtered", null, "title_mismatch"),
+    decided("hard_filtered", null, "country_mismatch"),
     decided("qualified", "hot"),
     decided("not_qualified", null, "recruiter"),
     decided("needs_review", "hot"),
@@ -240,7 +284,11 @@ test("a batch of ten pending leads ends each as scripted; reservations committed
   const reserved = await usages(workspaceId);
   assert.deepEqual(
     reserved.map((usage) => [usage.subjectRef, usage.status, usage.idempotencyKey]),
-    assessed.map((id, at) => [id, at < 6 ? "committed" : "released", `qual:${id}:1:fake-model:1`]),
+    assessed.map((id, at) => [
+      id,
+      at < 6 ? "committed" : "released",
+      `qual:${id}:${icpId}:1:fake-model:2`,
+    ]),
   );
   const wallet = await balance(workspaceId);
   assert.deepEqual([wallet.committed, wallet.reserved, wallet.available], ["1.2", "0", "8.8"]);
@@ -258,7 +306,7 @@ test("a batch of ten pending leads ends each as scripted; reservations committed
 });
 
 test("the batch's steps run again make no model call and no new reservation; a second batch selects none; a targeting change re-assesses at the new version", async () => {
-  const { workspaceId } = await workspaceWith(10);
+  const { workspaceId, icpId } = await workspaceWith(10);
   const ids = [await leadOf(workspaceId, "again-1"), await leadOf(workspaceId, "again-2")];
   fake.reset();
   fake.script(answer(), answer());
@@ -278,7 +326,7 @@ test("the batch's steps run again make no model call and no new reservation; a s
   };
   const step = (name: string, input: object) =>
     loaded.activities.get(name)?.run({ workspaceId, ...input } as never, context as never);
-  const lead = { personId: ids[0], icpVersion: 1 };
+  const lead = { personId: ids[0], icpId, icpVersion: 1 };
   const again = (await step("qualification_reserve", lead)) as { usageId: string };
   assert.deepEqual(again, { status: "reserved", usageId: first?.id, attempt: 1 });
   const snapshot = (await step("qualification_assess", lead)) as { snapshotId: string };
@@ -360,8 +408,131 @@ test("below 0.2 credits the lead waits insufficient_credits with no model call; 
   });
 });
 
+test("title-check-ai: a title outside the ICP's titles is assessed and a country miss is still hard_filtered; the leads a retired rule decided are assessed again once, under prompt v2: title_mismatch pending again, then decided, and a v1 snapshot not_qualified for agency_or_consultant; country_mismatch and own_company stay", async () => {
+  const { organizationId, workspaceId, icpId } = await workspaceWith(0.1);
+  const titles = ["Revenue Operations Manager"];
+  await inRun(workspaceId, (tx) => tx.icp.updateMany({ data: { titles } }));
+  const combined = { title: "RevOps & GTM Lead" };
+  const fresh = await leadOf(workspaceId, "combined-1", combined);
+  const barista = await leadOf(workspaceId, "barista-1", { title: "Barista" });
+  await leadOf(workspaceId, "combined-2", { ...combined, locationText: "Paris, France" });
+  const paris = await leadOf(workspaceId, "paris-1", { locationText: "Paris, France" });
+  const agency = await leadOf(workspaceId, "agency-1");
+  const own = await leadOf(workspaceId, "own-1");
+  // As an older release left them: the title filter's and the country filter's decisions, and
+  // prompt v1's snapshots, not_qualified for agency_or_consultant and for own_company.
+  await inRun(workspaceId, async (tx) => {
+    for (const [personId, reason] of [
+      [barista, "title_mismatch"],
+      [paris, "country_mismatch"],
+    ] as const) {
+      const why = [{ key: "qualification.why.hard_filtered", params: { reason } }];
+      await contacts.applyQualification({
+        personId,
+        status: "hard_filtered",
+        reason,
+        why,
+        icpVersion: 1,
+      });
+    }
+    for (const [personId, code] of [
+      [agency, "agency_or_consultant"],
+      [own, "own_company"],
+    ] as const) {
+      const id = platform.newId(qualificationIds.score_snapshot);
+      const model = { modelId: "fake-model", promptVersion: 1, summary: "", disqualifiers: [code] };
+      const outcome = { fitScore: 77, status: "not_qualified" as const };
+      await tx.scoreSnapshot.create({
+        data: {
+          id,
+          workspaceId,
+          personId,
+          icpVersion: 1,
+          ...model,
+          ...outcome,
+          decisionRecordId: `dec_${code}`,
+        },
+      });
+      const decision = { status: "not_qualified", fitScore: 77, snapshotId: id, reason: code };
+      await contacts.applyQualification({ personId, ...decision, icpVersion: 1 });
+    }
+  });
+  fake.reset();
+  const stopped = { filtered: 1, scored: 0, failed: 0, stopped: "insufficient_credits" };
+  assert.deepEqual(await batch(workspaceId), { selected: 4, ...stopped });
+  const kept = (status: string, reason: string) => ({ status, tier: null, reason, icpVersion: 1 });
+  const waiting = (reason: string | null) => ({
+    status: "pending",
+    tier: null,
+    reason,
+    icpVersion: null,
+  });
+  assert.deepEqual(await leads(workspaceId), [
+    waiting("insufficient_credits"),
+    waiting(null),
+    kept("hard_filtered", "country_mismatch"),
+    kept("hard_filtered", "country_mismatch"),
+    kept("not_qualified", "agency_or_consultant"),
+    kept("not_qualified", "own_company"),
+  ]);
+  assert.equal(fake.recordedCalls.length, 0);
+
+  const billing = asRole("billing_writer");
+  const subscription = await billing.subscription.findFirstOrThrow({ where: { organizationId } });
+  const { id: subscriptionId, periodStart, periodEnd } = subscription;
+  const grant = { organizationId, subscriptionId, amount: 0.6, reason: "top_up" };
+  await billing.creditGrant.create({
+    data: { id: platform.newId(creditIds.credit_grant), ...grant, periodStart, periodEnd },
+  });
+  /** answer() with its title and seniority verdicts quoting `title`. */
+  const quoting = (title: string, verdict = "met") => {
+    const base = answer({ title_function: verdict });
+    const named = ["title_function", "seniority"];
+    const verdicts = base.verdicts.map((v) =>
+      named.includes(v.criterion) ? { ...v, evidence: title } : v,
+    );
+    return { ...base, verdicts };
+  };
+  scripts.set(fresh, () => fake.script(quoting("RevOps & GTM Lead")));
+  scripts.set(barista, () => fake.script(quoting("Barista", "not_met")));
+  scripts.set(agency, () => fake.script(answer()));
+  const scored = { selected: 3, filtered: 0, scored: 3, failed: 0, stopped: null };
+  assert.deepEqual(await batch(workspaceId), scored);
+  const decisions = (await leads(workspaceId)).map(({ status, reason }) => [status, reason]);
+  assert.deepEqual(decisions, [
+    ["qualified", null],
+    ["not_qualified", null],
+    ["hard_filtered", "country_mismatch"],
+    ["hard_filtered", "country_mismatch"],
+    ["qualified", null],
+    ["not_qualified", "own_company"],
+  ]);
+  assert.equal(fake.recordedCalls.length, 3);
+  const keys = (await usages(workspaceId)).map((usage) => [usage.idempotencyKey, usage.status]);
+  const v2 = [fresh, barista, agency].map((id) => [
+    `qual:${id}:${icpId}:1:fake-model:2`,
+    "committed",
+  ]);
+  assert.deepEqual(keys, v2);
+  const snapshots = await app().scoreSnapshot.findMany({
+    where: { workspaceId, personId: { in: [agency, own] } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  assert.deepEqual(
+    snapshots.map((row) => [row.personId, row.promptVersion, row.disqualifiers]),
+    [
+      [agency, 1, ["agency_or_consultant"]],
+      [own, 1, ["own_company"]],
+      [agency, 2, []],
+    ],
+  );
+
+  const none = { selected: 0, filtered: 0, scored: 0, failed: 0, stopped: null };
+  assert.deepEqual(await batch(workspaceId), none);
+});
+
 test("the provider's failure leaves the lead waiting for a later batch, reserved again under the next attempt's key; at the third attempt it is ai_failed", async () => {
-  const { workspaceId } = await workspaceWith(1);
+  const { workspaceId, icpId } = await workspaceWith(1);
   const id = await leadOf(workspaceId, "flaky-1");
   scripts.set(id, () => fake.failNext("llm_invalid_key"));
   fake.reset();
@@ -371,7 +542,7 @@ test("the provider's failure leaves the lead waiting for a later batch, reserved
     assert.deepEqual(await batch(workspaceId), failed);
     assert.deepEqual(await leads(workspaceId), [lead]);
   }
-  const key = `qual:${id}:1:fake-model:1`;
+  const key = `qual:${id}:${icpId}:1:fake-model:2`;
   assert.deepEqual(
     (await usages(workspaceId)).map((usage) => [usage.idempotencyKey, usage.status]),
     [key, `${key}:2`, `${key}:3`].map((each) => [each, "released"]),
@@ -381,7 +552,7 @@ test("the provider's failure leaves the lead waiting for a later batch, reserved
 });
 
 test("a failure that is not the provider's fails the batch and keeps the lead pending and reserved; past the 24-hour lease, the next batch releases that reservation and commits under the next attempt's key", async () => {
-  const { workspaceId } = await workspaceWith(1);
+  const { workspaceId, icpId } = await workspaceWith(1);
   const id = await leadOf(workspaceId, "held-1");
   let now = new Date();
   platform.bindCreditsClient(createCreditsClient(() => now));
@@ -404,7 +575,7 @@ test("a failure that is not the provider's fails the batch and keeps the lead pe
     const scored = { selected: 1, filtered: 0, scored: 1, failed: 0, stopped: null };
     assert.deepEqual(await batch(workspaceId), scored);
     assert.equal((await leads(workspaceId))[0]?.status, "qualified");
-    const key = `qual:${id}:1:fake-model:1`;
+    const key = `qual:${id}:${icpId}:1:fake-model:2`;
     assert.deepEqual(
       (await usages(workspaceId)).map((usage) => [usage.idempotencyKey, usage.status]),
       [
@@ -512,7 +683,8 @@ test("qualification_rescore re-scores the scored leads from their stored verdict
   assert.deepEqual(await batch(workspaceId), scored);
   const calls = fake.recordedCalls.length;
   const spent = await usages(workspaceId);
-  // must_haves, unknown, weighs 60: (800 + 240) / 140 is 74, warm instead of 88, hot.
+  // must_haves, unknown, weighs 60: the fit (800 + 240) / 140 is 74, its priority with the intent
+  // of 71 is 73, warm, instead of 88's 80, hot.
   const data = { weight: 60 };
   await inRun(workspaceId, (tx) => tx.criterion.updateMany({ where: { key: "must_haves" }, data }));
   const rescore = (input: object) =>
@@ -563,4 +735,104 @@ test("through the host: the route's request, qualification.rescore_requested in 
   }
   const [lead] = await leads(workspaceId);
   assert.deepEqual([lead?.status, lead?.tier], ["qualified", "warm"]);
+});
+
+test("a batch over two audiences: each lead against its agent's audience, or the default, with its own excerpts, reserved under its audience's key; the snapshot and the lead name it; no excerpt in the history or a log line; after one audience changes, only its leads again", async (t) => {
+  const { workspaceId, icpId } = await workspaceWith(10);
+  const founders: string = await inRun(workspaceId, async (tx) => {
+    const { criteria } = await readIcpForScoring(workspaceId);
+    const id = platform.newId("icp");
+    const mustHaves = "Founded the company";
+    await tx.icp.create({
+      data: { id, workspaceId, name: "Founders", isDefault: false, ...ICP, mustHaves },
+    });
+    const rows = criteria.map(({ key, weight, isMust, enabled }: Record<string, never>) => ({
+      ...{ id: platform.newId("crit"), workspaceId, icpId: id, key, weight, isMust, enabled },
+    }));
+    await tx.criterion.createMany({ data: rows });
+    return id;
+  });
+  const ownerUserId = "usr_owner";
+  await createPlaybook(
+    { workspaceId, icpId: founders, ownerUserId, sourceIds: ["src_founders"] },
+    app(),
+  );
+  const signal = { kind: "signal", ref: "src_founders" };
+  const found = await leadOf(workspaceId, "found-1", {}, signal);
+  const imported = await leadOf(workspaceId, "imported-1");
+  for (const id of [found, imported]) scripts.set(id, () => fake.script(answer()));
+  const words = [1, 2, 3, 4, 5, 6, 7].map((n) => `Noor is hiring quokka wranglers, round ${n}`);
+  const excerpts = async ({ personId }: { personId: string }) => (personId === found ? words : []);
+  const restore = useSignalReader({ ...reader, excerpts });
+  logs.raw.length = 0;
+  try {
+    fake.reset();
+    const workflowId = `qualification_batch_audiences-${randomUUID()}`;
+    const options = { activities: scripted, workflowId };
+    const scored = { selected: 2, filtered: 0, scored: 2, failed: 0, stopped: null };
+    assert.deepEqual(await runWorkflow("qualification_batch", { workspaceId }, options), scored);
+    t.diagnostic(`history: ${workflowId}`);
+
+    // The founder's five excerpts, anonymized, against Founders' must-haves; the import's none.
+    const evidence = fake.recordedCalls.map((call) => {
+      const { messages } = call.input as { messages: { content: { text: string }[] }[] };
+      const text = messages.flatMap(({ content }) => content.map((part) => part.text)).join("");
+      const block = (name: string) =>
+        new RegExp(`<${name}>\\n([\\s\\S]*?)\\n</${name}>`).exec(text)?.[1] ?? "";
+      return [block("must_haves"), JSON.parse(block("evidence"))];
+    });
+    const anonymized = words.slice(0, 5).map((w) => w.replace("Noor", "[name]"));
+    assert.deepEqual(evidence, [
+      ["Founded the company", anonymized],
+      [ICP.mustHaves, []],
+    ]);
+    const keys = (await usages(workspaceId)).map((usage) => usage.idempotencyKey).sort();
+    const expected = [
+      `qual:${found}:${founders}:1:fake-model:2`,
+      `qual:${imported}:${icpId}:1:fake-model:2`,
+    ];
+    assert.deepEqual(keys, expected.sort());
+    const audiences = async () => {
+      const rows = await app().lead.findMany({ where: { workspaceId } });
+      const snapshots = await app().scoreSnapshot.findMany({ where: { workspaceId } });
+      const snapshotOf = (id: string | null) => snapshots.find((row) => row.id === id)?.icpId;
+      return new Map(
+        rows.map((row) => [
+          row.personId,
+          [row.icpIdScored, snapshotOf(row.currentScoreSnapshotId)],
+        ]),
+      );
+    };
+    assert.deepEqual(
+      await audiences(),
+      new Map([
+        [found, [founders, founders]],
+        [imported, [icpId, icpId]],
+      ]),
+    );
+
+    // The excerpts stay in their activity: no history event holds one.
+    const history = await env.client.workflow.getHandle(workflowId).fetchHistory();
+    // Each payload's data, base64 in the history's JSON, decoded.
+    const decoded = JSON.stringify(history).replaceAll(/"data":"([\w+/=]+)"/g, (_, data) =>
+      Buffer.from(data, "base64").toString("utf8"),
+    );
+    assert.match(decoded, new RegExp(found));
+    assert.doesNotMatch(decoded, /quokka/);
+
+    // Founders' targeting moves: its lead only, at the new version. The provider fails its
+    // assessment after the excerpts were read: the host logs the activity's failure, with none.
+    const moved = { version: 2, mustHaves: "Founded the company twice" };
+    await inRun(workspaceId, (tx) => tx.icp.update({ where: { id: founders }, data: moved }));
+    scripts.set(found, () => fake.failNext("llm_invalid_key"));
+    const failed = { selected: 1, filtered: 0, scored: 0, failed: 1, stopped: "provider_failed" };
+    assert.deepEqual(await batch(workspaceId), failed);
+    const latest = (await usages(workspaceId)).at(-1);
+    const key = `qual:${found}:${founders}:2:fake-model:2`;
+    assert.deepEqual([latest?.idempotencyKey, latest?.status], [key, "released"]);
+    assert.ok(logs.raw.some((line) => line.includes("worker: an activity failed")));
+    assert.doesNotMatch(logs.raw.join(""), /quokka/);
+  } finally {
+    restore();
+  }
 });

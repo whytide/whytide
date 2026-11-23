@@ -16,6 +16,7 @@ import {
 } from "@whytide/platform";
 import { z } from "zod";
 import { errors } from "../../errors.ts";
+import { LINKEDIN_HOSTS, LINKEDIN_ORIGIN } from "../constants.ts";
 import {
   REDIRECT_STATUSES,
   SHORT_LINK_HOST,
@@ -23,7 +24,6 @@ import {
   SHORT_LINK_REQUEST,
 } from "./constants.ts";
 
-const HOSTS = new Set(["linkedin.com", "www.linkedin.com"]);
 const KIND = "(?:activity|share|ugcPost)";
 const COLON = "(?::|%3[Aa])";
 const POST_PATHS = [
@@ -42,9 +42,9 @@ export function canonicalPostUrl(value: string): string | null {
   if (!URL.canParse(value)) return null;
   const url = new URL(value);
   const plain = url.protocol === "https:" && !url.username && !url.password && !url.port;
-  if (!plain || !HOSTS.has(url.hostname)) return null;
+  if (!plain || !LINKEDIN_HOSTS.has(url.hostname)) return null;
   if (!POST_PATHS.some((path) => path.test(url.pathname))) return null;
-  return `https://www.linkedin.com${url.pathname}`;
+  return `${LINKEDIN_ORIGIN}${url.pathname}`;
 }
 
 /** The short link `value` is, as https://lnkd.in<path> without the query or the fragment; else null. */

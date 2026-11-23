@@ -10,6 +10,8 @@ export const GROUPS = {
   import: "web.nav.import",
   leads: "web.nav.leads",
   linkedin: "web.nav.linkedin",
+  email: "web.nav.email",
+  results: "web.nav.results",
 } as const;
 
 /** The icon of an entry whose nav.ts names none. */

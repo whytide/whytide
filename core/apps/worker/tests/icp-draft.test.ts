@@ -1,6 +1,7 @@
 // icp's drafter end to end (icp-draft; core/modules/icp/README.md "The draft"), on the slice's
 // Temporal, a schema of its database and the LLM fake: icp_draft_profile drafts the ICP from the
-// workspace's Company Knowledge and the admin's brief, as the request left it. Synthetic data only.
+// workspace's Company Knowledge and the admin's brief, as the request left it; the automatic run
+// (icp-auto-draft) saves its proposal into the still empty ICP. Synthetic data only.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { beforeEach, test } from "node:test";
@@ -98,15 +99,29 @@ const VALID = {
 type Run = { workspaceId: string; icpId: string; draftRunId: string };
 type Recorded = { system: string; messages: { role: string; content: { text: string }[] }[] };
 const newId = (prefix: string) => `${prefix}_${randomUUID()}`;
-/** A workspace's Company Knowledge, and its ICP as the request leaves it: drafting under a run. */
-async function requested(): Promise<Run> {
+/**
+ * A workspace's Company Knowledge, and its ICP as the request leaves it: drafting under a run, a
+ * member's with the brief, or the automatic one without, over the ICP's `fields`.
+ */
+async function requested(automatic = false, fields: object = {}): Promise<Run> {
   const run = { workspaceId: newId("wsp"), icpId: newId("icp"), draftRunId: newId("idrun") };
   const { workspaceId, icpId: id, draftRunId } = run;
   await db().companyKnowledge.create({ data: { id: newId("ck"), workspaceId, ...KNOWLEDGE } });
-  const draft = { draftStatus: "drafting", draftRunId, draftBrief: BRIEF };
-  await db().icp.create({ data: { id, workspaceId, ...draft } });
+  const brief = automatic ? "" : BRIEF;
+  const draft = {
+    draftStatus: "drafting",
+    draftRunId,
+    draftBrief: brief,
+    draftAutomatic: automatic,
+  };
+  await db().icp.create({ data: { id, workspaceId, ...fields, ...draft } });
   return run;
 }
+/** The events of `eventName` the run's workspace wrote to the outbox, their payloads. */
+const published = async (workspaceId: string, eventName: string) =>
+  (await db().outboxEntry.findMany({ where: { workspaceId, eventName } })).map(
+    (entry) => entry.payload,
+  );
 const draft = (run: Run) => runWorkflow<unknown>("icp_draft_profile", run, { activities });
 const stored = async (workspaceId: string) => {
   const { draftStatus, draftError, pendingDraft, titles, version } =
@@ -126,7 +141,7 @@ test("a valid answer ends drafted: the pending draft with its model, prompt vers
   const { workspaceId } = run;
   const [decision, ...more] = await db().decisionRecord.findMany({ where: { workspaceId } });
   assert.equal(more.length, 0);
-  const pending = { model: "fake-model", promptVersion: 1, decisionRecordId: decision?.id };
+  const pending = { model: "fake-model", promptVersion: 2, decisionRecordId: decision?.id };
   assert.deepEqual(await stored(run.workspaceId), {
     ...{ draftStatus: "drafted", draftError: null },
     ...{ pendingDraft: { ...pending, fields: VALID }, untouched: UNTOUCHED },
@@ -138,6 +153,51 @@ test("a valid answer ends drafted: the pending draft with its model, prompt vers
   );
   assert.deepEqual([JSON.parse(blocks?.[1] ?? "null"), blocks?.[2]], [COMPANY, BRIEF]);
   assert.equal(decision?.subjectRef, run.icpId);
+  assert.deepEqual(await published(workspaceId, "icp.updated"), [], "a member's run waits");
+});
+
+test("an automatic run saves its proposal into the empty ICP as Use this draft does: version 2, icp.updated, the draft ended, the criteria kept", async () => {
+  const run = await requested(true);
+  const { workspaceId, icpId } = run;
+  const criteria = { id: newId("crit"), workspaceId, icpId, key: "location", weight: 10 };
+  await db().criterion.create({ data: { ...criteria, isMust: true } });
+  fake.script(VALID);
+  assert.deepEqual(await draft(run), { status: "saved" });
+  const icp = await db().icp.findFirstOrThrow({ where: { id: icpId } });
+  const { name, titles, seniorities, industries, sizeRanges, countries } = icp;
+  const { mustHaves, disqualifiers, version } = icp;
+  assert.deepEqual(
+    { name, titles, seniorities, industries, sizeRanges, countries, mustHaves, disqualifiers },
+    { ...VALID, countries: ["BE", "FR"] },
+  );
+  assert.equal(version, 2);
+  assert.deepEqual(
+    [icp.draftStatus, icp.draftError, icp.draftRunId, icp.draftAutomatic, icp.pendingDraft],
+    ["none", null, null, false, null],
+  );
+  assert.deepEqual(await published(workspaceId, "icp.updated"), [{ workspaceId, version: 2 }]);
+  assert.deepEqual(await published(workspaceId, "icp.audience_updated"), [
+    { workspaceId, icpId, version: 2 },
+  ]);
+  const kept = await db().criterion.findMany({ where: { icpId } });
+  assert.deepEqual(
+    kept.map(({ key, weight, isMust }) => [key, weight, isMust]),
+    [["location", 10, true]],
+  );
+  assert.match(userText(0), /<brief>\n\n<\/brief>$/, "no brief");
+});
+
+test("an automatic run over an ICP that got targeting since the request waits for review, nothing saved", async () => {
+  const run = await requested(true, { titles: ["Owner"] });
+  fake.script(VALID);
+  assert.deepEqual(await draft(run), { status: "drafted" });
+  const icp = await db().icp.findFirstOrThrow({ where: { id: run.icpId } });
+  assert.deepEqual(
+    [icp.draftStatus, icp.draftAutomatic, icp.titles, icp.version],
+    ["drafted", true, ["Owner"], 1],
+  );
+  assert.deepEqual((icp.pendingDraft as { fields: unknown }).fields, VALID);
+  assert.deepEqual(await published(run.workspaceId, "icp.updated"), []);
 });
 
 test("an answer off the schema, then one the gate refuses: retried once, then failed ai_failed, nothing pending", async () => {

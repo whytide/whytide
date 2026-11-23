@@ -12,7 +12,13 @@ import { asRole, withTestDb } from "@whytide/db/testing";
 import { useIdentityClient } from "@whytide/identity/testing";
 import { collectLogs, createLogger, newId, servicePrincipal } from "@whytide/platform";
 import { signInAs } from "@whytide/providers/auth/testing";
-import { createTwoWorkspaces, type TestTenant, useTenancyClient } from "@whytide/tenancy/testing";
+import {
+  createMembership,
+  createTwoWorkspaces,
+  createUser,
+  type TestTenant,
+  useTenancyClient,
+} from "@whytide/tenancy/testing";
 import { type Api, start } from "../src/start.ts";
 
 // linkedin by its build's path, as src/modules.generated.ts loads it: the api does not list a module
@@ -123,4 +129,18 @@ test("GET …/accounts/{id}/usage: the reads reserved and made today over the ca
     status: 404,
     body: { code: "sender_account_not_found" },
   });
+});
+
+test("who reads an account's usage (gamma-p6-070): its owner, a Member, and an Owner; a teammate Member is 403 not_account_owner", async () => {
+  const [a] = await createTwoWorkspaces();
+  const workspaceId = a.workspace.id;
+  const [member, teammate] = [await createUser(), await createUser()];
+  for (const { id: userId } of [member, teammate]) {
+    await createMembership({ userId, workspaceId, role: "Member" });
+  }
+  const { id } = await createConnectedAccount(workspaceId, { ownerUserId: member.id });
+  assert.equal((await usage({ ...a, user: member }, id)).status, 200);
+  assert.equal((await usage(a, id)).status, 200);
+  const refused = { status: 403, body: { code: "not_account_owner" } };
+  assert.deepEqual(await usage({ ...a, user: teammate }, id), refused);
 });

@@ -52,6 +52,9 @@ function portError(error: unknown): unknown {
 
 export const smtpAdapter = defineAdapter(appMailPort, {
   name: "smtp",
+  // What smtpConfig() cannot start without, for deploy:check (gamma-en-105); SMTP_USER and
+  // SMTP_PASSWORD stay out: a pair or neither.
+  requires: ["SMTP_HOST", "SMTP_PORT", "MAIL_FROM"],
   create: () => {
     const config = smtpConfig();
     const from = { name: "", address: config.MAIL_FROM };

@@ -2,7 +2,7 @@
 // config reads once at import; prints what the boundary did, as JSON. The fixture port, by default:
 // a vendor's field passes through and no cause is kept; with checkOutputs and keepCause set on the
 // binding, both are on. The LinkedIn port, defined with alwaysCheckOutputs: an extra key in any of
-// its eleven outputs fails, a binding's checkOutputs: false notwithstanding, and a message's text
+// its sixteen outputs fails, a binding's checkOutputs: false notwithstanding, and a message's text
 // in listRecentMessages too; a vendor's error keeps no cause.
 import { isAppError } from "@whytide/platform";
 import { bindPort, type PortImplementation } from "../../../_pattern/index.ts";
@@ -95,6 +95,32 @@ const CALLS: { readonly [M in Method]: readonly [Parameters<Linkedin[M]>[0], obj
     { providerAccountRef: account, memberRef: member },
     { connected: true, invitationPending: false },
   ],
+  searchPosts: [
+    { providerAccountRef: account, phrase: "sales automation", postedSince: at, limit: 10 },
+    { posts: [], nextCursor: null },
+  ],
+  listAuthorPosts: [
+    {
+      providerAccountRef: account,
+      authorUrl: "https://www.linkedin.com/company/example-ltd",
+      postedSince: at,
+      limit: 10,
+    },
+    { posts: [], nextCursor: null },
+  ],
+  listOwnPosts: [
+    { providerAccountRef: account, postedSince: at, limit: 10 },
+    { posts: [], nextCursor: null },
+  ],
+  getCompany: [
+    { providerAccountRef: account, companyUrl: "https://www.linkedin.com/company/example-ltd" },
+    {
+      companyUrl: "https://www.linkedin.com/company/example-ltd",
+      name: "Example Ltd",
+      fetchedAt: at,
+    },
+  ],
+  getContactEmails: [{ providerAccountRef: account, memberRef: member }, { emails: [] }],
 };
 const methods = Object.keys(CALLS) as Method[];
 /** Every method answers its good output with `extra` spread in, or `answer` when it names one. */
