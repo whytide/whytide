@@ -2,7 +2,7 @@
 
 Whytide finds high-intent B2B leads from buying signals on LinkedIn and on the web, qualifies them with AI against your ideal customer profile, shows the evidence behind every lead, and runs LinkedIn outreach from your own account, with a person approving every message or every first touch. This repository holds the code of Whytide Core, the source-available, self-hosted edition, and of Whytide Cloud, the hosted service that runs the same code.
 
-**Status:** this is the code at the end of gamma's LinkedIn work, version 0.3.0, published to read. It is not a supported release yet.
+**Status:** this is the code at the end of gamma's LinkedIn work, version 0.3.1, published to read. It is not a supported release yet.
 
 ## What it does
 

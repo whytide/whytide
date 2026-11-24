@@ -98,12 +98,14 @@ export function ChipInput(props: ChipInputProps) {
           {chips.map((chip) => (
             <li
               key={chip}
-              className="inline-flex h-7 items-center gap-0.5 rounded-md bg-muted ps-2 pe-0.5 text-sm font-medium text-ink ring-1 ring-line ring-inset"
+              className="inline-flex min-h-7 items-start gap-0.5 rounded-md bg-muted py-0.5 ps-2 pe-0.5 text-sm font-medium text-ink ring-1 ring-line ring-inset"
             >
-              {labelOf(chip)}
+              {/* A long value wraps and its chip grows, the remove button by its first line. It may
+                  break anywhere, so that a long word (a link) never widens the field or the page. */}
+              <span className="py-0.5 wrap-anywhere">{labelOf(chip)}</span>
               <button
                 type="button"
-                className="grid size-6 cursor-pointer place-items-center rounded text-ink-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                className="grid size-6 shrink-0 cursor-pointer place-items-center rounded text-ink-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label={t("remove", { item: labelOf(chip) })}
                 disabled={disabled}
                 onClick={() => remove(chip)}

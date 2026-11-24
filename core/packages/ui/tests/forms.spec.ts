@@ -1,6 +1,6 @@
 // The end-to-end test of the form components (alpha-p1-155) on the gallery page: each field in its
-// states, TextArea's counter and limit, ChipInput by keyboard and its list of options (open on a
-// focus and after a pick, closed by Escape, a long one scrolling), NumberField's keys, typing,
+// states, TextArea's counter and limit, ChipInput by keyboard, its long chips wrapping, and its list
+// of options (open on a focus and after a pick, closed by Escape, a long one scrolling), NumberField's keys, typing,
 // bounds and error (gamma-p2-070), and axe with that list open and that error shown.
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
@@ -210,6 +210,60 @@ test("ChipInput adds and removes chips by keyboard and picks countries from its 
   await expect(posted).toHaveCount(2);
   await expect(posted.first()).toHaveValue("DE");
   await expect(posted.last()).toHaveValue("US");
+});
+
+test("a ChipInput's long chips wrap inside the list and grow with their text, so no chip runs into another", async ({
+  page,
+}) => {
+  await openGallery(page, text);
+  const chips = entry(page, "ChipInput");
+  const titles = say("ui.gallery.job_titles");
+  const input = chips.getByRole("textbox", { name: titles }).first();
+  const list = chips.getByRole("list", { name: titles }).first();
+  // A sentence of several lines, and one word longer than the field is wide.
+  const sentence =
+    "Enterprise: custom pricing for teams of five or more, with a dedicated manager. "
+      .repeat(5)
+      .trim();
+  const word = `https://example.com/${"a".repeat(200)}`;
+  for (const value of [sentence, word]) {
+    await input.fill(value);
+    await input.press("Enter");
+  }
+  const items = list.getByRole("listitem");
+  await expect(items).toHaveText([say("ui.gallery.sample_title"), sentence, word]);
+  const [entryBox, area] = [await chips.boundingBox(), await list.boundingBox()];
+  if (!entryBox || !area) throw new Error("the entry or the list has no box");
+  // The list stays inside its entry: a long word widens neither the field nor the page.
+  expect(area.x + area.width).toBeLessThanOrEqual(entryBox.x + entryBox.width + 0.5);
+  const boxes = await items.evaluateAll((elements) =>
+    elements.map((element) => {
+      const { top, bottom, left, right } = element.getBoundingClientRect();
+      return { top, bottom, left, right, below: element.scrollHeight - element.clientHeight };
+    }),
+  );
+  for (const box of boxes) {
+    // The text fits its chip, with nothing running out below it, and the chip fits the list.
+    expect(box.below).toBeLessThanOrEqual(1);
+    expect(box.left).toBeGreaterThanOrEqual(area.x - 0.5);
+    expect(box.right).toBeLessThanOrEqual(area.x + area.width + 0.5);
+  }
+  // A short chip keeps its one line; the long ones grow.
+  const [short = 0, long = 0, link = 0] = boxes.map((box) => box.bottom - box.top);
+  expect(short).toBeCloseTo(28, 0);
+  expect(long).toBeGreaterThan(short * 2);
+  expect(link).toBeGreaterThan(short);
+  // No two chips cover each other.
+  for (const [index, a] of boxes.entries()) {
+    for (const b of boxes.slice(index + 1)) {
+      const apart =
+        a.bottom <= b.top + 0.5 ||
+        b.bottom <= a.top + 0.5 ||
+        a.right <= b.left + 0.5 ||
+        b.right <= a.left + 0.5;
+      expect(apart).toBe(true);
+    }
+  }
 });
 
 test("a ChipInput's list opens on a focus with every option not chosen, stays open after a pick, closes on Escape or on leaving", async ({
